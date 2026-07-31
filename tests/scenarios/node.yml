@@ -5,5 +5,5 @@ components:
     path: .
 docker: false
 release_please: false
-renovate: false
+renovate: true
 renovate_config_repository: ylazakovich/renovate-config

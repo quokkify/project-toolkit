@@ -131,18 +131,33 @@ def release_manifest_errors(manifest: object) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
-DEFAULT_RENOVATE_EXTENDS = "github>ylazakovich/renovate-config//presets/base"
+RENOVATE_PRESET_PATHS = {
+    "default": "presets/base",
+    "python": "presets/python/default",
+    "javascript": "presets/npm/default",
+    "java": "presets/gradle/default",
+    "docker": "presets/docker/default",
+    "github-actions": "presets/github-actions/default",
+}
 
 
-def assert_generated_renovate_config(path: Path, expected_extends: str, label: str) -> None:
-    """Validate the generated Renovate file shape and exact shared preset ref."""
+def renovate_extends(repository: str, presets: list[str]) -> list[str]:
+    """Return exact Renovate extends entries for selected preset names."""
+    return [f"github>{repository}//{RENOVATE_PRESET_PATHS[preset]}" for preset in presets]
+
+
+def assert_generated_renovate_config(path: Path, expected_extends: list[str], label: str) -> None:
+    """Validate the generated Renovate file shape and exact shared preset refs."""
     try:
         data = json.loads(path.read_text())
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         ERRORS.append(f"{label}: renovate.json is not valid JSON: {exc}")
         return
     check(data.get("$schema") == RENOVATE_SCHEMA, f"{label}: renovate schema mismatch")
-    check(data.get("extends") == [expected_extends], f"{label}: renovate extends mismatch")
+    check(
+        data.get("extends") == expected_extends,
+        f"{label}: renovate extends mismatch: {data.get('extends')!r}",
+    )
 
 
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
@@ -447,7 +462,14 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     run(["git", "config", "core.hooksPath", "/dev/null"], template_source)
     run(["git", "add", "."], template_source)
     run(["git", "commit", "--no-verify", "-qm", "candidate template"], template_source)
-    for scenario in ("python", "node", "java", "polyglot"):
+    expected_scenario_presets = {
+        "python": ["default", "python"],
+        "node": ["default", "javascript"],
+        "java": ["default", "java"],
+        "polyglot": ["default", "python", "javascript", "java"],
+        "docker": ["default", "python", "docker"],
+    }
+    for scenario, expected_presets in expected_scenario_presets.items():
         dest = tmp_path / scenario
         run(
             [
@@ -468,26 +490,23 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",
         )
-        if scenario == "node":
-            check(
-                not (dest / "renovate.json").exists(),
-                "node scenario disabled Renovate but generated renovate.json",
-            )
-        else:
-            assert_generated_renovate_config(
-                dest / "renovate.json",
-                DEFAULT_RENOVATE_EXTENDS,
-                scenario,
-            )
+        assert_generated_renovate_config(
+            dest / "renovate.json",
+            renovate_extends("ylazakovich/renovate-config", expected_presets),
+            scenario,
+        )
         if scenario == "polyglot":
             generated = (dest / ".github/workflows/ci.yml").read_text()
             for name in (
                 "python-ci.yml",
                 "node-ci.yml",
                 "java-ci.yml",
-                "docker-build.yml",
             ):
                 check(name in generated, f"polyglot generated workflow missing {name}")
+            check(
+                "docker-build.yml" not in generated,
+                "polyglot generated workflow unexpectedly includes Docker",
+            )
         if scenario == "python":
             run(["git", "init", "-q"], dest)
             run(["git", "config", "user.email", "fixture@example.invalid"], dest)
@@ -507,8 +526,25 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 == "ylazakovich/renovate-config",
                 "copier update did not persist renovate_config_repository",
             )
+            check(
+                answers.get("renovate_presets") == ["default", "python"],
+                "copier update did not persist inferred renovate_presets",
+            )
 
-    custom_dest = tmp_path / "custom-renovate"
+    no_renovate_data = tmp_path / "no-renovate.yml"
+    no_renovate_data.write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "fixture-no-renovate",
+                "toolkit_version": "v1.0.0",
+                "components": [{"type": "node", "path": "."}],
+                "docker": False,
+                "release_please": False,
+                "renovate": False,
+            }
+        )
+    )
+    no_renovate_dest = tmp_path / "no-renovate"
     run(
         [
             copier,
@@ -517,16 +553,75 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             "--defaults",
             "--vcs-ref",
             "HEAD",
-            "--data",
-            "renovate_config_repository=acme/shared-renovate",
+            "--data-file",
+            str(no_renovate_data),
+            str(template_source),
+            str(no_renovate_dest),
+        ]
+    )
+    check(
+        not (no_renovate_dest / "renovate.json").exists(),
+        "renovate=false generated renovate.json",
+    )
+
+    custom_all_data = tmp_path / "custom-renovate-all.yml"
+    custom_all_data.write_text(
+        yaml.safe_dump(
+            {
+                "renovate_config_repository": "acme/shared-renovate",
+                "renovate_presets": list(RENOVATE_PRESET_PATHS),
+            }
+        )
+    )
+    custom_dest = tmp_path / "custom-renovate-all"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data-file",
+            str(custom_all_data),
             str(template_source),
             str(custom_dest),
         ]
     )
     assert_generated_renovate_config(
         custom_dest / "renovate.json",
-        "github>acme/shared-renovate//presets/base",
-        "custom-renovate",
+        renovate_extends("acme/shared-renovate", list(RENOVATE_PRESET_PATHS)),
+        "custom-renovate-all",
+    )
+
+    custom_selected_data = tmp_path / "custom-renovate-selected.yml"
+    custom_selected_data.write_text(
+        yaml.safe_dump(
+            {
+                "renovate_config_repository": "acme/shared-renovate",
+                "renovate_presets": ["default", "javascript", "github-actions"],
+            }
+        )
+    )
+    custom_selected_dest = tmp_path / "custom-renovate-selected"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data-file",
+            str(custom_selected_data),
+            str(template_source),
+            str(custom_selected_dest),
+        ]
+    )
+    assert_generated_renovate_config(
+        custom_selected_dest / "renovate.json",
+        renovate_extends("acme/shared-renovate", ["default", "javascript", "github-actions"]),
+        "custom-renovate-selected",
     )
 
     for invalid_value in (
@@ -560,6 +655,40 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         check(
             result.returncode != 0,
             f"invalid renovate_config_repository accepted: {invalid_value}",
+        )
+
+    invalid_preset_values: tuple[tuple[str, object], ...] = (
+        ("unknown", ["default", "ruby"]),
+        ("duplicate", ["default", "python", "python"]),
+        ("empty", []),
+        ("scalar-string", "default"),
+        ("scalar-number", 1),
+        ("map", {"default": True}),
+    )
+    for invalid_label, invalid_value in invalid_preset_values:
+        invalid_data = tmp_path / f"invalid-renovate-presets-{invalid_label}.yml"
+        invalid_data.write_text(yaml.safe_dump({"renovate_presets": invalid_value}))
+        bad_dest = tmp_path / f"invalid-renovate-presets-{invalid_label}"
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(bad_dest),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(
+            result.returncode != 0,
+            f"invalid renovate_presets accepted: {invalid_label}={invalid_value!r}",
         )
 
 run([sys.executable, "tests/test_composite_actions.py"])

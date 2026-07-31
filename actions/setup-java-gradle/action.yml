@@ -18,6 +18,10 @@ inputs:
     description: Cache Java and Gradle local caches.
     required: false
     default: "true"
+  validate-wrappers:
+    description: Validate repository-contained Gradle Wrapper JAR files before setup.
+    required: false
+    default: "true"
 
 outputs:
   gradle-command:
@@ -31,12 +35,20 @@ runs:
       shell: bash
       env:
         CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+        VALIDATE_WRAPPERS: ${{ inputs.validate-wrappers }}
       run: |
         set -euo pipefail
         if [[ "$CACHE_DEPENDENCIES" != "true" && "$CACHE_DEPENDENCIES" != "false" ]]; then
           echo "cache-dependencies must be 'true' or 'false': $CACHE_DEPENDENCIES" >&2
           exit 2
         fi
+        if [[ "$VALIDATE_WRAPPERS" != "true" && "$VALIDATE_WRAPPERS" != "false" ]]; then
+          echo "validate-wrappers must be 'true' or 'false': $VALIDATE_WRAPPERS" >&2
+          exit 2
+        fi
+    - name: Validate Gradle wrappers
+      if: ${{ inputs.validate-wrappers == 'true' }}
+      uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
     - name: Set up Java
       uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
       with:

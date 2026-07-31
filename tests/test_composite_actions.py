@@ -21,7 +21,7 @@ class SetupActionTests(unittest.TestCase):
         cases = {
             "setup-python": {"CACHE_DEPENDENCIES": "maybe", "INSTALL_DEPENDENCIES": "true", "PACKAGE_MANAGER": "auto", "POETRY_VERSION": "2.1.4", "UV_VERSION": "0.8.15"},
             "setup-node": {"CACHE_DEPENDENCIES": "true", "INSTALL_DEPENDENCIES": "TRUE", "PACKAGE_MANAGER": "auto"},
-            "setup-java-gradle": {"CACHE_DEPENDENCIES": "yes"},
+            "setup-java-gradle": {"CACHE_DEPENDENCIES": "true", "VALIDATE_WRAPPERS": "yes"},
         }
         for name, values in cases.items():
             with self.subTest(name=name):
@@ -36,6 +36,17 @@ class SetupActionTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_gradle_wrapper_validation_defaults_on_and_can_be_disabled(self) -> None:
+        steps = action("setup-java-gradle")["runs"]["steps"]
+        validation = next(step for step in steps if step.get("name") == "Validate Gradle wrappers")
+        self.assertEqual(validation["uses"], "gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92")
+        self.assertEqual(validation["if"], "${{ inputs.validate-wrappers == 'true' }}")
+        self.assertIn("'true'", validation["if"])
+        self.assertNotIn("'false'", validation["if"])
+        inputs = action("setup-java-gradle")["inputs"]
+        self.assertEqual(inputs["validate-wrappers"]["default"], "true")
+        self.assertLess(steps.index(validation), next(i for i, step in enumerate(steps) if step.get("name") == "Set up Java"))
 
     def test_python_auto_detects_single_nondefault_requirements_file(self) -> None:
         install = action("setup-python")["runs"]["steps"][-1]

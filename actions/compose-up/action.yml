@@ -120,6 +120,37 @@ runs:
           validate_relative_path "$1" "compose-files entry"
         }
 
+        validate_http_url() {
+          local url="$1"
+          local authority
+          local host
+          local port=""
+
+          if [[ ! "$url" =~ ^https?://([^/?#]+)([/?#].*)?$ ]]; then
+            fail "wait-urls entries must be absolute HTTP(S) URLs"
+          fi
+          authority="${BASH_REMATCH[1]}"
+
+          if [[ "$authority" == \[* ]]; then
+            if [[ ! "$authority" =~ ^\[([0-9A-Fa-f:.]+)\](:([0-9]+))?$ ]]; then
+              fail "wait-urls entries must be absolute HTTP(S) URLs"
+            fi
+            host="${BASH_REMATCH[1]}"
+            port="${BASH_REMATCH[3]:-}"
+            [[ "$host" == *:* ]] || fail "wait-urls entries must be absolute HTTP(S) URLs"
+          else
+            if [[ ! "$authority" =~ ^([A-Za-z0-9._~-]+)(:([0-9]+))?$ ]]; then
+              fail "wait-urls entries must be absolute HTTP(S) URLs"
+            fi
+            port="${BASH_REMATCH[3]:-}"
+          fi
+
+          if [[ -n "$port" ]]; then
+            (( ${#port} <= 5 )) || fail "wait-urls entries must be absolute HTTP(S) URLs"
+            (( 10#$port > 0 && 10#$port <= 65535 )) || fail "wait-urls entries must be absolute HTTP(S) URLs"
+          fi
+        }
+
         requires_linux
 
         validate_boolean "build" "$BUILD"
@@ -157,7 +188,7 @@ runs:
 
         while IFS= read -r url; do
           [[ -z "$url" ]] && continue
-          [[ "$url" =~ ^https?://[^[:space:]]+$ ]] || fail "wait-urls entries must be absolute HTTP(S) URLs"
+          validate_http_url "$url"
         done <<< "$WAIT_URLS"
 
         compose_services=""

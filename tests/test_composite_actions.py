@@ -168,6 +168,12 @@ class ComposeActionTests(unittest.TestCase):
         for values, message in ((
             {"WAIT_URLS": "file:///etc/passwd"}, "absolute HTTP(S)"
         ), (
+            {"WAIT_URLS": "http:///no-host"}, "absolute HTTP(S)"
+        ), (
+            {"WAIT_URLS": "http://127.0.0.1:bad/health"}, "absolute HTTP(S)"
+        ), (
+            {"WAIT_URLS": "http://[::1/health"}, "absolute HTTP(S)"
+        ), (
             {"COMPOSE_FILES": "../secret.yml"}, "traversal"
         ), (
             {"WORKING_DIRECTORY": "/tmp"}, "absolute forms"

@@ -1,0 +1,22 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-please.yml
+    with:
+      mode: manifest
+      config-file: .github/release-please/config.json
+      manifest-file: .github/release-please/manifest.json

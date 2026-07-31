@@ -1,0 +1,24 @@
+name: Invalid release trigger set
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-please.yml
+    with:
+      mode: manifest
+      config-file: .github/release-please/config.json
+      manifest-file: .github/release-please/manifest.json

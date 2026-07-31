@@ -33,6 +33,103 @@ def run(cmd: list[str], cwd: Path = ROOT, env: dict[str, str] | None = None) -> 
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+def release_workflow_errors(path: Path) -> list[str]:
+    """Validate the repository-level Release Please driver workflow contract."""
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+
+    triggers = workflow.get("on", workflow.get(True))
+    require(isinstance(triggers, dict), "must define push and workflow_dispatch triggers")
+    if isinstance(triggers, dict):
+        require(
+            set(triggers) == {"push", "workflow_dispatch"},
+            "must define only push and workflow_dispatch triggers",
+        )
+        require(
+            triggers.get("push") == {"branches": ["main"]},
+            "push trigger must be limited to branches: [main]",
+        )
+        require("workflow_dispatch" in triggers, "must include workflow_dispatch")
+
+    require(
+        workflow.get("permissions")
+        == {"contents": "write", "pull-requests": "write"},
+        "permissions must be exactly contents:write and pull-requests:write",
+    )
+    require(
+        workflow.get("concurrency")
+        == {
+            "group": "release-${{ github.workflow }}-${{ github.repository }}",
+            "cancel-in-progress": False,
+        },
+        "concurrency must use the repository-scoped release group and must not cancel in-progress runs",
+    )
+
+    jobs = workflow.get("jobs")
+    require(isinstance(jobs, dict), "jobs block must be a mapping")
+    require(
+        isinstance(jobs, dict) and set(jobs) == {"release"},
+        "must define only the release caller job",
+    )
+    caller_jobs = (
+        [job for job in jobs.values() if isinstance(job, dict) and "uses" in job]
+        if isinstance(jobs, dict)
+        else []
+    )
+    require(len(caller_jobs) == 1, "must define exactly one reusable workflow caller job")
+    if not caller_jobs:
+        return errors
+
+    job = caller_jobs[0]
+    require(
+        job.get("uses") == "./.github/workflows/release-please.yml",
+        "caller job must use ./.github/workflows/release-please.yml",
+    )
+    require(
+        "steps" not in job and "runs-on" not in job,
+        "caller job must not define steps or runs-on",
+    )
+    require(
+        job.get("with")
+        == {
+            "mode": "manifest",
+            "config-file": ".github/release-please/config.json",
+            "manifest-file": ".github/release-please/manifest.json",
+        },
+        "caller job must pass manifest mode and current config/manifest paths",
+    )
+    return errors
+
+
+SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def release_manifest_errors(manifest: object) -> list[str]:
+    """Return errors for the single-package Release Please manifest contract."""
+    if not isinstance(manifest, dict) or set(manifest) != {"."}:
+        return ["manifest must contain exactly the root package key '.'"]
+    version = manifest["."]
+    if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
+        return ["root package version must be a well-formed SemVer string"]
+    return []
+
+
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
     if ".git" in path.parts or "templates/project/template" in path.as_posix():
         continue
@@ -254,6 +351,41 @@ check(
     release.get("permissions") == {"contents": "write", "pull-requests": "write"},
     "Release workflow permissions must be exactly contents:write and pull-requests:write",
 )
+release_manifest = json.loads((ROOT / ".github/release-please/manifest.json").read_text())
+check(
+    not release_manifest_errors(release_manifest),
+    "Release Please manifest must contain exactly one root package with a SemVer version",
+)
+for valid_manifest in ({".": "0.0.0"}, {".": "0.1.0"}, {".": "1.2.3-rc.1+build.5"}):
+    check(
+        not release_manifest_errors(valid_manifest),
+        f"valid release manifest must be accepted: {valid_manifest}",
+    )
+for invalid_manifest in (
+    {".": "01.0.0"},
+    {".": "0.1"},
+    {".": "1.0.0-01"},
+    {".": 1},
+    {".": "0.1.0", "extra": "0.1.0"},
+):
+    check(
+        bool(release_manifest_errors(invalid_manifest)),
+        f"invalid release manifest must be rejected: {invalid_manifest}",
+    )
+release_config = json.loads((ROOT / ".github/release-please/config.json").read_text())
+check(
+    release_config.get("release-type") == "simple"
+    and release_config.get("include-component-in-tag") is False
+    and release_config.get("packages", {}).get(".", {}).get("package-name")
+    == "project-toolkit",
+    "Release Please config must preserve the simple project-toolkit SemVer contract",
+)
+ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
+for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-*.yml")):
+    check(
+        bool(release_workflow_errors(fixture)),
+        f"{fixture.relative_to(ROOT)} must fail release driver validation",
+    )
 
 secret_patterns = [
     r"ghp_[A-Za-z0-9]{20,}",

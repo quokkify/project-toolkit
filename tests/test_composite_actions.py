@@ -28,6 +28,8 @@ class SetupActionTests(unittest.TestCase):
                 first = action(name)["runs"]["steps"][0]
                 self.assertIn("Validate", first["name"])
                 self.assertNotIn("uses", first)
+                if name == "setup-java-gradle":
+                    self.assertEqual(first["env"]["VALIDATE_WRAPPERS"], "${{ inputs.validate-wrappers }}")
                 result = subprocess.run(
                     ["bash", "-c", first["run"]],
                     env={**os.environ, **values},

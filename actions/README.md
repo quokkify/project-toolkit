@@ -11,7 +11,7 @@ This toolkit now ships reusable composite actions for common setup and runtime p
 - `actions/compose-up/action.yml`
   - one or more Compose files, optional image build, container health gating, and optional HTTP readiness
 
-Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. The toolkit reusable workflows remain self-contained because their checkout is the caller repository, not this toolkit repository.
+Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. Run `actions/checkout` before these setup actions; in particular, `setup-java-gradle` must see the checked-out caller repository so its default wrapper validation can scan repository-contained `gradle-wrapper.jar` files. The toolkit reusable workflows remain self-contained because their checkout is the caller repository, not this toolkit repository.
 
 The Python and Node actions install dependencies by default. Set `install-dependencies: "false"` for runtime-only setup. The Java/Gradle action validates repository-contained Gradle Wrapper JAR files by default; set `validate-wrappers: "false"` only for repositories that intentionally do not use a wrapper. It deliberately leaves dependency and build commands to the caller. Inputs such as `install-command` are trusted workflow configuration; never construct them from pull-request titles, branch names, or other untrusted event data.
 

@@ -51,8 +51,9 @@ jobs:
         run: actionlint .github/workflows/*.yml examples/*.yml
       - name: Check shell snippets
         run: |
-          if find . -type f -name '*.sh' -print -quit | grep -q .; then
-            shellcheck $(find . -type f -name '*.sh' -print)
+          mapfile -t files < <(find . -type f -name '*.sh' -print)
+          if (( ${#files[@]} )); then
+            shellcheck "${files[@]}"
           else
             echo "No shell scripts present; shellcheck not applicable"
           fi

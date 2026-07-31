@@ -594,6 +594,36 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "custom-renovate-all",
     )
 
+    dotted_repo_data = tmp_path / "custom-renovate-dotted-repo.yml"
+    dotted_repo_data.write_text(
+        yaml.safe_dump(
+            {
+                "renovate_config_repository": "octocat/octocat.github.io",
+                "renovate_presets": ["default"],
+            }
+        )
+    )
+    dotted_repo_dest = tmp_path / "custom-renovate-dotted-repo"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data-file",
+            str(dotted_repo_data),
+            str(template_source),
+            str(dotted_repo_dest),
+        ]
+    )
+    assert_generated_renovate_config(
+        dotted_repo_dest / "renovate.json",
+        renovate_extends("octocat/octocat.github.io", ["default"]),
+        "custom-renovate-dotted-repo",
+    )
+
     custom_selected_data = tmp_path / "custom-renovate-selected.yml"
     custom_selected_data.write_text(
         yaml.safe_dump(
@@ -627,6 +657,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     for invalid_value in (
         "https://github.com/acme/shared-renovate",
         "github>acme/shared-renovate",
+        "ac.me/shared-renovate",
         "acme/shared-renovate//presets/base",
         "acme/shared-renovate#main",
         "acme /shared-renovate",

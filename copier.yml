@@ -47,7 +47,7 @@ renovate_config_repository:
   help: GitHub owner/repository slug hosting the shared Renovate preset.
   default: ylazakovich/renovate-config
   validator: >-
-    {% if not (renovate_config_repository | regex_search('^[A-Za-z0-9][A-Za-z0-9_-]{0,38}/[A-Za-z0-9][A-Za-z0-9_-]{0,99}$')) %}
+    {% if not (renovate_config_repository | regex_search('^[A-Za-z0-9][A-Za-z0-9_-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')) %}
     Use one GitHub owner/repository slug such as ylazakovich/renovate-config; schemes, github>, paths, refs, whitespace, and templates are not allowed.
     {% endif %}
 

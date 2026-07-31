@@ -8,7 +8,7 @@ An exact release tag is immutable by project policy but Git itself permits tag d
 
 ## Permissions and secrets
 
-Language workflows request only `contents: read`. Release Please needs `contents: write` and `pull-requests: write`. Docker declares `packages: write` for optional registry push, but login is skipped unless `push: true`; callers should reduce permissions when their registry does not need GitHub Packages.
+Language and Docker workflows request only `contents: read`. Release Please needs `contents: write` and `pull-requests: write`. Docker login is skipped unless `push: true`; a caller pushing to GitHub Packages must explicitly grant `packages: write`, because the called workflow cannot elevate the caller token.
 
 Only Docker push accepts secrets (`registry-username` and `registry-password`). They are passed directly to the pinned login Action and are never echoed. Build arguments are not secret-safe. Reusable workflows cannot elevate permissions granted by their caller, and secrets are not automatically forwarded through nested workflows unless explicitly passed or inherited.
 

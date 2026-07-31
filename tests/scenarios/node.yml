@@ -5,4 +5,4 @@ components:
     path: .
 docker: false
 release_please: false
-renovate: true
+renovate: false

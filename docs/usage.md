@@ -39,7 +39,7 @@ The template accepts a YAML list of `python`, `node`, and `java` components plus
 
 ## Release Please
 
-Use [`examples/release-single.yml`](../examples/release-single.yml) for one product version or [`examples/release-components.yml`](../examples/release-components.yml) with a local manifest config for independent component versions. Both rely on Conventional Commits. Release Please updates `CHANGELOG.md` through its release PR. No release is created merely by copying this toolkit.
+Use [`examples/release-single.yml`](../examples/release-single.yml) for one product version or [`examples/release-components.yml`](../examples/release-components.yml) with the example [component config](../examples/release-please-components-config.json) and [manifest](../examples/release-please-components-manifest.json) for independent versions. Both rely on Conventional Commits. Release Please updates `CHANGELOG.md` through its release PR. No release is created merely by copying this toolkit.
 
 ## Renovate
 

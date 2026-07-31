@@ -103,6 +103,8 @@ with tempfile.TemporaryDirectory(prefix='project-toolkit-validation-') as tmp:
         run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'HEAD', '--data-file', str(ROOT / f'tests/scenarios/{scenario}.yml'), str(ROOT), str(dest)])
         run([actionlint, str(dest / '.github/workflows/ci.yml')])
         check((dest / '.copier-answers.yml').exists(), f'{scenario}: missing .copier-answers.yml')
+        if scenario == 'node':
+            check(not (dest / 'renovate.json').exists(), 'node scenario disabled Renovate but generated renovate.json')
         if scenario == 'polyglot':
             generated = (dest / '.github/workflows/ci.yml').read_text()
             for name in ('python-ci.yml', 'node-ci.yml', 'java-ci.yml', 'docker-build.yml'):

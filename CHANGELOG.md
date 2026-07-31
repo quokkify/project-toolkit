@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/ylazakovich/project-toolkit/compare/v1.0.0...v1.1.0) (2026-07-31)
+
+
+### Features
+
+* **copier:** add shared Renovate presets ([#5](https://github.com/ylazakovich/project-toolkit/issues/5)) ([3e1f7fc](https://github.com/ylazakovich/project-toolkit/commit/3e1f7fc9a48b13ab36d79667536920d3bc618667))
+
 ## 1.0.0 (2026-07-31)
 
 

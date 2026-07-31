@@ -133,6 +133,8 @@ class ComposeActionTests(unittest.TestCase):
         compose_files: str = "docker-compose.yml",
         curl_exit: str = "0",
         down_on_timeout: str = "true",
+        services: str = "web",
+        config_exit: str = "0",
     ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory(prefix="compose-action-test-") as tmp:
             root = Path(tmp)
@@ -150,7 +152,7 @@ class ComposeActionTests(unittest.TestCase):
                 "set -euo pipefail\n"
                 "printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n"
                 "case \"$*\" in\n"
-                "  *' config --services') printf 'web\\nmigrate\\n' ;;\n"
+                "  *' config --services') [[ \"$CONFIG_EXIT\" == 0 ]] || exit \"$CONFIG_EXIT\"; printf 'web\\nmigrate\\n' ;;\n"
                 "  *' ps --all --quiet web') echo web-id ;;\n"
                 "  *' ps --all --quiet migrate') echo migrate-id ;;\n"
                 "  'inspect --format {{.State.Running}} web-id') echo true ;;\n"
@@ -172,6 +174,7 @@ class ComposeActionTests(unittest.TestCase):
                     "COMPLETED_SERVICES": completed_services,
                     "COMPLETED_STATUS": completed_status,
                     "COMPOSE_FILES": compose_files,
+                    "CONFIG_EXIT": config_exit,
                     "CURL_EXIT": curl_exit,
                     "DOCKER_LOG": str(docker_log),
                     "DOWN_ON_TIMEOUT": down_on_timeout,
@@ -179,7 +182,7 @@ class ComposeActionTests(unittest.TestCase):
                     "CURL_LOG": str(curl_log),
                     "PATH": f"{bin_dir}:{env['PATH']}",
                     "RUNNER_OS": "Linux",
-                    "SERVICES": "web",
+                    "SERVICES": services,
                     "SHOW_LOGS_ON_FAILURE": "true",
                     "TIMEOUT_SECONDS": timeout,
                     "URL_TIMEOUT_SECONDS": "5",
@@ -247,6 +250,13 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("Timed out", result.stderr)
         self.assertTrue(curl_calls)
         self.assertNotIn(" down", docker_calls)
+
+    def test_auto_discovery_failure_is_not_ignored(self) -> None:
+        result, docker_calls, _ = self.run_action(services="", config_exit="7")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Failed to list Compose services", result.stderr)
+        self.assertIn("config --services", docker_calls)
+        self.assertNotIn("up --detach", docker_calls)
 
 
 if __name__ == "__main__":

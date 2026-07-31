@@ -71,9 +71,11 @@ runs:
           echo "compose-up supports Linux runners only" >&2
           exit 2
         fi
-        for value in "$BUILD" "$DOWN_ON_TIMEOUT" "$SHOW_LOGS_ON_FAILURE" "$WAIT_FOR_HEALTH"; do
+        for input in "build=$BUILD" "down-on-timeout=$DOWN_ON_TIMEOUT" "show-logs-on-failure=$SHOW_LOGS_ON_FAILURE" "wait-for-health=$WAIT_FOR_HEALTH"; do
+          name=${input%%=*}
+          value=${input#*=}
           if [[ "$value" != "true" && "$value" != "false" ]]; then
-            echo "Boolean inputs must be 'true' or 'false': $value" >&2
+            echo "$name must be 'true' or 'false': $value" >&2
             exit 2
           fi
         done
@@ -99,13 +101,33 @@ runs:
           compose_args+=(--file "$file")
         done
 
+        diagnostics() {
+          docker compose "${compose_args[@]}" ps || true
+          if [[ "$SHOW_LOGS_ON_FAILURE" == "true" ]]; then
+            docker compose "${compose_args[@]}" logs --no-color --tail 100 || true
+          fi
+        }
+        fail_readiness() {
+          local message=$1
+          echo "$message" >&2
+          diagnostics
+          if [[ "$DOWN_ON_TIMEOUT" == "true" ]]; then
+            docker compose "${compose_args[@]}" down || true
+          fi
+          exit 2
+        }
+
         normalize_services() {
           printf '%s' "$1" | tr ',' ' ' | xargs -r -n1
         }
         mapfile -t completed_services < <(normalize_services "$COMPLETED_SERVICES")
         mapfile -t active_services < <(normalize_services "$SERVICES")
         if (( ${#active_services[@]} == 0 )); then
-          mapfile -t configured_services < <(docker compose "${compose_args[@]}" config --services)
+          if ! configured_services_raw=$(docker compose "${compose_args[@]}" config --services); then
+            fail_readiness "Failed to list Compose services"
+          fi
+          mapfile -t configured_services < <(printf '%s\n' "$configured_services_raw" | sed '/^[[:space:]]*$/d')
+          (( ${#configured_services[@]} > 0 )) || fail_readiness "No Compose services were configured"
           for service in "${configured_services[@]}"; do
             is_completed=false
             for completed in "${completed_services[@]}"; do
@@ -122,22 +144,6 @@ runs:
             exit 2
           fi
         done
-
-        diagnostics() {
-          docker compose "${compose_args[@]}" ps || true
-          if [[ "$SHOW_LOGS_ON_FAILURE" == "true" ]]; then
-            docker compose "${compose_args[@]}" logs --no-color --tail 100 || true
-          fi
-        }
-        fail_readiness() {
-          local message=$1
-          echo "$message" >&2
-          diagnostics
-          if [[ "$DOWN_ON_TIMEOUT" == "true" ]]; then
-            docker compose "${compose_args[@]}" down || true
-          fi
-          exit 2
-        }
 
         up_args=(up --detach)
         [[ "$BUILD" == "true" ]] && up_args+=(--build)

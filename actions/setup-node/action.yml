@@ -1,0 +1,124 @@
+name: Setup Node.js
+description: Prepare Node.js with cached dependencies and optional dependency installation.
+
+inputs:
+  node-version:
+    description: Node.js version accepted by actions/setup-node.
+    required: false
+    default: "22"
+  working-directory:
+    description: Repository subpath where project files are located.
+    required: false
+    default: .
+  package-manager:
+    description: One of auto, npm, pnpm, or yarn.
+    required: false
+    default: auto
+  install-command:
+    description: Optional trusted shell command that replaces default dependency installation.
+    required: false
+    default: ""
+  install-dependencies:
+    description: Install dependencies after setting up Node.js.
+    required: false
+    default: "true"
+  cache-dependencies:
+    description: Cache common package-manager caches.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+      run: |
+        set -euo pipefail
+        for input in "cache-dependencies=$CACHE_DEPENDENCIES" "install-dependencies=$INSTALL_DEPENDENCIES"; do
+          name=${input%%=*}
+          value=${input#*=}
+          if [[ "$value" != "true" && "$value" != "false" ]]; then
+            echo "$name must be 'true' or 'false': $value" >&2
+            exit 2
+          fi
+        done
+        case "$PACKAGE_MANAGER" in
+          auto|npm|pnpm|yarn) ;;
+          *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
+        esac
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+    - name: Cache Node.js dependencies
+      if: ${{ inputs.cache-dependencies == 'true' }}
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ~/.npm
+          ~/.cache/yarn
+          ~/.local/share/pnpm/store
+        key: node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/npm-shrinkwrap.json', inputs.working-directory), format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory)) }}
+        restore-keys: |
+          node-${{ runner.os }}-${{ inputs.node-version }}-
+    - name: Install Node.js dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      env:
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+
+        if [[ -n "$INSTALL_COMMAND" ]]; then
+          bash -euo pipefail -c "$INSTALL_COMMAND"
+          exit 0
+        fi
+
+        manager="$PACKAGE_MANAGER"
+        if [[ "$manager" == "auto" ]]; then
+          if [[ -f pnpm-lock.yaml ]]; then
+            manager=pnpm
+          elif [[ -f yarn.lock ]]; then
+            manager=yarn
+          else
+            manager=npm
+          fi
+        fi
+
+        case "$manager" in
+          npm)
+            if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+              npm ci
+            else
+              npm install
+            fi
+            ;;
+          pnpm)
+            if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@' package.json 2>/dev/null; then
+              echo "pnpm projects must pin packageManager in package.json" >&2
+              exit 2
+            fi
+            corepack enable
+            pnpm install --frozen-lockfile
+            ;;
+          yarn)
+            if grep -q '^# yarn lockfile v1' yarn.lock 2>/dev/null; then
+              corepack prepare yarn@1.22.22 --activate
+              yarn install --frozen-lockfile
+            else
+              if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"yarn@' package.json 2>/dev/null; then
+                echo "Modern Yarn projects must pin packageManager in package.json" >&2
+                exit 2
+              fi
+              corepack enable
+              yarn install --immutable
+            fi
+            ;;
+        esac

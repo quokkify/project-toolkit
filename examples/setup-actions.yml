@@ -1,0 +1,76 @@
+name: Composite action examples
+on: [pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  setup-python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: ylazakovich/project-toolkit/actions/setup-python@v1.0.0
+        with:
+          python-version: "3.12"
+          working-directory: .
+
+  setup-node:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: ylazakovich/project-toolkit/actions/setup-node@v1.0.0
+        with:
+          node-version: "22"
+          working-directory: .
+
+  setup-java:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Java and Gradle cache
+        uses: ylazakovich/project-toolkit/actions/setup-java-gradle@v1.0.0
+        with:
+          java-version: "21"
+          distribution: temurin
+          working-directory: .
+
+  compose-up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Start and wait for compose services
+        uses: ylazakovich/project-toolkit/actions/compose-up@v1.0.0
+        with:
+          compose-files: |
+            docker-compose.yml
+            docker-compose.test.yml
+          working-directory: .
+          services: web,postgres
+          build: "true"
+          wait-for-health: "true"
+          wait-urls: http://127.0.0.1:8080/health
+          timeout-seconds: "120"
+          url-timeout-seconds: "5"
+      - name: Stop compose services
+        if: ${{ always() }}
+        shell: bash
+        working-directory: .
+        run: |
+          docker compose \
+            --file docker-compose.yml \
+            --file docker-compose.test.yml \
+            down --remove-orphans

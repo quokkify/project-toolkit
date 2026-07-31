@@ -4,7 +4,7 @@
     "Updates GitHub Actions and versioned reusable workflow references without automerge."
   ],
   "extends": ["config:recommended"],
-  "enabledManagers": ["github-actions", "regex"],
+  "enabledManagers": ["github-actions", "custom.regex"],
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
@@ -18,7 +18,7 @@
     },
     {
       "description": "Group non-breaking project-toolkit workflow updates.",
-      "matchManagers": ["regex"],
+      "matchManagers": ["custom.regex"],
       "matchPackageNames": ["ylazakovich/project-toolkit"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "project-toolkit non-major updates"

@@ -24,7 +24,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version: "24.11.1"
       - name: Set up Java
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
@@ -42,6 +42,8 @@ jobs:
           install -m 0755 actionlint "$HOME/.local/bin/actionlint"
       - name: Run repository validation
         run: python scripts/validate.py
+      - name: Validate Renovate preset
+        run: npx --yes --package renovate@44.4.6 renovate-config-validator --strict renovate/default.json5
       - name: Run actionlint on toolkit and examples
         run: actionlint .github/workflows/*.yml examples/*.yml
       - name: Check shell snippets

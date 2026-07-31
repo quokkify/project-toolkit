@@ -50,7 +50,7 @@ cd my-project
 copier update --trust
 ```
 
-The template accepts a YAML list of `python`, `node`, and `java` components plus Docker, Release Please, and Renovate booleans. Commit `.copier-answers.yml`; it is the update contract. Review generated diffs before accepting an update.
+The template accepts a YAML list of `python`, `node`, and `java` components plus Docker, Release Please, and Renovate booleans. Generated projects use Renovate presets from `ylazakovich/renovate-config` by default. Set `renovate_config_repository` to another GitHub `owner/repo` slug when a project should consume a different shared preset repository; it names the preset repository, not the generated consumer repository. Set `renovate_presets` to a non-empty YAML list of selected preset names, preserving the desired extends order. Supported names map to paths as follows: `default` -> `presets/base`, `python` -> `presets/python/default`, `javascript` -> `presets/npm/default`, `java` -> `presets/gradle/default`, `docker` -> `presets/docker/default`, and `github-actions` -> `presets/github-actions/default`. New projects infer `default` plus language presets from `components` and `docker` when enabled; `github-actions` remains explicit opt-in. The generated extends entries follow that preset repository's default branch intentionally; pin them manually later if a stricter stability policy requires it. Commit `.copier-answers.yml`; it is the update contract. Review generated diffs before accepting an update.
 
 ## Release Please
 
@@ -58,4 +58,6 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 
 ## Renovate
 
-Extend `github>ylazakovich/project-toolkit//renovate/default.json5`. The preset creates PRs for Actions and toolkit workflow references, groups safe non-major updates, preserves majors as visible PRs, and never enables automerge by default.
+New Copier-generated projects extend selected presets from `ylazakovich/renovate-config` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
+
+The legacy `github>ylazakovich/project-toolkit//renovate/default.json5` preset remains available for existing consumers. New generated projects intentionally follow the shared preset repository's default branch unless the generated `renovate.json` is manually pinned to a tag or commit later.

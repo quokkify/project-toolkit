@@ -41,3 +41,36 @@ release_please:
 renovate:
   type: bool
   default: true
+
+renovate_config_repository:
+  type: str
+  help: GitHub owner/repository slug hosting the shared Renovate preset.
+  default: ylazakovich/renovate-config
+  validator: >-
+    {% if not (renovate_config_repository | regex_search('^[A-Za-z0-9][A-Za-z0-9_-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')) %}
+    Use one GitHub owner/repository slug such as ylazakovich/renovate-config; schemes, github>, paths, refs, whitespace, and templates are not allowed.
+    {% endif %}
+
+renovate_presets:
+  type: yaml
+  help: "Renovate preset names to extend. Supported names: default, python, javascript, java, docker, github-actions."
+  default: >-
+    {%- set presets = ['default'] -%}
+    {%- set component_types = components | map(attribute='type') | list -%}
+    {%- if 'python' in component_types -%}{%- set _ = presets.append('python') -%}{%- endif -%}
+    {%- if 'node' in component_types -%}{%- set _ = presets.append('javascript') -%}{%- endif -%}
+    {%- if 'java' in component_types -%}{%- set _ = presets.append('java') -%}{%- endif -%}
+    {%- if docker -%}{%- set _ = presets.append('docker') -%}{%- endif -%}
+    {{ presets }}
+  validator: >-
+    {% set allowed_renovate_presets = ['default', 'python', 'javascript', 'java', 'docker', 'github-actions'] %}
+    {% if renovate_presets is string or renovate_presets is mapping or renovate_presets is not sequence %}
+    renovate_presets must be a non-empty YAML list of supported preset names.
+    {% elif not renovate_presets %}
+    Choose at least one Renovate preset.
+    {% else %}
+    {% set renovate_preset_state = namespace(seen=[]) %}
+    {% for preset in renovate_presets %}
+    {% if preset is not string %}Every renovate_presets entry must be a string.{% elif preset not in allowed_renovate_presets %}Unsupported Renovate preset: {{ preset }}.{% elif preset in renovate_preset_state.seen %}Duplicate Renovate preset: {{ preset }}.{% else %}{% set renovate_preset_state.seen = renovate_preset_state.seen + [preset] %}{% endif %}
+    {% endfor %}
+    {% endif %}

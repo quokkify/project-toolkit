@@ -50,7 +50,7 @@ cd my-project
 copier update --trust
 ```
 
-The template accepts a YAML list of `python`, `node`, and `java` components plus Docker, Release Please, and Renovate booleans. Commit `.copier-answers.yml`; it is the update contract. Review generated diffs before accepting an update.
+The template accepts a YAML list of `python`, `node`, and `java` components plus Docker, Release Please, and Renovate booleans. Generated projects use the central Renovate base preset from `github>ylazakovich/renovate-config//presets/base` by default. Set `renovate_config_repository` to another GitHub `owner/repo` slug when a project should consume a different shared preset repository. The default follows that preset repository's default branch intentionally; pin the generated `extends` entry manually later if a stricter stability policy requires it. Commit `.copier-answers.yml`; it is the update contract. Review generated diffs before accepting an update.
 
 ## Release Please
 
@@ -58,4 +58,6 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 
 ## Renovate
 
-Extend `github>ylazakovich/project-toolkit//renovate/default.json5`. The preset creates PRs for Actions and toolkit workflow references, groups safe non-major updates, preserves majors as visible PRs, and never enables automerge by default.
+New Copier-generated projects extend `github>ylazakovich/renovate-config//presets/base` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the generated preset path `//presets/base`.
+
+The legacy `github>ylazakovich/project-toolkit//renovate/default.json5` preset remains available for existing consumers. New generated projects intentionally follow the shared preset repository's default branch unless the generated `renovate.json` is manually pinned to a tag or commit later.

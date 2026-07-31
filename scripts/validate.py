@@ -130,6 +130,21 @@ def release_manifest_errors(manifest: object) -> list[str]:
     return []
 
 
+RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
+DEFAULT_RENOVATE_EXTENDS = "github>ylazakovich/renovate-config//presets/base"
+
+
+def assert_generated_renovate_config(path: Path, expected_extends: str, label: str) -> None:
+    """Validate the generated Renovate file shape and exact shared preset ref."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        ERRORS.append(f"{label}: renovate.json is not valid JSON: {exc}")
+        return
+    check(data.get("$schema") == RENOVATE_SCHEMA, f"{label}: renovate schema mismatch")
+    check(data.get("extends") == [expected_extends], f"{label}: renovate extends mismatch")
+
+
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
     if ".git" in path.parts or "templates/project/template" in path.as_posix():
         continue
@@ -458,6 +473,12 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 not (dest / "renovate.json").exists(),
                 "node scenario disabled Renovate but generated renovate.json",
             )
+        else:
+            assert_generated_renovate_config(
+                dest / "renovate.json",
+                DEFAULT_RENOVATE_EXTENDS,
+                scenario,
+            )
         if scenario == "polyglot":
             generated = (dest / ".github/workflows/ci.yml").read_text()
             for name in (
@@ -480,6 +501,66 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 ["git", "status", "--porcelain"], cwd=dest, text=True
             )
             check(status == "", f"copier update was not idempotent: {status}")
+            answers = yaml.safe_load((dest / ".copier-answers.yml").read_text())
+            check(
+                answers.get("renovate_config_repository")
+                == "ylazakovich/renovate-config",
+                "copier update did not persist renovate_config_repository",
+            )
+
+    custom_dest = tmp_path / "custom-renovate"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data",
+            "renovate_config_repository=acme/shared-renovate",
+            str(template_source),
+            str(custom_dest),
+        ]
+    )
+    assert_generated_renovate_config(
+        custom_dest / "renovate.json",
+        "github>acme/shared-renovate//presets/base",
+        "custom-renovate",
+    )
+
+    for invalid_value in (
+        "https://github.com/acme/shared-renovate",
+        "github>acme/shared-renovate",
+        "acme/shared-renovate//presets/base",
+        "acme/shared-renovate#main",
+        "acme /shared-renovate",
+        "acme/../shared-renovate",
+        "{{ acme }}/shared-renovate",
+    ):
+        invalid_label = re.sub(r"[^A-Za-z0-9]+", "-", invalid_value).strip("-")
+        bad_dest = tmp_path / ("invalid-renovate-" + invalid_label)
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data",
+                f"renovate_config_repository={invalid_value}",
+                str(template_source),
+                str(bad_dest),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(
+            result.returncode != 0,
+            f"invalid renovate_config_repository accepted: {invalid_value}",
+        )
 
 run([sys.executable, "tests/test_composite_actions.py"])
 

@@ -10,3 +10,4 @@ components:
 docker: true
 release_please: true
 renovate: true
+renovate_config_repository: ylazakovich/renovate-config

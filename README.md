@@ -38,6 +38,8 @@ The root [`copier.yml`](copier.yml) points at `templates/project/template/`. Kee
 
 Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; update workflow versions through Renovate or a reviewed manual change.
 
+Copier-generated `renovate.json` files extend the central shared base preset at `github>ylazakovich/renovate-config//presets/base` by default. Set the `renovate_config_repository` answer to another GitHub `owner/repo` slug to use a different shared preset repository. This default intentionally follows the preset repository's default branch; projects with stricter stability requirements can manually pin the generated `extends` entry later.
+
 ## Scope
 
 The toolkit does not deploy to providers, publish language packages, hide project secrets, or generate arbitrary jobs. Validation is static and fixture-based until reusable workflows are available on an accessible Git ref; see the documented limitation in [architecture](docs/architecture.md).

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/ylazakovich/project-toolkit/compare/v1.1.0...v1.1.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **actions:** validate Gradle wrappers ([#7](https://github.com/ylazakovich/project-toolkit/issues/7)) ([d933683](https://github.com/ylazakovich/project-toolkit/commit/d933683e8143db428888a3a0707903580c600f1a))
+
 ## [1.1.0](https://github.com/ylazakovich/project-toolkit/compare/v1.0.0...v1.1.0) (2026-07-31)
 
 

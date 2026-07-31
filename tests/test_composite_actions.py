@@ -219,15 +219,17 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
 
     def test_service_union_is_unique_and_completed_only_preserves_standalone_defaults(self) -> None:
-        result, env_file = self.run_validation(SERVICES="web,worker web", COMPLETED_SERVICES="worker migrate")
+        result, env_file = self.run_validation(SERVICES="web,\nworker web", COMPLETED_SERVICES="worker\nmigrate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
         result, env_file = self.run_validation(SERVICES="", COMPLETED_SERVICES="migrate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
-        result, env_file = self.run_validation(SERVICES="web,*", COMPLETED_SERVICES="")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("COMPOSE_SERVICES_NORMALIZED=web *\n", env_file)
+        for unsafe in ("web,*", "web ../foreign", "web $(id)"):
+            result, env_file = self.run_validation(SERVICES=unsafe, COMPLETED_SERVICES="")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("service names must match", result.stderr)
+            self.assertEqual(env_file, "")
 
     def test_pinned_standalone_command_contract_keeps_global_flags_before_up(self) -> None:
         # v2.3.0 appends additional-compose-args after `up -d`, so this fake
@@ -252,7 +254,17 @@ class ComposeActionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="compose-url-test-") as tmp:
             log = Path(tmp) / "curl.log"
             curl = Path(tmp) / "curl"
-            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\n")
+            curl.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$*\" >> \"$CURL_LOG\"\n"
+                "while (( $# )); do\n"
+                "  if [[ \"$1\" == --max-time ]]; then\n"
+                "    shift\n"
+                "    [[ \"${1:-}\" =~ ^[0-9]+$ ]] || exit 64\n"
+                "  fi\n"
+                "  shift\n"
+                "done\n"
+            )
             curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
             env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "CURL_LOG": str(log), "TIMEOUT_SECONDS": "5", "URL_TIMEOUT_SECONDS": "2", "WAIT_URLS": "http://127.0.0.1:8080/health"}
             result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)

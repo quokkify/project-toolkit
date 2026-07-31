@@ -58,6 +58,9 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
         return [f"{label}: action metadata must be a mapping"]
+    allowed_top = {"name", "description", "author", "branding", "inputs", "outputs", "runs"}
+    for key in sorted(set(data) - allowed_top):
+        errors.append(f"{label}: unknown top-level key {key}")
     if not data.get("name") or not data.get("description"):
         errors.append(f"{label}: action requires name and description")
     for forbidden in ("permissions", "secrets"):
@@ -72,13 +75,32 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
         if not isinstance(spec, dict) or not spec.get("description"):
             errors.append(f"{label}: input {name} requires a description")
             continue
+        unknown = set(spec) - {"description", "required", "default", "deprecationMessage"}
+        if unknown:
+            errors.append(f"{label}: input {name} has unknown keys: {sorted(unknown)}")
+        if "required" in spec and not isinstance(spec["required"], bool):
+            errors.append(f"{label}: input {name} required must be boolean")
         if name in BOOLEAN_INPUTS and spec.get("default") not in ("true", "false"):
             errors.append(f"{label}: boolean input {name} requires a true/false string default")
+
+    outputs = data.get("outputs", {})
+    if not isinstance(outputs, dict):
+        errors.append(f"{label}: outputs must be a mapping")
+    else:
+        for name, spec in outputs.items():
+            if not isinstance(spec, dict) or not spec.get("description") or not spec.get("value"):
+                errors.append(f"{label}: output {name} requires description and value")
+                continue
+            unknown = set(spec) - {"description", "value"}
+            if unknown:
+                errors.append(f"{label}: output {name} has unknown keys: {sorted(unknown)}")
 
     runs = data.get("runs", {})
     if not isinstance(runs, dict) or runs.get("using") != "composite":
         errors.append(f"{label}: action must use composite runner")
         return errors
+    for key in sorted(set(runs) - {"using", "steps"}):
+        errors.append(f"{label}: runs has unknown key {key}")
     steps = runs.get("steps")
     if not isinstance(steps, list) or not steps:
         errors.append(f"{label}: action requires non-empty runs.steps")
@@ -88,6 +110,11 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
             errors.append(f"{label}: step {index} must declare exactly one of uses or run")
         elif "run" in step and not step.get("shell"):
             errors.append(f"{label}: run step {index} requires an explicit shell")
+        if isinstance(step, dict):
+            allowed_step = {"name", "id", "if", "uses", "with", "run", "shell", "env", "working-directory"}
+            unknown = set(step) - allowed_step
+            if unknown:
+                errors.append(f"{label}: step {index} has unknown keys: {sorted(unknown)}")
     return errors
 
 
@@ -100,8 +127,8 @@ for action_path in action_paths:
     data = yaml.safe_load(action_path.read_text())
     label = str(action_path.relative_to(ROOT))
     ERRORS.extend(validate_action_metadata(data, label))
-    if isinstance(data, dict):
-        steps = data.get("runs", {}).get("steps", [])
+    if isinstance(data, dict) and isinstance(data.get("runs"), dict):
+        steps = data["runs"].get("steps", [])
         if isinstance(steps, list):
             for index, step in enumerate(steps, 1):
                 if isinstance(step, dict) and isinstance(step.get("run"), str):
@@ -133,6 +160,33 @@ for expected in ("permissions", "secrets", "true/false", "explicit shell"):
         any(expected in error for error in negative_errors),
         f"action validator negative probe did not reject {expected}",
     )
+
+
+def setup_policy_errors(example: object, texts: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(example, dict) or example.get("permissions") != {"contents": "read"}:
+        errors.append("examples/setup-actions.yml permissions must be exactly contents: read")
+    for label, text in texts.items():
+        if re.search(r"\$\{\{\s*secrets\.", text, re.IGNORECASE):
+            errors.append(f"{label}: setup actions must not read secret contexts")
+    return errors
+
+
+setup_example = yaml.safe_load((ROOT / "examples/setup-actions.yml").read_text())
+action_texts = {str(path.relative_to(ROOT)): path.read_text() for path in action_paths}
+ERRORS.extend(setup_policy_errors(setup_example, action_texts))
+mutated_example = dict(setup_example)
+mutated_example["permissions"] = "write-all"
+check(
+    bool(setup_policy_errors(mutated_example, action_texts)),
+    "setup policy negative probe did not reject widened permissions",
+)
+mutated_actions = dict(action_texts)
+mutated_actions["actions/setup-python/action.yml"] += "\n${{ secrets.GITHUB_TOKEN }}\n"
+check(
+    any("secret contexts" in error for error in setup_policy_errors(setup_example, mutated_actions)),
+    "setup policy negative probe did not reject secret context",
+)
 
 for path in sorted(ROOT.rglob("*.json")):
     if "templates/project/template" in path.as_posix():

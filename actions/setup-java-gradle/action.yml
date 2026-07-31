@@ -21,42 +21,13 @@ inputs:
 
 outputs:
   gradle-command:
-    description: Preferred Gradle command to use in downstream steps.
+    description: Workspace-relative Gradle command to use in downstream steps.
     value: ${{ steps.resolve.outputs.gradle-command }}
 
 runs:
   using: composite
   steps:
-    - name: Set up Java
-      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
-      with:
-        java-version: ${{ inputs.java-version }}
-        distribution: ${{ inputs.distribution }}
-    - name: Cache Java dependencies
-      if: ${{ inputs.cache-dependencies == 'true' }}
-      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-          ~/.m2/repository
-        key: java-${{ runner.os }}-${{ inputs.java-version }}-${{ hashFiles(format('{0}/**/gradle-wrapper.properties', inputs.working-directory), format('{0}/**/*.gradle*', inputs.working-directory), format('{0}/**/pom.xml', inputs.working-directory)) }}
-        restore-keys: |
-          java-${{ runner.os }}-${{ inputs.java-version }}-
-    - name: Resolve Gradle wrapper command
-      id: resolve
-      shell: bash
-      env:
-        WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: |
-        set -euo pipefail
-        if [[ -f "$WORKING_DIRECTORY/gradlew" ]]; then
-          chmod +x "$WORKING_DIRECTORY/gradlew"
-          echo "gradle-command=./gradlew" >> "$GITHUB_OUTPUT"
-        else
-          echo "gradle-command=gradle" >> "$GITHUB_OUTPUT"
-        fi
-    - name: Validate boolean inputs
+    - name: Validate inputs
       shell: bash
       env:
         CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
@@ -65,4 +36,33 @@ runs:
         if [[ "$CACHE_DEPENDENCIES" != "true" && "$CACHE_DEPENDENCIES" != "false" ]]; then
           echo "cache-dependencies must be 'true' or 'false': $CACHE_DEPENDENCIES" >&2
           exit 2
+        fi
+    - name: Set up Java
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      with:
+        java-version: ${{ inputs.java-version }}
+        distribution: ${{ inputs.distribution }}
+    - name: Cache Gradle dependencies
+      if: ${{ inputs.cache-dependencies == 'true' }}
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ inputs.java-version }}-${{ hashFiles(format('{0}/**/gradle-wrapper.properties', inputs.working-directory), format('{0}/**/*.gradle*', inputs.working-directory)) }}
+        restore-keys: |
+          gradle-${{ runner.os }}-${{ inputs.java-version }}-
+    - name: Resolve Gradle wrapper command
+      id: resolve
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        wrapper="$WORKING_DIRECTORY/gradlew"
+        if [[ -f "$wrapper" ]]; then
+          chmod +x "$wrapper"
+          echo "gradle-command=$wrapper" >> "$GITHUB_OUTPUT"
+        else
+          echo "gradle-command=gradle" >> "$GITHUB_OUTPUT"
         fi

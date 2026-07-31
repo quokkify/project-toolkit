@@ -30,6 +30,26 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+      run: |
+        set -euo pipefail
+        for input in "cache-dependencies=$CACHE_DEPENDENCIES" "install-dependencies=$INSTALL_DEPENDENCIES"; do
+          name=${input%%=*}
+          value=${input#*=}
+          if [[ "$value" != "true" && "$value" != "false" ]]; then
+            echo "$name must be 'true' or 'false': $value" >&2
+            exit 2
+          fi
+        done
+        case "$PACKAGE_MANAGER" in
+          auto|npm|pnpm|yarn) ;;
+          *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
+        esac
     - name: Set up Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
@@ -56,7 +76,7 @@ runs:
         set -euo pipefail
         cd "$WORKING_DIRECTORY"
 
-        if [[ -n "${INSTALL_COMMAND}" ]]; then
+        if [[ -n "$INSTALL_COMMAND" ]]; then
           bash -euo pipefail -c "$INSTALL_COMMAND"
           exit 0
         fi
@@ -81,28 +101,24 @@ runs:
             fi
             ;;
           pnpm)
+            if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@' package.json 2>/dev/null; then
+              echo "pnpm projects must pin packageManager in package.json" >&2
+              exit 2
+            fi
             corepack enable
             pnpm install --frozen-lockfile
             ;;
           yarn)
-            corepack enable
-            yarn install --immutable
-            ;;
-          *)
-            echo "Unsupported package-manager: $manager" >&2
-            exit 2
+            if grep -q '^# yarn lockfile v1' yarn.lock 2>/dev/null; then
+              corepack prepare yarn@1.22.22 --activate
+              yarn install --frozen-lockfile
+            else
+              if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"yarn@' package.json 2>/dev/null; then
+                echo "Modern Yarn projects must pin packageManager in package.json" >&2
+                exit 2
+              fi
+              corepack enable
+              yarn install --immutable
+            fi
             ;;
         esac
-    - name: Validate boolean inputs
-      shell: bash
-      env:
-        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
-        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
-      run: |
-        set -euo pipefail
-        for value in "$CACHE_DEPENDENCIES" "$INSTALL_DEPENDENCIES"; do
-          if [[ "$value" != "true" && "$value" != "false" ]]; then
-            echo "Boolean inputs must be 'true' or 'false': $value" >&2
-            exit 2
-          fi
-        done

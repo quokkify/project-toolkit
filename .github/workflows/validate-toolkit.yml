@@ -51,11 +51,12 @@ jobs:
         run: actionlint .github/workflows/*.yml examples/*.yml
       - name: Check shell snippets
         run: |
+          python scripts/check_action_shells.py
           mapfile -t files < <(find . -type f -name '*.sh' -print)
           if (( ${#files[@]} )); then
             shellcheck "${files[@]}"
           else
-            echo "No shell scripts present; shellcheck not applicable"
+            echo "No standalone shell scripts present"
           fi
       - name: Check diff whitespace
         env:

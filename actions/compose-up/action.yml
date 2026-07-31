@@ -1,5 +1,5 @@
 name: Compose up with readiness
-description: Start Docker Compose services and wait for container and HTTP readiness.
+description: Start Docker Compose services on Linux and wait for container, completion, and HTTP readiness.
 
 inputs:
   compose-files:
@@ -7,35 +7,39 @@ inputs:
     required: false
     default: docker-compose.yml
   working-directory:
-    description: Directory containing the Compose files.
+    description: Repository subpath containing the Compose files.
     required: false
     default: .
   services:
-    description: Optional comma- or space-separated services to wait on. Defaults to all configured services.
+    description: Space- or comma-separated long-running services; defaults to configured services minus completed-services.
+    required: false
+    default: ""
+  completed-services:
+    description: Space- or comma-separated one-shot services that must exit successfully.
     required: false
     default: ""
   build:
-    description: Build images before starting services.
+    description: Build images while bringing services up.
     required: false
     default: "false"
   wait-for-health:
-    description: Require healthy state when a container defines a health check.
+    description: Require healthy status from services that define a health check.
     required: false
     default: "true"
   wait-urls:
-    description: Optional newline-separated HTTP(S) URLs that must return a successful response.
+    description: Newline-separated HTTP(S) URLs that must return a successful response.
     required: false
     default: ""
   timeout-seconds:
-    description: Maximum readiness wait in seconds; must be a positive integer.
+    description: Readiness timeout from 1 through 86400 seconds.
     required: false
-    default: "300"
+    default: "120"
   show-logs-on-failure:
-    description: Print the last 100 Compose log lines when startup or readiness fails.
+    description: Print service status and the last 100 log lines on failure.
     required: false
     default: "true"
   down-on-timeout:
-    description: Run Docker Compose down after a readiness timeout.
+    description: Run docker compose down after a readiness failure.
     required: false
     default: "false"
 
@@ -46,6 +50,7 @@ runs:
       shell: bash
       env:
         BUILD: ${{ inputs.build }}
+        COMPLETED_SERVICES: ${{ inputs.completed-services }}
         COMPOSE_FILES: ${{ inputs.compose-files }}
         DOWN_ON_TIMEOUT: ${{ inputs.down-on-timeout }}
         SERVICES: ${{ inputs.services }}
@@ -56,34 +61,57 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
-        cd "$WORKING_DIRECTORY"
 
-        require_boolean() {
-          local name="$1" value="$2"
+        if [[ "${RUNNER_OS:-Linux}" != "Linux" ]]; then
+          echo "compose-up supports Linux runners only" >&2
+          exit 2
+        fi
+        for value in "$BUILD" "$DOWN_ON_TIMEOUT" "$SHOW_LOGS_ON_FAILURE" "$WAIT_FOR_HEALTH"; do
           if [[ "$value" != "true" && "$value" != "false" ]]; then
-            echo "$name must be 'true' or 'false': $value" >&2
+            echo "Boolean inputs must be 'true' or 'false': $value" >&2
             exit 2
           fi
-        }
-
-        require_boolean build "$BUILD"
-        require_boolean wait-for-health "$WAIT_FOR_HEALTH"
-        require_boolean show-logs-on-failure "$SHOW_LOGS_ON_FAILURE"
-        require_boolean down-on-timeout "$DOWN_ON_TIMEOUT"
-        if [[ ! "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-          echo "timeout-seconds must be a positive integer: $TIMEOUT_SECONDS" >&2
+        done
+        if [[ ! "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]{0,4}$ ]] || (( 10#$TIMEOUT_SECONDS > 86400 )); then
+          echo "timeout-seconds must be an integer from 1 through 86400" >&2
           exit 2
         fi
+        timeout=$((10#$TIMEOUT_SECONDS))
 
+        cd "$WORKING_DIRECTORY"
+        mapfile -t compose_files < <(printf '%s\n' "$COMPOSE_FILES" | sed '/^[[:space:]]*$/d')
+        if (( ${#compose_files[@]} == 0 )); then
+          echo "At least one compose file is required" >&2
+          exit 2
+        fi
         compose_args=()
-        while IFS= read -r file; do
-          [[ -n "$file" ]] || continue
+        for file in "${compose_files[@]}"; do
           compose_args+=(--file "$file")
-        done <<< "$COMPOSE_FILES"
-        if (( ${#compose_args[@]} == 0 )); then
-          echo "compose-files must contain at least one path" >&2
-          exit 2
+        done
+
+        normalize_services() {
+          printf '%s' "$1" | tr ',' ' ' | xargs -r -n1
+        }
+        mapfile -t completed_services < <(normalize_services "$COMPLETED_SERVICES")
+        mapfile -t active_services < <(normalize_services "$SERVICES")
+        if (( ${#active_services[@]} == 0 )); then
+          mapfile -t configured_services < <(docker compose "${compose_args[@]}" config --services)
+          for service in "${configured_services[@]}"; do
+            is_completed=false
+            for completed in "${completed_services[@]}"; do
+              [[ "$service" == "$completed" ]] && is_completed=true
+            done
+            [[ "$is_completed" == "false" ]] && active_services+=("$service")
+          done
         fi
+
+        mapfile -t wait_urls < <(printf '%s\n' "$WAIT_URLS" | sed '/^[[:space:]]*$/d')
+        for url in "${wait_urls[@]}"; do
+          if [[ ! "$url" =~ ^https?://[^[:space:]]+$ ]]; then
+            echo "wait-urls entries must be absolute HTTP(S) URLs: $url" >&2
+            exit 2
+          fi
+        done
 
         diagnostics() {
           docker compose "${compose_args[@]}" ps || true
@@ -91,77 +119,70 @@ runs:
             docker compose "${compose_args[@]}" logs --no-color --tail 100 || true
           fi
         }
+        fail_readiness() {
+          local message=$1
+          echo "$message" >&2
+          diagnostics
+          if [[ "$DOWN_ON_TIMEOUT" == "true" ]]; then
+            docker compose "${compose_args[@]}" down || true
+          fi
+          exit 2
+        }
 
         up_args=(up --detach)
-        if [[ "$BUILD" == "true" ]]; then
-          up_args+=(--build)
-        fi
+        [[ "$BUILD" == "true" ]] && up_args+=(--build)
         if ! docker compose "${compose_args[@]}" "${up_args[@]}"; then
-          diagnostics
-          exit 2
+          fail_readiness "docker compose up failed"
         fi
 
-        if [[ -z "$SERVICES" ]]; then
-          services="$(docker compose "${compose_args[@]}" config --services | tr '\n' ' ')"
-        else
-          services="$(tr ',' ' ' <<< "$SERVICES")"
-        fi
-        services="$(xargs <<< "$services")"
-
-        mapfile -t wait_urls < <(printf '%s\n' "$WAIT_URLS" | sed '/^[[:space:]]*$/d')
-        if [[ -z "$services" && ${#wait_urls[@]} -eq 0 ]]; then
-          echo "No Compose services or wait URLs discovered" >&2
-          diagnostics
-          exit 2
-        fi
-
-        deadline=$((SECONDS + TIMEOUT_SECONDS))
+        deadline=$((SECONDS + timeout))
         while true; do
           all_ready=true
 
-          for service in $services; do
-            mapfile -t containers < <(docker compose "${compose_args[@]}" ps --quiet "$service")
+          for service in "${active_services[@]}"; do
+            mapfile -t containers < <(docker compose "${compose_args[@]}" ps --all --quiet "$service")
             if (( ${#containers[@]} == 0 )); then
               all_ready=false
-              break
+              continue
             fi
             for container in "${containers[@]}"; do
-              running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)"
+              running=$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)
               if [[ "$running" != "true" ]]; then
                 all_ready=false
-                break 2
+                continue
               fi
               if [[ "$WAIT_FOR_HEALTH" == "true" ]]; then
-                health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || true)"
-                if [[ "$health" != "no-healthcheck" && "$health" != "healthy" ]]; then
-                  all_ready=false
-                  break 2
-                fi
+                health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || true)
+                [[ "$health" == "healthy" || "$health" == "no-healthcheck" ]] || all_ready=false
               fi
             done
           done
 
-          if [[ "$all_ready" == "true" ]]; then
-            for url in "${wait_urls[@]}"; do
-              if ! curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then
-                all_ready=false
-                break
-              fi
-            done
-          fi
-
-          if [[ "$all_ready" == "true" ]]; then
-            echo "Compose services are ready"
-            exit 0
-          fi
-
-          if (( SECONDS >= deadline )); then
-            echo "Timed out waiting for Compose readiness" >&2
-            diagnostics
-            if [[ "$DOWN_ON_TIMEOUT" == "true" ]]; then
-              docker compose "${compose_args[@]}" down
+          for service in "${completed_services[@]}"; do
+            mapfile -t containers < <(docker compose "${compose_args[@]}" ps --all --quiet "$service")
+            if (( ${#containers[@]} == 0 )); then
+              all_ready=false
+              continue
             fi
-            exit 2
-          fi
+            for container in "${containers[@]}"; do
+              status=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)
+              exit_code=$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || true)
+              if [[ "$status" == "exited" && "$exit_code" != "0" ]]; then
+                fail_readiness "Completed service failed: $service (exit $exit_code)"
+              fi
+              [[ "$status" == "exited" && "$exit_code" == "0" ]] || all_ready=false
+            done
+          done
+
+          for url in "${wait_urls[@]}"; do
+            remaining=$((deadline - SECONDS))
+            (( remaining > 0 )) || fail_readiness "Timed out waiting for Compose readiness after ${timeout}s"
+            request_timeout=$remaining
+            (( request_timeout > 5 )) && request_timeout=5
+            curl --fail --silent --show-error --location --max-time "$request_timeout" -- "$url" >/dev/null || all_ready=false
+          done
+
+          [[ "$all_ready" == "true" ]] && break
+          (( SECONDS >= deadline )) && fail_readiness "Timed out waiting for Compose readiness after ${timeout}s"
           sleep 2
         done

@@ -14,6 +14,18 @@ inputs:
     description: One of auto, pip, uv, or poetry.
     required: false
     default: auto
+  requirements-file:
+    description: Requirements file relative to working-directory; auto-detected when empty.
+    required: false
+    default: ""
+  uv-version:
+    description: Exact uv package version installed when uv is selected.
+    required: false
+    default: "0.8.15"
+  poetry-version:
+    description: Exact Poetry package version installed when Poetry is selected.
+    required: false
+    default: "2.1.4"
   install-command:
     description: Optional trusted shell command that replaces default dependency installation.
     required: false
@@ -30,6 +42,32 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        POETRY_VERSION: ${{ inputs.poetry-version }}
+        UV_VERSION: ${{ inputs.uv-version }}
+      run: |
+        set -euo pipefail
+        for input in "cache-dependencies=$CACHE_DEPENDENCIES" "install-dependencies=$INSTALL_DEPENDENCIES"; do
+          name=${input%%=*}
+          value=${input#*=}
+          if [[ "$value" != "true" && "$value" != "false" ]]; then
+            echo "$name must be 'true' or 'false': $value" >&2
+            exit 2
+          fi
+        done
+        case "$PACKAGE_MANAGER" in
+          auto|pip|uv|poetry) ;;
+          *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
+        esac
+        if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" ]]; then
+          echo "uv-version and poetry-version must be exact non-empty versions" >&2
+          exit 2
+        fi
     - name: Set up Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
@@ -51,12 +89,15 @@ runs:
       env:
         INSTALL_COMMAND: ${{ inputs.install-command }}
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        POETRY_VERSION: ${{ inputs.poetry-version }}
+        REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
+        UV_VERSION: ${{ inputs.uv-version }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
         cd "$WORKING_DIRECTORY"
 
-        if [[ -n "${INSTALL_COMMAND}" ]]; then
+        if [[ -n "$INSTALL_COMMAND" ]]; then
           bash -euo pipefail -c "$INSTALL_COMMAND"
           exit 0
         fi
@@ -74,37 +115,38 @@ runs:
 
         case "$manager" in
           uv)
-            python -m pip install uv
+            python -m pip install "uv==$UV_VERSION"
             uv sync --frozen
             ;;
           poetry)
-            python -m pip install poetry
+            python -m pip install "poetry==$POETRY_VERSION"
             poetry install --no-interaction
             ;;
           pip)
-            if [[ -f requirements.txt ]]; then
-              python -m pip install -r requirements.txt
+            requirements="$REQUIREMENTS_FILE"
+            if [[ -n "$requirements" && ! -f "$requirements" ]]; then
+              echo "requirements-file does not exist: $requirements" >&2
+              exit 2
+            fi
+            if [[ -z "$requirements" && -f requirements.txt ]]; then
+              requirements=requirements.txt
+            elif [[ -z "$requirements" ]]; then
+              shopt -s nullglob
+              candidates=(requirements*.txt)
+              shopt -u nullglob
+              if (( ${#candidates[@]} == 1 )); then
+                requirements="${candidates[0]}"
+              elif (( ${#candidates[@]} > 1 )); then
+                echo "Multiple requirements files found; set requirements-file explicitly" >&2
+                exit 2
+              fi
+            fi
+            if [[ -n "$requirements" ]]; then
+              python -m pip install -r "$requirements"
             elif [[ -f pyproject.toml ]]; then
               python -m pip install -e .
             else
               echo "No Python dependency manifest found; continuing without install"
             fi
             ;;
-          *)
-            echo "Unsupported package-manager: $manager" >&2
-            exit 2
-            ;;
         esac
-    - name: Validate boolean inputs
-      shell: bash
-      env:
-        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
-        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
-      run: |
-        set -euo pipefail
-        for value in "$CACHE_DEPENDENCIES" "$INSTALL_DEPENDENCIES"; do
-          if [[ "$value" != "true" && "$value" != "false" ]]; then
-            echo "Boolean inputs must be 'true' or 'false': $value" >&2
-            exit 2
-          fi
-        done

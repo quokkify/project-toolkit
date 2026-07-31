@@ -28,7 +28,7 @@ Toolkit consumers can call composite actions directly for repeated setup and com
 
 Use examples in [`examples/setup-actions.yml`](../examples/setup-actions.yml). The action inputs are versioned and can be called with their defaults where repository conventions already match the toolkit assumptions. Custom install commands are trusted caller configuration and must never interpolate untrusted pull-request data.
 
-Setup actions install dependencies by default; set `install-dependencies: "false"` when only the language runtime and cache are needed. `compose-up` accepts newline-separated `compose-files` and `wait-urls`; it requires no write permissions by itself. Callers remain responsible for granting only the permissions required by their surrounding job and for running `docker compose down` during normal cleanup when needed.
+The Python and Node actions install dependencies by default; set `install-dependencies: "false"` when only the language runtime and cache are needed. The Java/Gradle action prepares Java, Gradle caches, and a workspace-relative wrapper command; callers run their own Gradle dependency/build command. `compose-up` is Linux-only, accepts newline-separated `compose-files` and `wait-urls`, and supports explicit `completed-services` for successful one-shot containers. It requires no write permissions by itself. Callers remain responsible for granting only the permissions required by their surrounding job and for running `docker compose down` during normal cleanup when needed.
 
 ## Docker secrets
 

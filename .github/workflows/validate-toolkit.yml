@@ -1,0 +1,69 @@
+name: Validate toolkit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.11.1"
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install pinned validation dependencies
+        run: python -m pip install PyYAML==6.0.2 copier==9.10.2
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 actionlint "$HOME/.local/bin/actionlint"
+      - name: Run repository validation
+        run: python scripts/validate.py
+      - name: Validate Renovate preset
+        run: npx --yes --package renovate@44.4.6 renovate-config-validator --strict renovate/default.json5
+      - name: Run actionlint on toolkit and examples
+        run: actionlint .github/workflows/*.yml examples/*.yml
+      - name: Check shell snippets
+        run: |
+          mapfile -t files < <(find . -type f -name '*.sh' -print)
+          if (( ${#files[@]} )); then
+            shellcheck "${files[@]}"
+          else
+            echo "No shell scripts present; shellcheck not applicable"
+          fi
+      - name: Check diff whitespace
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff-tree --check --root "$HEAD_SHA"
+          else
+            git diff --check "$BASE_SHA..$HEAD_SHA"
+          fi

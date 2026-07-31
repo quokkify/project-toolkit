@@ -1,0 +1,135 @@
+name: Java CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Project directory relative to the repository root.
+        type: string
+        default: .
+      java-version:
+        type: string
+        default: "21"
+      distribution:
+        description: JDK distribution accepted by actions/setup-java.
+        type: string
+        default: temurin
+      build-tool:
+        description: One of auto, gradle, or maven.
+        type: string
+        default: auto
+      install-command:
+        description: Optional trusted setup command run before checks.
+        type: string
+        default: ""
+      lint-command:
+        description: Optional trusted check/lint command. Auto-selects a tool command when empty.
+        type: string
+        default: ""
+      test-command:
+        description: Optional trusted test command. Auto-selects a tool command when empty.
+        type: string
+        default: ""
+      build-command:
+        description: Optional trusted build command. Auto-selects a tool command when empty.
+        type: string
+        default: ""
+      run-lint:
+        type: boolean
+        default: true
+      run-tests:
+        type: boolean
+        default: true
+      run-build:
+        type: boolean
+        default: true
+      cache-dependencies:
+        type: boolean
+        default: true
+      timeout-minutes:
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.distribution }}
+      - name: Cache Java dependencies
+        if: ${{ inputs.cache-dependencies }}
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.m2/repository
+          key: java-${{ runner.os }}-${{ inputs.java-version }}-${{ hashFiles(format('{0}/**/gradle-wrapper.properties', inputs.working-directory), format('{0}/**/*.gradle*', inputs.working-directory), format('{0}/**/pom.xml', inputs.working-directory)) }}
+          restore-keys: |
+            java-${{ runner.os }}-${{ inputs.java-version }}-
+      - name: Resolve build tool and commands
+        id: commands
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          LINT_COMMAND: ${{ inputs.lint-command }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: |
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          case "$tool" in
+            gradle)
+              if [[ -f ./gradlew ]]; then chmod +x ./gradlew; runner=./gradlew; else runner=gradle; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test"
+              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner build"
+              ;;
+            maven)
+              if [[ -f ./mvnw ]]; then chmod +x ./mvnw; runner=./mvnw; else runner=mvn; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner --batch-mode --no-transfer-progress validate"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner --batch-mode --no-transfer-progress test"
+              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner --batch-mode --no-transfer-progress package -DskipTests"
+              ;;
+            *) echo "Unsupported build-tool: $tool" >&2; exit 2 ;;
+          esac
+          printf 'lint=%s\ntest=%s\nbuild=%s\n' "$LINT_COMMAND" "$TEST_COMMAND" "$BUILD_COMMAND" >> "$GITHUB_OUTPUT"
+      - name: Project setup
+        if: ${{ inputs.install-command != '' }}
+        env:
+          COMMAND: ${{ inputs.install-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Lint or check
+        if: ${{ inputs.run-lint }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.lint }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.test }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Build
+        if: ${{ inputs.run-build }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.build }}
+        run: bash -euo pipefail -c "$COMMAND"

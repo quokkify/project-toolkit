@@ -1,0 +1,12 @@
+project_name: fixture-polyglot
+toolkit_version: v1.0.0
+components:
+  - type: python
+    path: backend
+  - type: node
+    path: frontend
+  - type: java
+    path: worker
+docker: true
+release_please: true
+renovate: true

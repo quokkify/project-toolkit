@@ -1,0 +1,70 @@
+name: Polyglot CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      node: ${{ steps.filter.outputs.node }}
+      java: ${{ steps.filter.outputs.java }}
+      integration: ${{ steps.filter.outputs.integration }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            python:
+              - 'backend/**'
+              - '.github/workflows/**'
+              - 'Dockerfile'
+            node:
+              - 'frontend/**'
+              - '.github/workflows/**'
+              - 'Dockerfile'
+            java:
+              - 'worker/**'
+              - '.github/workflows/**'
+              - 'Dockerfile'
+            integration:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'worker/**'
+              - 'Dockerfile'
+              - 'docker/**'
+              - '.github/workflows/**'
+  python:
+    needs: changes
+    if: ${{ needs.changes.outputs.python == 'true' }}
+    uses: ylazakovich/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    with:
+      working-directory: backend
+  node:
+    needs: changes
+    if: ${{ needs.changes.outputs.node == 'true' }}
+    uses: ylazakovich/project-toolkit/.github/workflows/node-ci.yml@v1.0.0
+    with:
+      working-directory: frontend
+  java:
+    needs: changes
+    if: ${{ needs.changes.outputs.java == 'true' }}
+    uses: ylazakovich/project-toolkit/.github/workflows/java-ci.yml@v1.0.0
+    with:
+      working-directory: worker
+  integration:
+    needs: [changes, python, node, java]
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.integration == 'true' && (needs.python.result == 'success' || needs.python.result == 'skipped') && (needs.node.result == 'success' || needs.node.result == 'skipped') && (needs.java.result == 'success' || needs.java.result == 'skipped') }}
+    uses: ylazakovich/project-toolkit/.github/workflows/docker-build.yml@v1.0.0
+    with:
+      context: .
+      push: false

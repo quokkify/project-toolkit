@@ -1,0 +1,67 @@
+name: Release Please
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "single for one package/version; manifest for independently versioned components."
+        type: string
+        default: single
+      release-type:
+        description: Release Please release type for single mode.
+        type: string
+        default: simple
+      path:
+        description: Package path for single mode.
+        type: string
+        default: .
+      config-file:
+        description: Release Please manifest-mode config path.
+        type: string
+        default: .github/release-please/config.json
+      manifest-file:
+        description: Release Please manifest path.
+        type: string
+        default: .github/release-please/manifest.json
+      target-branch:
+        description: Branch Release Please should target; empty uses repository default.
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate mode
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          [[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }
+  single:
+    if: ${{ inputs.mode == 'single' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Release Please for one package
+        uses: googleapis/release-please-action@c2a5a2bd6a758a0937f1ddb1e8950609867ed15c # v4.3.0
+        with:
+          release-type: ${{ inputs.release-type }}
+          path: ${{ inputs.path }}
+          target-branch: ${{ inputs.target-branch }}
+  manifest:
+    if: ${{ inputs.mode == 'manifest' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Release Please in manifest mode
+        uses: googleapis/release-please-action@c2a5a2bd6a758a0937f1ddb1e8950609867ed15c # v4.3.0
+        with:
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
+          target-branch: ${{ inputs.target-branch }}

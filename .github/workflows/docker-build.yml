@@ -1,0 +1,111 @@
+name: Docker build
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        type: string
+        default: .
+      dockerfile:
+        type: string
+        default: Dockerfile
+      target:
+        type: string
+        default: ""
+      platforms:
+        type: string
+        default: linux/amd64
+      build-args:
+        description: Non-secret newline-delimited Docker build arguments. Never put secrets here.
+        type: string
+        default: ""
+      push:
+        description: Push the image after building. Disabled by default.
+        type: boolean
+        default: false
+      registry:
+        type: string
+        default: ghcr.io
+      image-name:
+        description: Image name relative to registry, for example owner/app; required when push is enabled.
+        type: string
+        default: ""
+      tags:
+        description: Newline-delimited full tags. When empty, registry/image-name:sha is used.
+        type: string
+        default: ""
+      provenance:
+        type: boolean
+        default: true
+      sbom:
+        type: boolean
+        default: true
+      timeout-minutes:
+        type: number
+        default: 30
+    secrets:
+      registry-username:
+        description: Registry username; required only when push is true.
+        required: false
+      registry-password:
+        description: Registry password or token; required only when push is true.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate push configuration
+        if: ${{ inputs.push }}
+        env:
+          IMAGE_NAME: ${{ inputs.image-name }}
+          EXPLICIT_TAGS: ${{ inputs.tags }}
+          REGISTRY_USERNAME: ${{ secrets.registry-username }}
+          REGISTRY_PASSWORD: ${{ secrets.registry-password }}
+        run: |
+          [[ -n "$IMAGE_NAME" || -n "$EXPLICIT_TAGS" ]] || { echo "image-name or tags is required when push=true" >&2; exit 2; }
+          [[ -n "$REGISTRY_USERNAME" ]] || { echo "registry-username secret is required when push=true" >&2; exit 2; }
+          [[ -n "$REGISTRY_PASSWORD" ]] || { echo "registry-password secret is required when push=true" >&2; exit 2; }
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Log in to registry
+        if: ${{ inputs.push }}
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+      - name: Resolve image tags
+        id: image
+        env:
+          EXPLICIT_TAGS: ${{ inputs.tags }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          tags="$EXPLICIT_TAGS"
+          if [[ -z "$tags" && -n "$IMAGE_NAME" ]]; then
+            tags="${REGISTRY}/${IMAGE_NAME}:sha-${GITHUB_SHA::12}"
+          fi
+          printf 'tags<<EOF\n%s\nEOF\n' "$tags" >> "$GITHUB_OUTPUT"
+      - name: Build image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build-args }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: ${{ inputs.push && inputs.provenance }}
+          sbom: ${{ inputs.push && inputs.sbom }}

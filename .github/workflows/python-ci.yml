@@ -1,0 +1,142 @@
+name: Python CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Project directory relative to the repository root.
+        type: string
+        default: .
+      python-version:
+        description: Python version accepted by actions/setup-python.
+        type: string
+        default: "3.12"
+      package-manager:
+        description: One of auto, pip, uv, or poetry.
+        type: string
+        default: auto
+      install-command:
+        description: Optional trusted shell command overriding dependency installation.
+        type: string
+        default: ""
+      lint-command:
+        description: Trusted shell command used for linting.
+        type: string
+        default: "python -m compileall -q ."
+      test-command:
+        description: Trusted shell command used for tests.
+        type: string
+        default: "python -m unittest discover"
+      build-command:
+        description: Optional trusted shell command used to build the project.
+        type: string
+        default: ""
+      run-lint:
+        description: Run the lint step.
+        type: boolean
+        default: true
+      run-tests:
+        description: Run the test step.
+        type: boolean
+        default: true
+      run-build:
+        description: Run the build step when build-command is non-empty.
+        type: boolean
+        default: false
+      cache-dependencies:
+        description: Cache common Python package-manager directories.
+        type: boolean
+        default: true
+      timeout-minutes:
+        description: Job timeout in minutes.
+        type: number
+        default: 20
+      upload-test-artifacts:
+        description: Upload test artifacts. Disabled unless explicitly enabled.
+        type: boolean
+        default: false
+      test-artifact-path:
+        description: Path or glob to upload when upload-test-artifacts is enabled.
+        type: string
+        default: test-results
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Cache Python dependencies
+        if: ${{ inputs.cache-dependencies }}
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/uv
+            ~/.cache/pypoetry
+          key: python-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/**/uv.lock', inputs.working-directory), format('{0}/**/poetry.lock', inputs.working-directory), format('{0}/**/requirements*.txt', inputs.working-directory), format('{0}/**/pyproject.toml', inputs.working-directory)) }}
+          restore-keys: |
+            python-${{ runner.os }}-${{ inputs.python-version }}-
+      - name: Install dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [[ -n "$INSTALL_COMMAND" ]]; then
+            bash -euo pipefail -c "$INSTALL_COMMAND"
+            exit
+          fi
+          manager="$PACKAGE_MANAGER"
+          if [[ "$manager" == auto ]]; then
+            if [[ -f uv.lock ]]; then manager=uv
+            elif [[ -f poetry.lock ]]; then manager=poetry
+            else manager=pip
+            fi
+          fi
+          case "$manager" in
+            uv) python -m pip install uv && uv sync --frozen ;;
+            poetry) python -m pip install poetry && poetry install --no-interaction ;;
+            pip)
+              if [[ -f requirements.txt ]]; then python -m pip install -r requirements.txt
+              elif [[ -f pyproject.toml ]]; then python -m pip install -e .
+              else echo "No Python dependency manifest found; continuing without install"
+              fi
+              ;;
+            *) echo "Unsupported package-manager: $manager" >&2; exit 2 ;;
+          esac
+      - name: Lint
+        if: ${{ inputs.run-lint }}
+        env:
+          COMMAND: ${{ inputs.lint-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        env:
+          COMMAND: ${{ inputs.test-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Build
+        if: ${{ inputs.run-build && inputs.build-command != '' }}
+        env:
+          COMMAND: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Upload test artifacts
+        if: ${{ always() && inputs.upload-test-artifacts }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-test-artifacts
+          path: ${{ format('{0}/{1}', inputs.working-directory, inputs.test-artifact-path) }}
+          if-no-files-found: warn

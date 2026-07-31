@@ -96,17 +96,27 @@ runs:
           local name="$1"
           local value="$2"
           local max="$3"
+          local normalized="$value"
 
           [[ "$value" =~ ^[0-9]+$ ]] || fail "$name must be a positive integer from 1 through $max"
-          (( 10#$value > 0 && 10#$value <= 10#$max )) || fail "$name must be an integer from 1 through $max"
+          while [[ ${#normalized} -gt 1 && "${normalized:0:1}" == "0" ]]; do
+            normalized="${normalized:1}"
+          done
+          [[ "$normalized" != "0" ]] || fail "$name must be an integer from 1 through $max"
+          if (( ${#normalized} > ${#max} )) || { (( ${#normalized} == ${#max} )) && [[ "$normalized" > "$max" ]]; }; then
+            fail "$name must be an integer from 1 through $max"
+          fi
         }
 
         validate_relative_path() {
           local value="$1"
           local description="$2"
 
-          if [[ -z "$value" || "$value" == /* || "$value" == ~* || "$value" == *:* || "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" == *$'\t'* || "$value" == *$' '* ]]; then
-            fail "$description must be a non-empty relative path without whitespace, absolute forms, or drive letters"
+          if [[ "$value" =~ [[:cntrl:]] ]]; then
+            fail "$description must be a non-empty relative path without whitespace or control characters, absolute forms, or drive letters"
+          fi
+          if [[ -z "$value" || "$value" == /* || "$value" == ~* || "$value" == *:* || "$value" == *$' '* ]]; then
+            fail "$description must be a non-empty relative path without whitespace or control characters, absolute forms, or drive letters"
           fi
           [[ "$value" == "." ]] && return 0
           case "/$value/" in
@@ -196,13 +206,13 @@ runs:
         }
 
         compose_services=""
-        if [[ -n "$SERVICES" ]]; then
-          service_names=()
-          for source in "$SERVICES" "$COMPLETED_SERVICES"; do
-            IFS=$' \t\r\n' read -r -d '' -a source_tokens < <(printf '%s\0' "${source//,/ }")
-            for token in "${source_tokens[@]}"; do
-              [[ -z "$token" ]] && continue
-              validate_service_name "$token"
+        service_names=()
+        for source in "$SERVICES" "$COMPLETED_SERVICES"; do
+          IFS=$' \t\r\n' read -r -d '' -a source_tokens < <(printf '%s\0' "${source//,/ }")
+          for token in "${source_tokens[@]}"; do
+            [[ -z "$token" ]] && continue
+            validate_service_name "$token"
+            if [[ -n "$SERVICES" ]]; then
               already_seen=false
               for existing in "${service_names[@]}"; do
                 if [[ "$existing" == "$token" ]]; then
@@ -211,8 +221,10 @@ runs:
                 fi
               done
               [[ "$already_seen" == "true" ]] || service_names+=("$token")
-            done
+            fi
           done
+        done
+        if [[ -n "$SERVICES" ]]; then
           compose_services="${service_names[*]}"
         fi
 

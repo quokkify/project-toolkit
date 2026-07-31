@@ -188,6 +188,12 @@ class ComposeActionTests(unittest.TestCase):
         ), (
             {"WORKING_DIRECTORY": "deploy\tother"}, "without whitespace"
         ), (
+            {"WORKING_DIRECTORY": "deploy\vother"}, "control characters"
+        ), (
+            {"WORKING_DIRECTORY": "deploy\fother"}, "control characters"
+        ), (
+            {"WORKING_DIRECTORY": "deploy\x1bother"}, "control characters"
+        ), (
             {"COMPOSE_FILES": "docker-compose.yml\r"}, "without whitespace"
         ), (
             {"COMPOSE_FILES": "\tdocker-compose.yml"}, "without whitespace"
@@ -207,6 +213,18 @@ class ComposeActionTests(unittest.TestCase):
         result, _ = self.run_validation(TIMEOUT_SECONDS="0")
         self.assertEqual(result.returncode, 2)
         self.assertIn("1 through 86400", result.stderr)
+        for name, value in (
+            ("TIMEOUT_SECONDS", "18446744073709551617"),
+            ("URL_TIMEOUT_SECONDS", "18446744073709551617"),
+            ("TIMEOUT_SECONDS", "86401"),
+            ("URL_TIMEOUT_SECONDS", "301"),
+        ):
+            result, env_file = self.run_validation(**{name: value})
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(env_file, "")
+        result, env_file = self.run_validation(TIMEOUT_SECONDS="00001", URL_TIMEOUT_SECONDS="00002")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_TIMEOUT_SECONDS=00001", env_file)
 
     def test_default_inputs_pass_validation(self) -> None:
         result, env_file = self.run_validation(
@@ -227,6 +245,11 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
         for unsafe in ("web,*", "web ../foreign", "web $(id)"):
             result, env_file = self.run_validation(SERVICES=unsafe, COMPLETED_SERVICES="")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("service names must match", result.stderr)
+            self.assertEqual(env_file, "")
+        for unsafe in ("*", "../foreign", "$(id)", "/abs", "--flag"):
+            result, env_file = self.run_validation(SERVICES="", COMPLETED_SERVICES=unsafe)
             self.assertEqual(result.returncode, 2)
             self.assertIn("service names must match", result.stderr)
             self.assertEqual(env_file, "")

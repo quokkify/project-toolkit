@@ -1,0 +1,167 @@
+name: Compose up with readiness
+description: Start Docker Compose services and wait for container and HTTP readiness.
+
+inputs:
+  compose-files:
+    description: Newline-separated Compose files relative to working-directory.
+    required: false
+    default: docker-compose.yml
+  working-directory:
+    description: Directory containing the Compose files.
+    required: false
+    default: .
+  services:
+    description: Optional comma- or space-separated services to wait on. Defaults to all configured services.
+    required: false
+    default: ""
+  build:
+    description: Build images before starting services.
+    required: false
+    default: "false"
+  wait-for-health:
+    description: Require healthy state when a container defines a health check.
+    required: false
+    default: "true"
+  wait-urls:
+    description: Optional newline-separated HTTP(S) URLs that must return a successful response.
+    required: false
+    default: ""
+  timeout-seconds:
+    description: Maximum readiness wait in seconds; must be a positive integer.
+    required: false
+    default: "300"
+  show-logs-on-failure:
+    description: Print the last 100 Compose log lines when startup or readiness fails.
+    required: false
+    default: "true"
+  down-on-timeout:
+    description: Run Docker Compose down after a readiness timeout.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Start Compose and wait for readiness
+      shell: bash
+      env:
+        BUILD: ${{ inputs.build }}
+        COMPOSE_FILES: ${{ inputs.compose-files }}
+        DOWN_ON_TIMEOUT: ${{ inputs.down-on-timeout }}
+        SERVICES: ${{ inputs.services }}
+        SHOW_LOGS_ON_FAILURE: ${{ inputs.show-logs-on-failure }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        WAIT_FOR_HEALTH: ${{ inputs.wait-for-health }}
+        WAIT_URLS: ${{ inputs.wait-urls }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+
+        require_boolean() {
+          local name="$1" value="$2"
+          if [[ "$value" != "true" && "$value" != "false" ]]; then
+            echo "$name must be 'true' or 'false': $value" >&2
+            exit 2
+          fi
+        }
+
+        require_boolean build "$BUILD"
+        require_boolean wait-for-health "$WAIT_FOR_HEALTH"
+        require_boolean show-logs-on-failure "$SHOW_LOGS_ON_FAILURE"
+        require_boolean down-on-timeout "$DOWN_ON_TIMEOUT"
+        if [[ ! "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "timeout-seconds must be a positive integer: $TIMEOUT_SECONDS" >&2
+          exit 2
+        fi
+
+        compose_args=()
+        while IFS= read -r file; do
+          [[ -n "$file" ]] || continue
+          compose_args+=(--file "$file")
+        done <<< "$COMPOSE_FILES"
+        if (( ${#compose_args[@]} == 0 )); then
+          echo "compose-files must contain at least one path" >&2
+          exit 2
+        fi
+
+        diagnostics() {
+          docker compose "${compose_args[@]}" ps || true
+          if [[ "$SHOW_LOGS_ON_FAILURE" == "true" ]]; then
+            docker compose "${compose_args[@]}" logs --no-color --tail 100 || true
+          fi
+        }
+
+        up_args=(up --detach)
+        if [[ "$BUILD" == "true" ]]; then
+          up_args+=(--build)
+        fi
+        if ! docker compose "${compose_args[@]}" "${up_args[@]}"; then
+          diagnostics
+          exit 2
+        fi
+
+        if [[ -z "$SERVICES" ]]; then
+          services="$(docker compose "${compose_args[@]}" config --services | tr '\n' ' ')"
+        else
+          services="$(tr ',' ' ' <<< "$SERVICES")"
+        fi
+        services="$(xargs <<< "$services")"
+
+        mapfile -t wait_urls < <(printf '%s\n' "$WAIT_URLS" | sed '/^[[:space:]]*$/d')
+        if [[ -z "$services" && ${#wait_urls[@]} -eq 0 ]]; then
+          echo "No Compose services or wait URLs discovered" >&2
+          diagnostics
+          exit 2
+        fi
+
+        deadline=$((SECONDS + TIMEOUT_SECONDS))
+        while true; do
+          all_ready=true
+
+          for service in $services; do
+            mapfile -t containers < <(docker compose "${compose_args[@]}" ps --quiet "$service")
+            if (( ${#containers[@]} == 0 )); then
+              all_ready=false
+              break
+            fi
+            for container in "${containers[@]}"; do
+              running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)"
+              if [[ "$running" != "true" ]]; then
+                all_ready=false
+                break 2
+              fi
+              if [[ "$WAIT_FOR_HEALTH" == "true" ]]; then
+                health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container" 2>/dev/null || true)"
+                if [[ "$health" != "no-healthcheck" && "$health" != "healthy" ]]; then
+                  all_ready=false
+                  break 2
+                fi
+              fi
+            done
+          done
+
+          if [[ "$all_ready" == "true" ]]; then
+            for url in "${wait_urls[@]}"; do
+              if ! curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then
+                all_ready=false
+                break
+              fi
+            done
+          fi
+
+          if [[ "$all_ready" == "true" ]]; then
+            echo "Compose services are ready"
+            exit 0
+          fi
+
+          if (( SECONDS >= deadline )); then
+            echo "Timed out waiting for Compose readiness" >&2
+            diagnostics
+            if [[ "$DOWN_ON_TIMEOUT" == "true" ]]; then
+              docker compose "${compose_args[@]}" down
+            fi
+            exit 2
+          fi
+          sleep 2
+        done

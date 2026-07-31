@@ -17,6 +17,19 @@ jobs:
 
 A polyglot repository calls Python, Node.js, and Java workflows as separate jobs. See [`examples/polyglot-ci.yml`](../examples/polyglot-ci.yml) for path filtering and an integration job that treats unrelated skipped checks as acceptable but requires every selected component check to succeed.
 
+## Reusable composite actions
+
+Toolkit consumers can call composite actions directly for repeated setup and compose orchestration:
+
+- `actions/setup-python/action.yml`
+- `actions/setup-node/action.yml`
+- `actions/setup-java-gradle/action.yml`
+- `actions/compose-up/action.yml`
+
+Use examples in [`examples/setup-actions.yml`](../examples/setup-actions.yml). The action inputs are versioned and can be called with their defaults where repository conventions already match the toolkit assumptions. Custom install commands are trusted caller configuration and must never interpolate untrusted pull-request data.
+
+Setup actions install dependencies by default; set `install-dependencies: "false"` when only the language runtime and cache are needed. `compose-up` accepts newline-separated `compose-files` and `wait-urls`; it requires no write permissions by itself. Callers remain responsible for granting only the permissions required by their surrounding job and for running `docker compose down` during normal cleanup when needed.
+
 ## Docker secrets
 
 Docker push is off by default. When `push: true`, pass both declared secrets explicitly:

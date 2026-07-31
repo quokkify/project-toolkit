@@ -41,6 +41,99 @@ for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         ERRORS.append(f"{path.relative_to(ROOT)}: YAML: {exc}")
 
+
+BOOLEAN_INPUTS = {
+    "build",
+    "cache-dependencies",
+    "down-on-timeout",
+    "install-dependencies",
+    "show-logs-on-failure",
+    "wait-for-health",
+}
+EXPECTED_ACTIONS = {"compose-up", "setup-java-gradle", "setup-node", "setup-python"}
+
+
+def validate_action_metadata(data: object, label: str) -> list[str]:
+    """Return fail-closed metadata errors for one composite action."""
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return [f"{label}: action metadata must be a mapping"]
+    if not data.get("name") or not data.get("description"):
+        errors.append(f"{label}: action requires name and description")
+    for forbidden in ("permissions", "secrets"):
+        if forbidden in data:
+            errors.append(f"{label}: composite action must not declare {forbidden}")
+
+    inputs = data.get("inputs", {})
+    if not isinstance(inputs, dict):
+        errors.append(f"{label}: inputs must be a mapping")
+        inputs = {}
+    for name, spec in inputs.items():
+        if not isinstance(spec, dict) or not spec.get("description"):
+            errors.append(f"{label}: input {name} requires a description")
+            continue
+        if name in BOOLEAN_INPUTS and spec.get("default") not in ("true", "false"):
+            errors.append(f"{label}: boolean input {name} requires a true/false string default")
+
+    runs = data.get("runs", {})
+    if not isinstance(runs, dict) or runs.get("using") != "composite":
+        errors.append(f"{label}: action must use composite runner")
+        return errors
+    steps = runs.get("steps")
+    if not isinstance(steps, list) or not steps:
+        errors.append(f"{label}: action requires non-empty runs.steps")
+        return errors
+    for index, step in enumerate(steps, 1):
+        if not isinstance(step, dict) or ("uses" in step) == ("run" in step):
+            errors.append(f"{label}: step {index} must declare exactly one of uses or run")
+        elif "run" in step and not step.get("shell"):
+            errors.append(f"{label}: run step {index} requires an explicit shell")
+    return errors
+
+
+action_paths = sorted((ROOT / "actions").glob("*/action.yml"))
+check(
+    {path.parent.name for path in action_paths} == EXPECTED_ACTIONS,
+    "actions/: expected exactly the four documented pilot composite actions",
+)
+for action_path in action_paths:
+    data = yaml.safe_load(action_path.read_text())
+    label = str(action_path.relative_to(ROOT))
+    ERRORS.extend(validate_action_metadata(data, label))
+    if isinstance(data, dict):
+        steps = data.get("runs", {}).get("steps", [])
+        if isinstance(steps, list):
+            for index, step in enumerate(steps, 1):
+                if isinstance(step, dict) and isinstance(step.get("run"), str):
+                    syntax = subprocess.run(
+                        ["bash", "-n"],
+                        input=step["run"],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    check(
+                        syntax.returncode == 0,
+                        f"{label}: run step {index} has invalid bash syntax: {syntax.stderr.strip()}",
+                    )
+
+# Negative contract probes prove that permission/secret leakage, malformed booleans,
+# and ambiguous run steps are rejected by the validator itself.
+negative_probe = {
+    "name": "invalid",
+    "description": "invalid",
+    "permissions": {"contents": "write"},
+    "secrets": {"token": {}},
+    "inputs": {"build": {"description": "bad", "default": "yes"}},
+    "runs": {"using": "composite", "steps": [{"run": "true"}]},
+}
+negative_errors = validate_action_metadata(negative_probe, "negative-probe")
+for expected in ("permissions", "secrets", "true/false", "explicit shell"):
+    check(
+        any(expected in error for error in negative_errors),
+        f"action validator negative probe did not reject {expected}",
+    )
+
 for path in sorted(ROOT.rglob("*.json")):
     if "templates/project/template" in path.as_posix():
         continue
@@ -62,10 +155,13 @@ for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
             continue
         target, sep, ref = use.rpartition("@")
         check(bool(sep), f"{path.relative_to(ROOT)}: action without ref: {use}")
-        if target.startswith("ylazakovich/project-toolkit/.github/workflows/"):
+        is_toolkit_reference = target.startswith(
+            "ylazakovich/project-toolkit/.github/workflows/"
+        ) or target.startswith("ylazakovich/project-toolkit/actions/")
+        if is_toolkit_reference:
             check(
                 bool(re.fullmatch(r"v\d+\.\d+\.\d+", ref)),
-                f"{path.relative_to(ROOT)}: toolkit workflow must use exact SemVer: {use}",
+                f"{path.relative_to(ROOT)}: toolkit action/workflow must use exact SemVer: {use}",
             )
         else:
             check(
@@ -136,6 +232,18 @@ if ERRORS:
 assert copier is not None and actionlint is not None
 with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     tmp_path = Path(tmp)
+    template_source = shutil.copytree(
+        ROOT,
+        tmp_path / "template-source",
+        ignore=shutil.ignore_patterns(
+            ".git", ".worktrees", ".ruff_cache", "__pycache__", "*.pyc"
+        ),
+    )
+    run(["git", "init", "-q"], template_source)
+    run(["git", "config", "user.email", "fixture@example.invalid"], template_source)
+    run(["git", "config", "user.name", "Fixture"], template_source)
+    run(["git", "add", "."], template_source)
+    run(["git", "commit", "-qm", "candidate template"], template_source)
     for scenario in ("python", "node", "java", "polyglot"):
         dest = tmp_path / scenario
         run(
@@ -147,8 +255,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "--vcs-ref",
                 "HEAD",
                 "--data-file",
-                str(ROOT / f"tests/scenarios/{scenario}.yml"),
-                str(ROOT),
+                str(template_source / f"tests/scenarios/{scenario}.yml"),
+                str(template_source),
                 str(dest),
             ]
         )
@@ -182,6 +290,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 ["git", "status", "--porcelain"], cwd=dest, text=True
             )
             check(status == "", f"copier update was not idempotent: {status}")
+
+run([sys.executable, "tests/test_composite_actions.py"])
 
 with tempfile.TemporaryDirectory(prefix="project-toolkit-fixtures-") as tmp:
     fixtures = Path(tmp)

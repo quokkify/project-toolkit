@@ -3,7 +3,7 @@
 A small, versioned toolkit for composing consistent GitHub automation across Python, Node.js, Java, Docker, and polyglot repositories—without Git submodules.
 
 - **Reusable workflows** own complete jobs and runner behavior.
-- **Composite actions** would own repeated step sequences; none are justified in the MVP.
+- **Composite actions** provide reusable setup/runtime primitives for Python, Node.js, Java/Gradle, and compose-readiness.
 - **Copier** creates and later updates small physical files in a consumer repository.
 - **Renovate** proposes version updates; **Release Please** prepares changelogs and releases.
 
@@ -24,7 +24,7 @@ jobs:
       test-command: pytest
 ```
 
-Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/node-ci.yml), and [`Java`](examples/java-ci.yml) examples, or compose all three with path filters in the [`polyglot example`](examples/polyglot-ci.yml). Docker builds do not push by default.
+Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/node-ci.yml), and [`Java`](examples/java-ci.yml) examples, or compose all three with path filters in the [`polyglot example`](examples/polyglot-ci.yml). Docker builds do not push by default. For action-level usage, see [`examples/setup-actions.yml`](examples/setup-actions.yml).
 
 ## Documentation
 
@@ -40,4 +40,6 @@ Submodules are intentionally absent: consumers need a stable job API and upgrade
 
 ## Scope
 
-The MVP does not deploy to providers, publish language packages, hide project secrets, generate arbitrary jobs, or replace setup Actions, Renovate, or Release Please. Validation is static and fixture-based until reusable workflows are available on an accessible Git ref; see the documented limitation in [architecture](docs/architecture.md).
+The toolkit does not deploy to providers, publish language packages, hide project secrets, or generate arbitrary jobs. Validation is static and fixture-based until reusable workflows are available on an accessible Git ref; see the documented limitation in [architecture](docs/architecture.md).
+
+Toolkit composite actions are maintained under `actions/` (setup steps plus Compose readiness) and can be consumed directly by downstream projects. They are independent building blocks for caller-owned jobs; reusable workflows keep their self-contained job implementations so cross-repository calls do not depend on a caller checkout containing toolkit-local actions.

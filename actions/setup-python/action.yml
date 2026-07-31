@@ -1,0 +1,110 @@
+name: Setup Python
+description: Prepare Python with cached dependencies and optional dependency installation.
+
+inputs:
+  python-version:
+    description: Python version accepted by actions/setup-python.
+    required: false
+    default: "3.12"
+  working-directory:
+    description: Repository subpath where project files are located.
+    required: false
+    default: .
+  package-manager:
+    description: One of auto, pip, uv, or poetry.
+    required: false
+    default: auto
+  install-command:
+    description: Optional trusted shell command that replaces default dependency installation.
+    required: false
+    default: ""
+  install-dependencies:
+    description: Install dependencies after setting up Python.
+    required: false
+    default: "true"
+  cache-dependencies:
+    description: Cache pip/uv/poetry package metadata.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Cache Python dependencies
+      if: ${{ inputs.cache-dependencies == 'true' }}
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.cache/uv
+          ~/.cache/pypoetry
+        key: python-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/**/uv.lock', inputs.working-directory), format('{0}/**/poetry.lock', inputs.working-directory), format('{0}/**/requirements*.txt', inputs.working-directory), format('{0}/**/pyproject.toml', inputs.working-directory)) }}
+        restore-keys: |
+          python-${{ runner.os }}-${{ inputs.python-version }}-
+    - name: Install Python dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      env:
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+
+        if [[ -n "${INSTALL_COMMAND}" ]]; then
+          bash -euo pipefail -c "$INSTALL_COMMAND"
+          exit 0
+        fi
+
+        manager="$PACKAGE_MANAGER"
+        if [[ "$manager" == "auto" ]]; then
+          if [[ -f uv.lock ]]; then
+            manager=uv
+          elif [[ -f poetry.lock ]]; then
+            manager=poetry
+          else
+            manager=pip
+          fi
+        fi
+
+        case "$manager" in
+          uv)
+            python -m pip install uv
+            uv sync --frozen
+            ;;
+          poetry)
+            python -m pip install poetry
+            poetry install --no-interaction
+            ;;
+          pip)
+            if [[ -f requirements.txt ]]; then
+              python -m pip install -r requirements.txt
+            elif [[ -f pyproject.toml ]]; then
+              python -m pip install -e .
+            else
+              echo "No Python dependency manifest found; continuing without install"
+            fi
+            ;;
+          *)
+            echo "Unsupported package-manager: $manager" >&2
+            exit 2
+            ;;
+        esac
+    - name: Validate boolean inputs
+      shell: bash
+      env:
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+      run: |
+        set -euo pipefail
+        for value in "$CACHE_DEPENDENCIES" "$INSTALL_DEPENDENCIES"; do
+          if [[ "$value" != "true" && "$value" != "false" ]]; then
+            echo "Boolean inputs must be 'true' or 'false': $value" >&2
+            exit 2
+          fi
+        done

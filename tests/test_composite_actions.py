@@ -224,7 +224,13 @@ class ComposeActionTests(unittest.TestCase):
             self.assertEqual(env_file, "")
         result, env_file = self.run_validation(TIMEOUT_SECONDS="00001", URL_TIMEOUT_SECONDS="00002")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("COMPOSE_TIMEOUT_SECONDS=00001", env_file)
+        self.assertIn("COMPOSE_TIMEOUT_SECONDS=1", env_file)
+        self.assertIn("COMPOSE_URL_TIMEOUT_SECONDS=2", env_file)
+        started = time.monotonic()
+        result, env_file = self.run_validation(TIMEOUT_SECONDS="0" * 5000 + "1")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(env_file, "")
+        self.assertLess(time.monotonic() - started, 1.0)
 
     def test_default_inputs_pass_validation(self) -> None:
         result, env_file = self.run_validation(
@@ -241,6 +247,9 @@ class ComposeActionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
         result, env_file = self.run_validation(SERVICES="", COMPLETED_SERVICES="migrate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+        result, env_file = self.run_validation(SERVICES=" \t , ", COMPLETED_SERVICES="migrate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
         for unsafe in ("web,*", "web ../foreign", "web $(id)"):

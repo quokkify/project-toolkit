@@ -9,6 +9,8 @@ A small, versioned toolkit for composing consistent GitHub automation across Pyt
 
 ## Quick start
 
+The exact `v1.0.0` references below are the intended first-release production contract. They become runnable only after the owner publishes that immutable tag; this task intentionally does not create it.
+
 ```yaml
 name: CI
 on: [pull_request]

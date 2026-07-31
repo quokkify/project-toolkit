@@ -1,5 +1,7 @@
 # Usage
 
+The examples intentionally target the planned immutable `v1.0.0` release. They are production-shaped but cannot run until the owner separately approves and publishes that tag.
+
 Copy a small caller workflow from [`examples/`](../examples/) and replace commands/paths. Production callers use an exact released tag:
 
 ```yaml

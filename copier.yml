@@ -26,8 +26,10 @@ components:
   validator: >-
     {% if not components %}Choose at least one component.{% endif %}
     {% for component in components %}
+    {% if component is not mapping %}Every component must be a mapping with type and path.{% else %}
     {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}
-    {% if not component.path %}Every component requires a non-empty path.{% endif %}
+    {% if component.path is not string or not component.path | trim %}Every component requires a non-empty string path.{% endif %}
+    {% endif %}
     {% endfor %}
 
 docker:

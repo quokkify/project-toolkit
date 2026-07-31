@@ -61,14 +61,17 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Validate push configuration
         if: ${{ inputs.push }}
         env:
           IMAGE_NAME: ${{ inputs.image-name }}
+          EXPLICIT_TAGS: ${{ inputs.tags }}
           REGISTRY_USERNAME: ${{ secrets.registry-username }}
           REGISTRY_PASSWORD: ${{ secrets.registry-password }}
         run: |
-          [[ -n "$IMAGE_NAME" ]] || { echo "image-name is required when push=true" >&2; exit 2; }
+          [[ -n "$IMAGE_NAME" || -n "$EXPLICIT_TAGS" ]] || { echo "image-name or tags is required when push=true" >&2; exit 2; }
           [[ -n "$REGISTRY_USERNAME" ]] || { echo "registry-username secret is required when push=true" >&2; exit 2; }
           [[ -n "$REGISTRY_PASSWORD" ]] || { echo "registry-password secret is required when push=true" >&2; exit 2; }
       - name: Set up Docker Buildx
@@ -104,5 +107,5 @@ jobs:
           tags: ${{ steps.image.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: ${{ inputs.provenance }}
-          sbom: ${{ inputs.sbom }}
+          provenance: ${{ inputs.push && inputs.provenance }}
+          sbom: ${{ inputs.push && inputs.sbom }}

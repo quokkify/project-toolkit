@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Validate toolkit policy, templates, and executable language fixtures."""
 from __future__ import annotations
 import json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
@@ -8,9 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
 
 def check(condition: bool, message: str) -> None:
+    """Record a validation error when a condition is false."""
     if not condition: ERRORS.append(message)
 
 def run(cmd: list[str], cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
+    """Run a command with visible, repository-relative provenance."""
     print('+', ' '.join(cmd), f'(cwd={cwd.relative_to(ROOT) if cwd.is_relative_to(ROOT) else cwd})')
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
@@ -88,6 +91,7 @@ run(['javac', '-Xlint:all', '-d', 'build/classes', 'src/toolkit/App.java'], java
 run(['javac', '-Xlint:all', '-cp', 'build/classes', '-d', 'build/test-classes', 'test/toolkit/AppTest.java'], java)
 run(['java', '-cp', 'build/classes:build/test-classes', 'toolkit.AppTest'], java)
 run(['jar', '--create', '--file', 'build/toolkit-java-fixture.jar', '-C', 'build/classes', '.'], java)
+run(['mvn', '--batch-mode', '--no-transfer-progress', 'test'], java)
 
 copier = shutil.which('copier')
 check(copier is not None, 'copier executable is required')

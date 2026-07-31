@@ -1,4 +1,5 @@
 name: Component releases
+# Requires the separately approved and published immutable v1.0.0 toolkit tag.
 on:
   push:
     branches: [main]

@@ -110,12 +110,14 @@ runs:
           echo "working-directory must be a non-empty relative path" >&2
           exit 2
         }
-        case "/$WORKING_DIRECTORY/" in
-          */../*|*/./*|/./*)
-            echo "working-directory must not contain traversal or ambiguous dot components" >&2
-            exit 2
-            ;;
-        esac
+        if [[ "$WORKING_DIRECTORY" != "." ]]; then
+          case "/$WORKING_DIRECTORY/" in
+            */../*|*/./*)
+              echo "working-directory must not contain traversal or ambiguous dot components" >&2
+              exit 2
+              ;;
+          esac
+        fi
 
         mapfile -t compose_files < <(printf '%s\n' "$COMPOSE_FILES" | sed '/^[[:space:]]*$/d')
         if (( ${#compose_files[@]} == 0 )); then
@@ -149,11 +151,25 @@ runs:
           }
         done <<< "$WAIT_URLS"
 
+        compose_services=""
+        if [[ -n "$SERVICES" ]]; then
+          service_names=()
+          while IFS= read -r service; do
+            [[ -z "$service" ]] && continue
+            already_seen=false
+            for existing in "${service_names[@]}"; do
+              [[ "$existing" == "$service" ]] && already_seen=true && break
+            done
+            [[ "$already_seen" == "true" ]] || service_names+=("$service")
+          done < <(printf '%s %s\n' "$SERVICES" "$COMPLETED_SERVICES" | tr ',' ' ' | xargs -r -n1)
+          compose_services="${service_names[*]}"
+        fi
+
         {
           printf 'COMPOSE_FILES_NORMALIZED<<COMPOSE_FILES_EOF\n'
           printf '%s\n' "${normalized_files[@]}"
           printf 'COMPOSE_FILES_EOF\n'
-          printf 'COMPOSE_SERVICES_NORMALIZED=%s\n' "$(printf '%s %s\n' "$SERVICES" "$COMPLETED_SERVICES" | tr ',' ' ' | xargs -r)"
+          printf 'COMPOSE_SERVICES_NORMALIZED=%s\n' "$compose_services"
           printf 'COMPOSE_WORKING_DIRECTORY=%s\n' "$WORKING_DIRECTORY"
           printf 'COMPOSE_TIMEOUT_SECONDS=%s\n' "$TIMEOUT_SECONDS"
           printf 'COMPOSE_URL_TIMEOUT_SECONDS=%s\n' "$URL_TIMEOUT_SECONDS"
@@ -190,7 +206,9 @@ runs:
               ready=true
               break
             fi
-            sleep 2
+            sleep_seconds=2
+            (( sleep_seconds > remaining )) && sleep_seconds=$remaining
+            (( sleep_seconds > 0 )) && sleep "$sleep_seconds"
           done
           if [[ "$ready" != "true" ]]; then
             echo "Timed out waiting for HTTP readiness" >&2
@@ -203,7 +221,6 @@ runs:
       shell: bash
       env:
         COMPOSE_FILES: ${{ env.COMPOSE_FILES_NORMALIZED }}
-        WORKING_DIRECTORY: ${{ env.COMPOSE_WORKING_DIRECTORY }}
       run: |
         set -euo pipefail
         mapfile -t compose_files < <(printf '%s\n' "$COMPOSE_FILES" | sed '/^[[:space:]]*$/d')
@@ -211,5 +228,4 @@ runs:
         for file in "${compose_files[@]}"; do
           compose_args+=(--file "$file")
         done
-        cd "$WORKING_DIRECTORY"
         docker compose "${compose_args[@]}" down || true

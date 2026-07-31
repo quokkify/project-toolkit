@@ -4,6 +4,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -179,6 +180,24 @@ class ComposeActionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("1 through 86400", result.stderr)
 
+    def test_default_inputs_pass_validation(self) -> None:
+        result, env_file = self.run_validation(
+            COMPOSE_FILES="docker-compose.yml", SERVICES="", COMPLETED_SERVICES="",
+            WAIT_URLS="", WORKING_DIRECTORY=".",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_FILES_NORMALIZED<<", env_file)
+        self.assertIn("docker-compose.yml", env_file)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+
+    def test_service_union_is_unique_and_completed_only_preserves_standalone_defaults(self) -> None:
+        result, env_file = self.run_validation(SERVICES="web,worker web", COMPLETED_SERVICES="worker migrate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
+        result, env_file = self.run_validation(SERVICES="", COMPLETED_SERVICES="migrate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+
     def test_url_readiness_uses_bounded_probe_and_option_terminator(self) -> None:
         step = self.steps["Wait for HTTP readiness"]
         with tempfile.TemporaryDirectory(prefix="compose-url-test-") as tmp:
@@ -191,6 +210,22 @@ class ComposeActionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("-- http://127.0.0.1:8080/health", log.read_text())
 
+    def test_url_timeout_does_not_sleep_past_global_deadline(self) -> None:
+        step = self.steps["Wait for HTTP readiness"]
+        with tempfile.TemporaryDirectory(prefix="compose-url-timeout-test-") as tmp:
+            curl = Path(tmp) / "curl"
+            curl.write_text("#!/usr/bin/env bash\nexit 1\n")
+            curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
+            env = {
+                **os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "TIMEOUT_SECONDS": "1",
+                "URL_TIMEOUT_SECONDS": "1", "WAIT_URLS": "http://127.0.0.1:8080/health",
+            }
+            started = time.monotonic()
+            result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
+            elapsed = time.monotonic() - started
+            self.assertEqual(result.returncode, 2)
+            self.assertLess(elapsed, 1.5, f"URL loop exceeded global timeout: {elapsed:.3f}s")
+
     def test_cleanup_is_scoped_and_has_no_volume_flag(self) -> None:
         step = self.steps["Optional Compose cleanup after failure"]
         text = step["run"]
@@ -199,6 +234,23 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("env.COMPOSE_STARTED == 'true'", step["if"])
         self.assertIn("inputs.down-on-timeout == 'true'", step["if"])
         self.assertEqual(self.data["inputs"]["down-on-timeout"]["default"], "false")
+
+    def test_cleanup_uses_prefixed_files_from_repository_root(self) -> None:
+        step = self.steps["Optional Compose cleanup after failure"]
+        with tempfile.TemporaryDirectory(prefix="compose-cleanup-test-") as tmp:
+            log = Path(tmp) / "docker.log"
+            docker = Path(tmp) / "docker"
+            docker.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$PWD|$*\" >> \"$DOCKER_LOG\"\n")
+            docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
+            env = {
+                **os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "DOCKER_LOG": str(log),
+                "COMPOSE_FILES": "deploy/docker-compose.yml\ndeploy/compose.prod.yml",
+            }
+            result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            command = log.read_text()
+            self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml down", command)
+            self.assertNotIn("deploy/deploy", command)
 
 
 if __name__ == "__main__":

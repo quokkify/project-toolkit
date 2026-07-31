@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/ylazakovich/project-toolkit/compare/v1.1.1...v2.0.0) (2026-07-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* Compose startup and container-health ownership moves to the pinned standalone v2.3.0 action. Legacy wait-for-health=false and show-logs-on-failure=false modes now fail closed before startup.
+
+### Features
+
+* delegate Compose startup to standalone health action ([68e51e0](https://github.com/ylazakovich/project-toolkit/commit/68e51e07bd48d804d6e9b7543ad830126b3a096b))
+
 ## [1.1.1](https://github.com/ylazakovich/project-toolkit/compare/v1.1.0...v1.1.1) (2026-07-31)
 
 

@@ -105,8 +105,8 @@ runs:
           local value="$1"
           local description="$2"
 
-          if [[ -z "$value" || "$value" == /* || "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" == *$'\t'* || "$value" == *$' '* ]]; then
-            fail "$description must be a non-empty relative path without spaces or traversal"
+          if [[ -z "$value" || "$value" == /* || "$value" == ~* || "$value" == *:* || "$value" == *$'\\n'* || "$value" == *$'\\r'* || "$value" == *$'\\t'* || "$value" == *$' '* ]]; then
+            fail "$description must be a non-empty relative path without spaces, absolute forms, or drive letters"
           fi
           [[ "$value" == "." ]] && return 0
           case "/$value/" in
@@ -114,6 +114,10 @@ runs:
               fail "$description must not contain traversal or ambiguous dot components"
               ;;
           esac
+        }
+
+        validate_compose_file() {
+          validate_relative_path "$1" "compose-files entry"
         }
 
         requires_linux
@@ -142,12 +146,7 @@ runs:
 
         normalized_files=()
         for file in "${compose_files[@]}"; do
-          [[ "$file" != /* && "$file" != *$'\n'* && "$file" != *$'\r'* && "$file" != *$'\t'* && "$file" != *$' '* ]] || fail "compose-files entries must be non-empty relative paths without spaces"
-          case "/$file/" in
-            */../*|*/./*|/./*)
-              fail "compose-files entries must not contain traversal or ambiguous dot components"
-              ;;
-          esac
+          validate_compose_file "$file"
 
           if [[ "$WORKING_DIRECTORY" == "." ]]; then
             normalized_files+=("$file")

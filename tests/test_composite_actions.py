@@ -165,7 +165,17 @@ class ComposeActionTests(unittest.TestCase):
             self.assertEqual(env_file, "")
 
     def test_validation_rejects_unsafe_urls_and_paths(self) -> None:
-        for values, message in (({"WAIT_URLS": "file:///etc/passwd"}, "absolute HTTP(S)"), ({"COMPOSE_FILES": "../secret.yml"}, "traversal"), ({"WORKING_DIRECTORY": "/tmp"}, "relative path")):
+        for values, message in ((
+            {"WAIT_URLS": "file:///etc/passwd"}, "absolute HTTP(S)"
+        ), (
+            {"COMPOSE_FILES": "../secret.yml"}, "traversal"
+        ), (
+            {"WORKING_DIRECTORY": "/tmp"}, "absolute forms"
+        ), (
+            {"WORKING_DIRECTORY": "C:/tmp"}, "absolute forms"
+        ), (
+            {"COMPOSE_FILES": "C:\\tmp\\compose.yml"}, "drive letters"
+        )):
             result, env_file = self.run_validation(**values)
             self.assertEqual(result.returncode, 2)
             self.assertIn(message, result.stderr)
@@ -232,6 +242,27 @@ class ComposeActionTests(unittest.TestCase):
             result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("-- http://127.0.0.1:8080/health", log.read_text())
+
+    def test_url_readiness_does_not_echo_secret_fragments(self) -> None:
+        step = self.steps["Wait for HTTP readiness"]
+        with tempfile.TemporaryDirectory(prefix="compose-url-secret-test-") as tmp:
+            log = Path(tmp) / "curl.log"
+            curl = Path(tmp) / "curl"
+            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\nexit 1\n")
+            curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
+            wait_url = "http://127.0.0.1:8080/health?api_key=top_secret"
+            env = {
+                **os.environ,
+                "PATH": f"{tmp}:{os.environ['PATH']}",
+                "CURL_LOG": str(log),
+                "TIMEOUT_SECONDS": "5",
+                "URL_TIMEOUT_SECONDS": "1",
+                "WAIT_URLS": wait_url,
+            }
+            result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertNotIn("top_secret", result.stdout + result.stderr)
+            self.assertIn("top_secret", log.read_text())
 
     def test_url_timeout_does_not_sleep_past_global_deadline(self) -> None:
         step = self.steps["Wait for HTTP readiness"]

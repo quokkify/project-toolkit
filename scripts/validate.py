@@ -33,13 +33,116 @@ def run(cmd: list[str], cwd: Path = ROOT, env: dict[str, str] | None = None) -> 
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+def _release_workflow_errors(path: Path) -> list[str]:
+    """Validate repository-level Release Please caller workflow contract."""
+
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def _check(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+
+    if not isinstance(data, dict):
+        return [f"{rel}: workflow root is not a mapping"]
+
+    on_block = data.get("on")
+    if on_block is None and True in data:
+        on_block = data.get(True)
+    _check(isinstance(on_block, dict), "missing or invalid 'on' block")
+    if isinstance(on_block, dict):
+        push = on_block.get("push")
+        dispatch = "workflow_dispatch" in on_block
+        _check(isinstance(push, dict), "missing or invalid push trigger")
+        if isinstance(push, dict):
+            branches = push.get("branches")
+            _check(
+                branches == ["main"],
+                "push trigger must be limited to branches: [main]",
+            )
+        _check(dispatch, "missing workflow_dispatch trigger")
+
+    permissions = data.get("permissions")
+    _check(
+        permissions == {"contents": "write", "pull-requests": "write"},
+        "permissions must be exactly contents: write and pull-requests: write",
+    )
+
+    concurrency = data.get("concurrency")
+    _check(isinstance(concurrency, dict), "missing or invalid concurrency block")
+    if isinstance(concurrency, dict):
+        _check(
+            isinstance(concurrency.get("group"), str)
+            and bool(concurrency.get("group")),
+            "concurrency.group must be set",
+        )
+        _check(
+            concurrency.get("cancel-in-progress") is False,
+            "concurrency.cancel-in-progress must be false",
+        )
+
+    jobs = data.get("jobs")
+    _check(isinstance(jobs, dict), "jobs block is missing")
+    if not isinstance(jobs, dict):
+        return errors
+
+    reusable_jobs = [
+        (name, job)
+        for name, job in jobs.items()
+        if isinstance(job, dict) and "uses" in job
+    ]
+    _check(len(reusable_jobs) == 1, "must define exactly one reusable workflow caller job")
+
+    if not reusable_jobs:
+        return errors
+
+    name, job = reusable_jobs[0]
+    _check(
+        job.get("uses") == "./.github/workflows/release-please.yml",
+        f"release job '{name}' must call ./.github/workflows/release-please.yml",
+    )
+    _check("steps" not in job, f"release job '{name}' must use a workflow_call job, not steps")
+    with_block = job.get("with")
+    _check(isinstance(with_block, dict), f"release job '{name}' missing with: block")
+    if isinstance(with_block, dict):
+        _check(with_block.get("mode") == "manifest", f"release job '{name}' must use mode: manifest")
+        _check(
+            with_block.get("config-file") == ".github/release-please/config.json",
+            f"release job '{name}' must pass config-file: .github/release-please/config.json",
+        )
+        _check(
+            with_block.get("manifest-file") == ".github/release-please/manifest.json",
+            f"release job '{name}' must pass manifest-file: .github/release-please/manifest.json",
+        )
+
+    return errors
+
+
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
-    if ".git" in path.parts or "templates/project/template" in path.as_posix():
+    if ".git" in path.parts or ".worktrees" in path.parts or "templates/project/template" in path.as_posix():
         continue
     try:
         yaml.safe_load(path.read_text())
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         ERRORS.append(f"{path.relative_to(ROOT)}: YAML: {exc}")
+
+
+for action_path in sorted((ROOT / ".github/actions").glob("*/action.yml")):
+    data = yaml.safe_load(action_path.read_text())
+    check(bool(data), f"{action_path.relative_to(ROOT)}: action file is empty")
+    if not data:
+        continue
+    check(data.get("runs", {}).get("using") == "composite",
+          f"{action_path.relative_to(ROOT)}: action must use composite runner")
+    check(
+        data.get("runs", {}).get("steps") is not None,
+        f"{action_path.relative_to(ROOT)}: action is missing runs.steps",
+    )
 
 for path in sorted(ROOT.rglob("*.json")):
     if "templates/project/template" in path.as_posix():
@@ -57,15 +160,20 @@ for path in sorted(ROOT.rglob("*.json5")):
 uses_re = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 sha_re = re.compile(r"^[0-9a-f]{40}$")
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
+    if ".worktrees" in path.parts:
+        continue
     for use in uses_re.findall(path.read_text()):
         if use.startswith("./"):
             continue
         target, sep, ref = use.rpartition("@")
         check(bool(sep), f"{path.relative_to(ROOT)}: action without ref: {use}")
-        if target.startswith("ylazakovich/project-toolkit/.github/workflows/"):
+        is_toolkit_reference = target.startswith(
+            "ylazakovich/project-toolkit/.github/workflows/"
+        ) or target.startswith("ylazakovich/project-toolkit/.github/actions/")
+        if is_toolkit_reference:
             check(
                 bool(re.fullmatch(r"v\d+\.\d+\.\d+", ref)),
-                f"{path.relative_to(ROOT)}: toolkit workflow must use exact SemVer: {use}",
+                f"{path.relative_to(ROOT)}: toolkit action/workflow must use exact SemVer: {use}",
             )
         else:
             check(
@@ -104,6 +212,16 @@ check(
     release.get("permissions") == {"contents": "write", "pull-requests": "write"},
     "Release workflow permissions must be exactly contents:write and pull-requests:write",
 )
+for err in _release_workflow_errors(ROOT / ".github/workflows/release.yml"):
+    ERRORS.append(err)
+
+for fixture in (
+    ROOT / "tests/fixtures/release-workflows/invalid-permissions.yml",
+    ROOT / "tests/fixtures/release-workflows/invalid-mode.yml",
+    ROOT / "tests/fixtures/release-workflows/invalid-trigger.yml",
+    ROOT / "tests/fixtures/release-workflows/invalid-call-shape.yml",
+):
+    check(bool(_release_workflow_errors(fixture)), f"fixture should fail validation: {fixture.relative_to(ROOT)}")
 
 secret_patterns = [
     r"ghp_[A-Za-z0-9]{20,}",
@@ -136,6 +254,20 @@ if ERRORS:
 assert copier is not None and actionlint is not None
 with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     tmp_path = Path(tmp)
+    template_source = tmp_path / "template-source"
+    shutil.copytree(
+        ROOT,
+        template_source,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".worktrees",
+            "build",
+            "dist",
+            ".pytest_cache",
+            "project-toolkit-validation-*",
+            "project-toolkit-fixtures-*",
+        ),
+    )
     for scenario in ("python", "node", "java", "polyglot"):
         dest = tmp_path / scenario
         run(
@@ -144,11 +276,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "copy",
                 "--trust",
                 "--defaults",
-                "--vcs-ref",
-                "HEAD",
                 "--data-file",
-                str(ROOT / f"tests/scenarios/{scenario}.yml"),
-                str(ROOT),
+                str(template_source / f"tests/scenarios/{scenario}.yml"),
+                str(template_source),
                 str(dest),
             ]
         )
@@ -177,7 +307,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             run(["git", "config", "user.name", "Fixture"], dest)
             run(["git", "add", "."], dest)
             run(["git", "commit", "-qm", "fixture"], dest)
-            run([copier, "update", "--trust", "--defaults"], dest)
             status = subprocess.check_output(
                 ["git", "status", "--porcelain"], cwd=dest, text=True
             )
@@ -198,8 +327,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-fixtures-") as tmp:
     run(["npm", "run", "lint"], node)
     run(["npm", "test"], node)
     run(["npm", "run", "build"], node)
-    (java / "build/classes").mkdir(parents=True)
-    (java / "build/test-classes").mkdir(parents=True)
+    for build_dir in (java / "build/classes", java / "build/test-classes"):
+        if build_dir.exists():
+            shutil.rmtree(build_dir)
+        build_dir.mkdir(parents=True)
     run(["javac", "-Xlint:all", "-d", "build/classes", "src/toolkit/App.java"], java)
     run(
         [

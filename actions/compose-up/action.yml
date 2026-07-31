@@ -102,12 +102,11 @@ runs:
           [[ "$value" =~ ^[0-9]+$ ]] || fail "$name must be a positive integer from 1 through $max"
           (( ${#value} <= 20 )) || fail "$name must be an integer from 1 through $max"
           zero_prefix="${value%%[!0]*}"
-          normalized="${value#$zero_prefix}"
+          normalized="${value#"$zero_prefix"}"
           [[ -n "$normalized" ]] || normalized=0
           [[ "$normalized" != "0" ]] || fail "$name must be an integer from 1 through $max"
-          if (( ${#normalized} > ${#max} )) || { (( ${#normalized} == ${#max} )) && [[ "$normalized" > "$max" ]]; }; then
-            fail "$name must be an integer from 1 through $max"
-          fi
+          (( ${#normalized} <= ${#max} )) || fail "$name must be an integer from 1 through $max"
+          (( 10#$normalized <= 10#$max )) || fail "$name must be an integer from 1 through $max"
           printf '%s' "$normalized"
         }
 

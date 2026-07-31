@@ -1,0 +1,14 @@
+name: Component releases
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  release:
+    uses: ylazakovich/project-toolkit/.github/workflows/release-please.yml@v1.0.0
+    with:
+      mode: manifest
+      config-file: .github/release-please/config.json
+      manifest-file: .github/release-please/manifest.json

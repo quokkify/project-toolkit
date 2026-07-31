@@ -1,0 +1,11 @@
+name: Node.js CI
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  node:
+    uses: ylazakovich/project-toolkit/.github/workflows/node-ci.yml@v1.0.0
+    with:
+      package-manager: npm
+      lint-command: npm run lint
+      test-command: npm test

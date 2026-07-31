@@ -1,0 +1,12 @@
+name: Python CI
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  python:
+    uses: ylazakovich/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    with:
+      python-version: "3.12"
+      install-command: python -m pip install -e .[test]
+      lint-command: ruff check .
+      test-command: pytest

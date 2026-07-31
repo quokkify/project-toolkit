@@ -1,0 +1,40 @@
+{
+  "description": [
+    "Shared dependency policy for repositories consuming project-toolkit.",
+    "Updates GitHub Actions and versioned reusable workflow references without automerge."
+  ],
+  "extends": ["config:recommended"],
+  "enabledManagers": ["github-actions", "regex"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "Group non-breaking GitHub Actions updates.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "github actions non-major updates"
+    },
+    {
+      "description": "Group non-breaking project-toolkit workflow updates.",
+      "matchManagers": ["regex"],
+      "matchPackageNames": ["ylazakovich/project-toolkit"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "project-toolkit non-major updates"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update exact SemVer references to reusable project-toolkit workflows.",
+      "managerFilePatterns": ["/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "uses:\\s*ylazakovich/project-toolkit/\\.github/workflows/[^@\\s]+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "ylazakovich/project-toolkit",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    }
+  ]
+}

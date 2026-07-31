@@ -1,0 +1,15 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    uses: ylazakovich/project-toolkit/.github/workflows/release-please.yml@{{ toolkit_version }}
+    with:
+      mode: single

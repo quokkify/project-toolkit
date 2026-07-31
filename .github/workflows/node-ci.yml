@@ -1,0 +1,113 @@
+name: Node.js CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Project directory relative to the repository root.
+        type: string
+        default: .
+      node-version:
+        description: Node.js version accepted by actions/setup-node.
+        type: string
+        default: "22"
+      package-manager:
+        description: One of auto, npm, pnpm, or yarn.
+        type: string
+        default: auto
+      install-command:
+        description: Optional trusted shell command overriding dependency installation.
+        type: string
+        default: ""
+      lint-command:
+        description: Trusted lint command.
+        type: string
+        default: "npm run lint"
+      test-command:
+        description: Trusted test command.
+        type: string
+        default: "npm test"
+      build-command:
+        description: Optional trusted build command.
+        type: string
+        default: "npm run build"
+      run-lint:
+        type: boolean
+        default: true
+      run-tests:
+        type: boolean
+        default: true
+      run-build:
+        description: Disabled by default because not every Node.js project has a build.
+        type: boolean
+        default: false
+      cache-dependencies:
+        type: boolean
+        default: true
+      timeout-minutes:
+        type: number
+        default: 20
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Cache Node.js dependencies
+        if: ${{ inputs.cache-dependencies }}
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/yarn
+            ~/.local/share/pnpm/store
+          key: node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/npm-shrinkwrap.json', inputs.working-directory), format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory)) }}
+          restore-keys: |
+            node-${{ runner.os }}-${{ inputs.node-version }}-
+      - name: Install dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [[ -n "$INSTALL_COMMAND" ]]; then bash -euo pipefail -c "$INSTALL_COMMAND"; exit; fi
+          manager="$PACKAGE_MANAGER"
+          if [[ "$manager" == auto ]]; then
+            if [[ -f pnpm-lock.yaml ]]; then manager=pnpm
+            elif [[ -f yarn.lock ]]; then manager=yarn
+            else manager=npm
+            fi
+          fi
+          case "$manager" in
+            npm) [[ -f package-lock.json || -f npm-shrinkwrap.json ]] && npm ci || npm install ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile ;;
+            yarn) corepack enable && yarn install --immutable ;;
+            *) echo "Unsupported package-manager: $manager" >&2; exit 2 ;;
+          esac
+      - name: Lint
+        if: ${{ inputs.run-lint }}
+        env:
+          COMMAND: ${{ inputs.lint-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        env:
+          COMMAND: ${{ inputs.test-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Build
+        if: ${{ inputs.run-build && inputs.build-command != '' }}
+        env:
+          COMMAND: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "$COMMAND"

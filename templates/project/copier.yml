@@ -1,0 +1,35 @@
+_min_copier_version: "9.4.0"
+_subdirectory: template
+_answers_file: .copier-answers.yml
+_templates_suffix: .jinja
+_exclude:
+  - "{% if not renovate %}renovate.json{% endif %}"
+  - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
+
+project_name:
+  type: str
+  help: Human-readable project name.
+  default: my-project
+
+toolkit_version:
+  type: str
+  help: Immutable project-toolkit SemVer tag used by generated workflows.
+  default: v1.0.0
+  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v1.0.0{% endif %}"
+
+components:
+  type: yaml
+  help: "List of mappings such as [{type: python, path: backend}]. Supported types: python, node, java."
+  default:
+    - type: python
+      path: .
+
+docker:
+  type: bool
+  default: false
+release_please:
+  type: bool
+  default: false
+renovate:
+  type: bool
+  default: true

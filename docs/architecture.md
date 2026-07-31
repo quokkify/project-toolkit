@@ -1,0 +1,21 @@
+# Architecture
+
+## Researched constraints
+
+- GitHub reusable workflows must live directly under `.github/workflows`, opt in through `workflow_call`, and are invoked at job level. Inputs and secrets are explicitly declared; nested workflows receive only permissions/secrets passed through the chain. A called workflow cannot elevate the caller token permissions. Public workflow repositories are callable by accessible repositories; private reuse additionally depends on repository/organization Actions access policy. See [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) and [access to private reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/share-across-private-repositories).
+- Composite actions package repeated **steps** and run inside a caller job; they do not replace job-level reusable workflows. The MVP has no justified repeated step-level abstraction, so no decorative `action.yml` is created. See [creating a composite action](https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action).
+- Secrets are accepted only by Docker push. Build arguments are explicitly documented as non-secret because Docker build args can leak through image metadata/cache. Release Please uses the caller repository's `GITHUB_TOKEN`; callers must grant the documented write permissions.
+- Copier records template answers and source metadata in `.copier-answers.yml`; `copier update` reapplies a newer template while preserving project answers and may require conflict resolution for locally edited generated files. See [Copier updating](https://copier.readthedocs.io/en/stable/updating/).
+- Release Please manifest mode separates configuration (`config.json`) from current versions (`manifest.json`) and supports one package or multiple independently versioned paths. See [manifest releaser](https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md).
+- Renovate shareable presets can be consumed through `github>owner/repo//path`. The built-in GitHub Actions manager covers `uses:` dependencies; the preset adds a targeted regex manager so exact SemVer references to this toolkit's reusable workflows are explicit and testable. See [Renovate presets](https://docs.renovatebot.com/config-presets/) and [GitHub Actions manager](https://docs.renovatebot.com/modules/manager/github-actions/).
+
+## Decisions
+
+1. **Atomic language workflows.** Python, Node.js, Java, Docker, and release remain independent reusable workflows rather than one universal matrix/generator.
+2. **Caller composition.** A consuming repository owns triggers, path filtering, dependencies, environments, and composition. One polyglot repository can invoke several toolkit workflows in one local orchestrator.
+3. **Copier owns physical project files.** It creates the small local workflow and optional local configs. It does not copy CI implementation.
+4. **Renovate owns version movement.** Production references use immutable release tags such as `@v1.2.0`; Renovate proposes upgrades through PRs. `@main` is not a production contract.
+5. **No submodules.** Job-level reuse and template updates solve the sharing problems without coupling consumer Git history to toolkit Git state.
+6. **Two release modes.** A polyglot product may share one version (`single`) or use independent component versions (`manifest`); these are deliberately distinct configurations.
+7. **Composite actions are earned.** Add one only after real repeated step-level logic appears and cannot be expressed clearly through established Actions.
+8. **Static validation is honest.** A reusable workflow added in a PR may not be invocable remotely until it exists on an accessible ref/default branch. The PR therefore uses actionlint, template generation/update, policy checks, and executable fixtures. It does not claim remote runtime validation.

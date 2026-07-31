@@ -1,0 +1,8 @@
+project_name: fixture-node
+toolkit_version: v1.0.0
+components:
+  - type: node
+    path: .
+docker: false
+release_please: false
+renovate: true

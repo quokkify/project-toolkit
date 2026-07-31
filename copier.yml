@@ -23,6 +23,12 @@ components:
   default:
     - type: python
       path: .
+  validator: >-
+    {% if not components %}Choose at least one component.{% endif %}
+    {% for component in components %}
+    {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}
+    {% if not component.path %}Every component requires a non-empty path.{% endif %}
+    {% endfor %}
 
 docker:
   type: bool

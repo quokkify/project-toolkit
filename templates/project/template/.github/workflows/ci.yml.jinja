@@ -13,7 +13,7 @@ jobs:
   {{ component.type }}-{{ loop.index }}:
     uses: ylazakovich/project-toolkit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
     with:
-      working-directory: {{ component.path }}
+      working-directory: {{ component.path | tojson }}
 {% endfor %}
 {% if docker %}
   docker:

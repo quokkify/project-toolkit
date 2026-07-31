@@ -27,7 +27,7 @@ on:
         type: string
         default: ghcr.io
       image-name:
-        description: Repository-relative or fully qualified image name used when push is enabled.
+        description: Image name relative to registry, for example owner/app; required when push is enabled.
         type: string
         default: ""
       tags:

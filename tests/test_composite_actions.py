@@ -174,6 +174,16 @@ class ComposeActionTests(unittest.TestCase):
         ), (
             {"WAIT_URLS": "http://[::1/health"}, "absolute HTTP(S)"
         ), (
+            {"WAIT_URLS": "http://127.0.0.1:8080/a b"}, "without whitespace"
+        ), (
+            {"WAIT_URLS": "http://127.0.0.1:8080/a\tb"}, "without whitespace"
+        ), (
+            {"WAIT_URLS": "http://127.0.0.1:8080/a\rb"}, "without whitespace"
+        ), (
+            {"WAIT_URLS": "http://127.0.0.1:8080/a\vb"}, "without whitespace"
+        ), (
+            {"WAIT_URLS": "http://127.0.0.1:8080/a\x1bb"}, "control characters"
+        ), (
             {"COMPOSE_FILES": "../secret.yml"}, "traversal"
         ), (
             {"WORKING_DIRECTORY": "/tmp"}, "absolute forms"

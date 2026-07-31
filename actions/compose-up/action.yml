@@ -138,6 +138,9 @@ runs:
           local host
           local port=""
 
+          if [[ "$url" =~ [[:space:][:cntrl:]] ]]; then
+            fail "wait-urls entries must be absolute HTTP(S) URLs without whitespace or control characters"
+          fi
           if [[ ! "$url" =~ ^https?://([^/?#]+)([/?#].*)?$ ]]; then
             fail "wait-urls entries must be absolute HTTP(S) URLs"
           fi

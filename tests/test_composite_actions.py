@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -154,6 +155,7 @@ class ComposeActionTests(unittest.TestCase):
         standalone = self.steps["Start Compose with standalone health engine"]
         self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
         self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")
+        self.assertNotIn("--project-directory", text)
 
     def test_validation_rejects_unsupported_legacy_flags_before_startup(self) -> None:
         for name, value, message in (("WAIT_FOR_HEALTH", "false", "wait-for-health=false"), ("SHOW_LOGS_ON_FAILURE", "false", "show-logs-on-failure=false")):
@@ -197,6 +199,27 @@ class ComposeActionTests(unittest.TestCase):
         result, env_file = self.run_validation(SERVICES="", COMPLETED_SERVICES="migrate")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+        result, env_file = self.run_validation(SERVICES="web,*", COMPLETED_SERVICES="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=web *\n", env_file)
+
+    def test_pinned_standalone_command_contract_keeps_global_flags_before_up(self) -> None:
+        # v2.3.0 appends additional-compose-args after `up -d`, so this fake
+        # mirrors its exact command order and guards against passing global
+        # Compose flags such as --project-directory through that input.
+        _, env_file = self.run_validation(WORKING_DIRECTORY="deploy", BUILD="true")
+        files = env_file.split("COMPOSE_FILES_NORMALIZED<<COMPOSE_FILES_EOF\n", 1)[1].split("\nCOMPOSE_FILES_EOF", 1)[0].splitlines()
+        additional_args = "--build"
+        services = next(line.split("=", 1)[1] for line in env_file.splitlines() if line.startswith("COMPOSE_SERVICES_NORMALIZED="))
+        argv = ["docker", "compose"]
+        for file in files:
+            argv.extend(["-f", file])
+        argv.extend(["up", "-d", *shlex.split(additional_args), *shlex.split(services)])
+        self.assertEqual(
+            argv,
+            ["docker", "compose", "-f", "deploy/docker-compose.yml", "-f", "deploy/compose.prod.yml", "up", "-d", "--build", "web", "worker", "migrate"],
+        )
+        self.assertNotIn("--project-directory", argv)
 
     def test_url_readiness_uses_bounded_probe_and_option_terminator(self) -> None:
         step = self.steps["Wait for HTTP readiness"]

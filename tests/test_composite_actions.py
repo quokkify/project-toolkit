@@ -125,151 +125,80 @@ class SetupActionTests(unittest.TestCase):
 class ComposeActionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        steps = [
-            step
-            for step in action("compose-up")["runs"]["steps"]
-            if step.get("name") == "Start Compose and wait for readiness"
-        ]
-        if len(steps) != 1:
-            raise AssertionError("expected exactly one Compose readiness step")
-        cls.script = steps[0]["run"]
+        cls.data = action("compose-up")
+        cls.steps = {step["name"]: step for step in cls.data["runs"]["steps"]}
 
-    def run_action(
-        self,
-        *,
-        timeout: str = "5",
-        health: str = "healthy",
-        wait_urls: str = "http://127.0.0.1:8080/health",
-        completed_services: str = "",
-        completed_status: str = "exited",
-        completed_exit: str = "0",
-        compose_files: str = "docker-compose.yml",
-        curl_exit: str = "0",
-        down_on_timeout: str = "true",
-        services: str = "web",
-        config_exit: str = "0",
-    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    def run_validation(self, **overrides: str) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory(prefix="compose-action-test-") as tmp:
             root = Path(tmp)
-            bin_dir = root / "bin"
-            work_dir = root / "project"
-            bin_dir.mkdir()
-            work_dir.mkdir()
-            (work_dir / "docker-compose.yml").write_text("services: {web: {image: scratch}}\n")
-            docker_log = root / "docker.log"
-            curl_log = root / "curl.log"
+            env_file = root / "github-env"
+            values = {
+                "BUILD": "false", "COMPLETED_SERVICES": "migrate", "COMPOSE_FILES": "docker-compose.yml\ncompose.prod.yml",
+                "DOWN_ON_TIMEOUT": "false", "SERVICES": "web,worker", "SHOW_LOGS_ON_FAILURE": "true",
+                "TIMEOUT_SECONDS": "120", "URL_TIMEOUT_SECONDS": "5", "WAIT_FOR_HEALTH": "true",
+                "WAIT_URLS": "http://127.0.0.1:8080/health", "WORKING_DIRECTORY": "deploy",
+                "RUNNER_OS": "Linux", "GITHUB_ENV": str(env_file),
+            }
+            values.update(overrides)
+            result = subprocess.run(["bash", "-c", self.steps["Validate Compose inputs"]["run"]], env={**os.environ, **values}, text=True, capture_output=True, check=False)
+            return result, env_file.read_text() if env_file.exists() else ""
 
-            docker = bin_dir / "docker"
-            docker.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -euo pipefail\n"
-                "printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n"
-                "case \"$*\" in\n"
-                "  *' config --services') [[ \"$CONFIG_EXIT\" == 0 ]] || exit \"$CONFIG_EXIT\"; printf 'web\\nmigrate\\n' ;;\n"
-                "  *' ps --all --quiet web') echo web-id ;;\n"
-                "  *' ps --all --quiet migrate') echo migrate-id ;;\n"
-                "  'inspect --format {{.State.Running}} web-id') echo true ;;\n"
-                "  'inspect --format {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}} web-id') echo \"$FAKE_HEALTH\" ;;\n"
-                "  'inspect --format {{.State.Status}} migrate-id') echo \"$COMPLETED_STATUS\" ;;\n"
-                "  'inspect --format {{.State.ExitCode}} migrate-id') echo \"$COMPLETED_EXIT\" ;;\n"
-                "esac\n"
-            )
-            docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
-            curl = bin_dir / "curl"
-            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\nexit \"$CURL_EXIT\"\n")
+    def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
+        text = (ROOT / "actions/compose-up/action.yml").read_text()
+        self.assertEqual(text.count("uses: ylazakovich/compose-health-check-action@"), 1)
+        self.assertIn("@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0", text)
+        self.assertNotIn("docker compose up", text)
+        self.assertNotIn("docker inspect", text)
+        self.assertEqual(sum(step.get("uses", "").startswith("ylazakovich/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
+        standalone = self.steps["Start Compose with standalone health engine"]
+        self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
+        self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")
+
+    def test_validation_rejects_unsupported_legacy_flags_before_startup(self) -> None:
+        for name, value, message in (("WAIT_FOR_HEALTH", "false", "wait-for-health=false"), ("SHOW_LOGS_ON_FAILURE", "false", "show-logs-on-failure=false")):
+            result, env_file = self.run_validation(**{name: value})
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(message, result.stderr)
+            self.assertEqual(env_file, "")
+
+    def test_validation_rejects_unsafe_urls_and_paths(self) -> None:
+        for values, message in (({"WAIT_URLS": "file:///etc/passwd"}, "absolute HTTP(S)"), ({"COMPOSE_FILES": "../secret.yml"}, "traversal"), ({"WORKING_DIRECTORY": "/tmp"}, "relative path")):
+            result, env_file = self.run_validation(**values)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(message, result.stderr)
+            self.assertEqual(env_file, "")
+
+    def test_validation_exports_prefixed_files_union_and_bounds(self) -> None:
+        result, env_file = self.run_validation()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("deploy/docker-compose.yml", env_file)
+        self.assertIn("deploy/compose.prod.yml", env_file)
+        self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
+        self.assertIn("COMPOSE_TIMEOUT_SECONDS=120", env_file)
+        result, _ = self.run_validation(TIMEOUT_SECONDS="0")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("1 through 86400", result.stderr)
+
+    def test_url_readiness_uses_bounded_probe_and_option_terminator(self) -> None:
+        step = self.steps["Wait for HTTP readiness"]
+        with tempfile.TemporaryDirectory(prefix="compose-url-test-") as tmp:
+            log = Path(tmp) / "curl.log"
+            curl = Path(tmp) / "curl"
+            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\n")
             curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
+            env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "CURL_LOG": str(log), "TIMEOUT_SECONDS": "5", "URL_TIMEOUT_SECONDS": "2", "WAIT_URLS": "http://127.0.0.1:8080/health"}
+            result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("-- http://127.0.0.1:8080/health", log.read_text())
 
-            env = os.environ.copy()
-            env.update(
-                {
-                    "BUILD": "false",
-                    "COMPLETED_EXIT": completed_exit,
-                    "COMPLETED_SERVICES": completed_services,
-                    "COMPLETED_STATUS": completed_status,
-                    "COMPOSE_FILES": compose_files,
-                    "CONFIG_EXIT": config_exit,
-                    "CURL_EXIT": curl_exit,
-                    "DOCKER_LOG": str(docker_log),
-                    "DOWN_ON_TIMEOUT": down_on_timeout,
-                    "FAKE_HEALTH": health,
-                    "CURL_LOG": str(curl_log),
-                    "PATH": f"{bin_dir}:{env['PATH']}",
-                    "RUNNER_OS": "Linux",
-                    "SERVICES": services,
-                    "SHOW_LOGS_ON_FAILURE": "true",
-                    "TIMEOUT_SECONDS": timeout,
-                    "URL_TIMEOUT_SECONDS": "5",
-                    "WAIT_FOR_HEALTH": "true",
-                    "WAIT_URLS": wait_urls,
-                    "WORKING_DIRECTORY": str(work_dir),
-                }
-            )
-            result = subprocess.run(["bash", "-c", self.script], env=env, text=True, capture_output=True, check=False)
-            return (
-                result,
-                docker_log.read_text() if docker_log.exists() else "",
-                curl_log.read_text() if curl_log.exists() else "",
-            )
-
-    def test_successful_readiness_and_url_option_terminator(self) -> None:
-        result, docker_calls, curl_calls = self.run_action()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("up --detach", docker_calls)
-        self.assertIn("-- http://127.0.0.1:8080/health", curl_calls)
-
-    def test_completed_service_must_exit_zero(self) -> None:
-        result, _, _ = self.run_action(completed_services="migrate")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        result, docker_calls, _ = self.run_action(completed_services="migrate", completed_exit="7")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Completed service failed", result.stderr)
-        self.assertIn(" down", docker_calls)
-
-    def test_rejects_unsafe_urls_before_compose(self) -> None:
-        for url in ("--help", "file:///etc/passwd", "not-a-url"):
-            with self.subTest(url=url):
-                result, docker_calls, curl_calls = self.run_action(wait_urls=url)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("absolute HTTP(S)", result.stderr)
-                self.assertEqual(docker_calls, "")
-                self.assertEqual(curl_calls, "")
-
-    def test_timeout_bounds(self) -> None:
-        for value in ("0", "01", "86401", "999999999999999999999999"):
-            with self.subTest(value=value):
-                result, docker_calls, _ = self.run_action(timeout=value)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("1 through 86400", result.stderr)
-                self.assertEqual(docker_calls, "")
-
-    def test_timeout_prints_diagnostics_and_runs_down(self) -> None:
-        result, docker_calls, _ = self.run_action(timeout="1", health="starting")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Timed out", result.stderr)
-        self.assertIn("logs --no-color --tail 100", docker_calls)
-        self.assertIn(" down", docker_calls)
-
-    def test_empty_compose_files_fails_before_docker(self) -> None:
-        result, docker_calls, _ = self.run_action(compose_files="")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("At least one compose file", result.stderr)
-        self.assertEqual(docker_calls, "")
-
-    def test_failing_url_times_out_without_down_when_disabled(self) -> None:
-        result, docker_calls, curl_calls = self.run_action(
-            timeout="1", curl_exit="22", down_on_timeout="false"
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Timed out", result.stderr)
-        self.assertTrue(curl_calls)
-        self.assertNotIn(" down", docker_calls)
-
-    def test_auto_discovery_failure_is_not_ignored(self) -> None:
-        result, docker_calls, _ = self.run_action(services="", config_exit="7")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Failed to list Compose services", result.stderr)
-        self.assertIn("config --services", docker_calls)
-        self.assertNotIn("up --detach", docker_calls)
+    def test_cleanup_is_scoped_and_has_no_volume_flag(self) -> None:
+        step = self.steps["Optional Compose cleanup after failure"]
+        text = step["run"]
+        self.assertIn('docker compose "${compose_args[@]}" down', text)
+        self.assertNotIn("-v", text)
+        self.assertIn("env.COMPOSE_STARTED == 'true'", step["if"])
+        self.assertIn("inputs.down-on-timeout == 'true'", step["if"])
+        self.assertEqual(self.data["inputs"]["down-on-timeout"]["default"], "false")
 
 
 if __name__ == "__main__":

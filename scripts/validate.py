@@ -53,6 +53,10 @@ def release_workflow_errors(path: Path) -> list[str]:
     require(isinstance(triggers, dict), "must define push and workflow_dispatch triggers")
     if isinstance(triggers, dict):
         require(
+            set(triggers) == {"push", "workflow_dispatch"},
+            "must define only push and workflow_dispatch triggers",
+        )
+        require(
             triggers.get("push") == {"branches": ["main"]},
             "push trigger must be limited to branches: [main]",
         )
@@ -106,6 +110,24 @@ def release_workflow_errors(path: Path) -> list[str]:
         "caller job must pass manifest mode and current config/manifest paths",
     )
     return errors
+
+
+SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def release_manifest_errors(manifest: object) -> list[str]:
+    """Return errors for the single-package Release Please manifest contract."""
+    if not isinstance(manifest, dict) or set(manifest) != {"."}:
+        return ["manifest must contain exactly the root package key '.'"]
+    version = manifest["."]
+    if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
+        return ["root package version must be a well-formed SemVer string"]
+    return []
 
 
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
@@ -331,9 +353,25 @@ check(
 )
 release_manifest = json.loads((ROOT / ".github/release-please/manifest.json").read_text())
 check(
-    release_manifest == {".": "0.0.0"},
-    "Initial Release Please manifest must remain at 0.0.0 until the generated release PR",
+    not release_manifest_errors(release_manifest),
+    "Release Please manifest must contain exactly one root package with a SemVer version",
 )
+for valid_manifest in ({".": "0.0.0"}, {".": "0.1.0"}, {".": "1.2.3-rc.1+build.5"}):
+    check(
+        not release_manifest_errors(valid_manifest),
+        f"valid release manifest must be accepted: {valid_manifest}",
+    )
+for invalid_manifest in (
+    {".": "01.0.0"},
+    {".": "0.1"},
+    {".": "1.0.0-01"},
+    {".": 1},
+    {".": "0.1.0", "extra": "0.1.0"},
+):
+    check(
+        bool(release_manifest_errors(invalid_manifest)),
+        f"invalid release manifest must be rejected: {invalid_manifest}",
+    )
 release_config = json.loads((ROOT / ".github/release-please/config.json").read_text())
 check(
     release_config.get("release-type") == "simple"

@@ -181,6 +181,16 @@ class ComposeActionTests(unittest.TestCase):
             {"WORKING_DIRECTORY": "C:/tmp"}, "absolute forms"
         ), (
             {"COMPOSE_FILES": "C:\\tmp\\compose.yml"}, "drive letters"
+        ), (
+            {"WORKING_DIRECTORY": "deploy\nother"}, "without whitespace"
+        ), (
+            {"WORKING_DIRECTORY": "deploy\rother"}, "without whitespace"
+        ), (
+            {"WORKING_DIRECTORY": "deploy\tother"}, "without whitespace"
+        ), (
+            {"COMPOSE_FILES": "docker-compose.yml\r"}, "without whitespace"
+        ), (
+            {"COMPOSE_FILES": "\tdocker-compose.yml"}, "without whitespace"
         )):
             result, env_file = self.run_validation(**values)
             self.assertEqual(result.returncode, 2)

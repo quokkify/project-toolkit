@@ -105,8 +105,8 @@ runs:
           local value="$1"
           local description="$2"
 
-          if [[ -z "$value" || "$value" == /* || "$value" == ~* || "$value" == *:* || "$value" == *$'\\n'* || "$value" == *$'\\r'* || "$value" == *$'\\t'* || "$value" == *$' '* ]]; then
-            fail "$description must be a non-empty relative path without spaces, absolute forms, or drive letters"
+          if [[ -z "$value" || "$value" == /* || "$value" == ~* || "$value" == *:* || "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" == *$'\t'* || "$value" == *$' '* ]]; then
+            fail "$description must be a non-empty relative path without whitespace, absolute forms, or drive letters"
           fi
           [[ "$value" == "." ]] && return 0
           case "/$value/" in

@@ -64,3 +64,13 @@ jobs:
           wait-for-health: "true"
           wait-urls: http://127.0.0.1:8080/health
           timeout-seconds: "120"
+          url-timeout-seconds: "5"
+      - name: Stop compose services
+        if: ${{ always() }}
+        shell: bash
+        working-directory: .
+        run: |
+          docker compose \
+            --file docker-compose.yml \
+            --file docker-compose.test.yml \
+            down --remove-orphans

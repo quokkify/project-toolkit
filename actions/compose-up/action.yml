@@ -34,6 +34,10 @@ inputs:
     description: Readiness timeout from 1 through 86400 seconds.
     required: false
     default: "120"
+  url-timeout-seconds:
+    description: Maximum timeout for each HTTP readiness probe, from 1 through 300 seconds.
+    required: false
+    default: "5"
   show-logs-on-failure:
     description: Print service status and the last 100 log lines on failure.
     required: false
@@ -56,6 +60,7 @@ runs:
         SERVICES: ${{ inputs.services }}
         SHOW_LOGS_ON_FAILURE: ${{ inputs.show-logs-on-failure }}
         TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        URL_TIMEOUT_SECONDS: ${{ inputs.url-timeout-seconds }}
         WAIT_FOR_HEALTH: ${{ inputs.wait-for-health }}
         WAIT_URLS: ${{ inputs.wait-urls }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
@@ -77,6 +82,11 @@ runs:
           exit 2
         fi
         timeout=$((10#$TIMEOUT_SECONDS))
+        if [[ ! "$URL_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{0,2}$ ]] || (( 10#$URL_TIMEOUT_SECONDS > 300 )); then
+          echo "url-timeout-seconds must be an integer from 1 through 300" >&2
+          exit 2
+        fi
+        url_timeout=$((10#$URL_TIMEOUT_SECONDS))
 
         cd "$WORKING_DIRECTORY"
         mapfile -t compose_files < <(printf '%s\n' "$COMPOSE_FILES" | sed '/^[[:space:]]*$/d')
@@ -178,7 +188,7 @@ runs:
             remaining=$((deadline - SECONDS))
             (( remaining > 0 )) || fail_readiness "Timed out waiting for Compose readiness after ${timeout}s"
             request_timeout=$remaining
-            (( request_timeout > 5 )) && request_timeout=5
+            (( request_timeout > url_timeout )) && request_timeout=$url_timeout
             curl --fail --silent --show-error --location --max-time "$request_timeout" -- "$url" >/dev/null || all_ready=false
           done
 

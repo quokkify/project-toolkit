@@ -112,7 +112,14 @@ class SetupActionTests(unittest.TestCase):
 class ComposeActionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.script = action("compose-up")["runs"]["steps"][0]["run"]
+        steps = [
+            step
+            for step in action("compose-up")["runs"]["steps"]
+            if step.get("name") == "Start Compose and wait for readiness"
+        ]
+        if len(steps) != 1:
+            raise AssertionError("expected exactly one Compose readiness step")
+        cls.script = steps[0]["run"]
 
     def run_action(
         self,
@@ -123,6 +130,9 @@ class ComposeActionTests(unittest.TestCase):
         completed_services: str = "",
         completed_status: str = "exited",
         completed_exit: str = "0",
+        compose_files: str = "docker-compose.yml",
+        curl_exit: str = "0",
+        down_on_timeout: str = "true",
     ) -> tuple[subprocess.CompletedProcess[str], str, str]:
         with tempfile.TemporaryDirectory(prefix="compose-action-test-") as tmp:
             root = Path(tmp)
@@ -151,7 +161,7 @@ class ComposeActionTests(unittest.TestCase):
             )
             docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
             curl = bin_dir / "curl"
-            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\nexit 0\n")
+            curl.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\nexit \"$CURL_EXIT\"\n")
             curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
 
             env = os.environ.copy()
@@ -161,9 +171,10 @@ class ComposeActionTests(unittest.TestCase):
                     "COMPLETED_EXIT": completed_exit,
                     "COMPLETED_SERVICES": completed_services,
                     "COMPLETED_STATUS": completed_status,
-                    "COMPOSE_FILES": "docker-compose.yml",
+                    "COMPOSE_FILES": compose_files,
+                    "CURL_EXIT": curl_exit,
                     "DOCKER_LOG": str(docker_log),
-                    "DOWN_ON_TIMEOUT": "true",
+                    "DOWN_ON_TIMEOUT": down_on_timeout,
                     "FAKE_HEALTH": health,
                     "CURL_LOG": str(curl_log),
                     "PATH": f"{bin_dir}:{env['PATH']}",
@@ -171,6 +182,7 @@ class ComposeActionTests(unittest.TestCase):
                     "SERVICES": "web",
                     "SHOW_LOGS_ON_FAILURE": "true",
                     "TIMEOUT_SECONDS": timeout,
+                    "URL_TIMEOUT_SECONDS": "5",
                     "WAIT_FOR_HEALTH": "true",
                     "WAIT_URLS": wait_urls,
                     "WORKING_DIRECTORY": str(work_dir),
@@ -220,6 +232,21 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("Timed out", result.stderr)
         self.assertIn("logs --no-color --tail 100", docker_calls)
         self.assertIn(" down", docker_calls)
+
+    def test_empty_compose_files_fails_before_docker(self) -> None:
+        result, docker_calls, _ = self.run_action(compose_files="")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("At least one compose file", result.stderr)
+        self.assertEqual(docker_calls, "")
+
+    def test_failing_url_times_out_without_down_when_disabled(self) -> None:
+        result, docker_calls, curl_calls = self.run_action(
+            timeout="1", curl_exit="22", down_on_timeout="false"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Timed out", result.stderr)
+        self.assertTrue(curl_calls)
+        self.assertNotIn(" down", docker_calls)
 
 
 if __name__ == "__main__":

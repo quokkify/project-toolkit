@@ -22,9 +22,14 @@ for path in sorted((ROOT / "actions").glob("*/action.yml")):
         if not isinstance(script, str):
             continue
         label = f"{path.relative_to(ROOT)} step {index}"
+        declared_env = step.get("env", {})
+        declarations = ""
+        if isinstance(declared_env, dict):
+            names = [name for name in declared_env if isinstance(name, str)]
+            declarations = "".join(f"declare {name}\n" for name in sorted(names))
         result = subprocess.run(
             [SHELLCHECK, "--shell=bash", "--external-sources", "-"],
-            input=script,
+            input=declarations + script,
             text=True,
             capture_output=True,
             check=False,

@@ -290,14 +290,16 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ROOT,
         tmp_path / "template-source",
         ignore=shutil.ignore_patterns(
-            ".git", ".worktrees", ".ruff_cache", "__pycache__", "*.pyc"
+            ".git", ".worktrees", ".ruff_cache", ".venv", "__pycache__", "*.pyc", "build", "dist", "node_modules"
         ),
     )
     run(["git", "init", "-q"], template_source)
     run(["git", "config", "user.email", "fixture@example.invalid"], template_source)
     run(["git", "config", "user.name", "Fixture"], template_source)
+    run(["git", "config", "commit.gpgsign", "false"], template_source)
+    run(["git", "config", "core.hooksPath", "/dev/null"], template_source)
     run(["git", "add", "."], template_source)
-    run(["git", "commit", "-qm", "candidate template"], template_source)
+    run(["git", "commit", "--no-verify", "-qm", "candidate template"], template_source)
     for scenario in ("python", "node", "java", "polyglot"):
         dest = tmp_path / scenario
         run(
@@ -337,8 +339,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             run(["git", "init", "-q"], dest)
             run(["git", "config", "user.email", "fixture@example.invalid"], dest)
             run(["git", "config", "user.name", "Fixture"], dest)
+            run(["git", "config", "commit.gpgsign", "false"], dest)
+            run(["git", "config", "core.hooksPath", "/dev/null"], dest)
             run(["git", "add", "."], dest)
-            run(["git", "commit", "-qm", "fixture"], dest)
+            run(["git", "commit", "--no-verify", "-qm", "fixture"], dest)
             run([copier, "update", "--trust", "--defaults"], dest)
             status = subprocess.check_output(
                 ["git", "status", "--porcelain"], cwd=dest, text=True

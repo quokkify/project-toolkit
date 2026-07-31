@@ -95,11 +95,12 @@ actionlint = shutil.which('actionlint')
 check(actionlint is not None, 'actionlint executable is required')
 if ERRORS:
     print('\n'.join('ERROR: ' + e for e in ERRORS), file=sys.stderr); raise SystemExit(1)
+assert copier is not None and actionlint is not None
 with tempfile.TemporaryDirectory(prefix='project-toolkit-validation-') as tmp:
     tmp_path = Path(tmp)
     for scenario in ('python', 'node', 'java', 'polyglot'):
         dest = tmp_path / scenario
-        run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'HEAD', '--data-file', str(ROOT / f'tests/scenarios/{scenario}.yml'), str(ROOT / 'templates/project'), str(dest)])
+        run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'HEAD', '--data-file', str(ROOT / f'tests/scenarios/{scenario}.yml'), str(ROOT), str(dest)])
         run([actionlint, str(dest / '.github/workflows/ci.yml')])
         check((dest / '.copier-answers.yml').exists(), f'{scenario}: missing .copier-answers.yml')
         if scenario == 'polyglot':

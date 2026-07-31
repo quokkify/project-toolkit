@@ -19,3 +19,5 @@
 6. **Two release modes.** A polyglot product may share one version (`single`) or use independent component versions (`manifest`); these are deliberately distinct configurations.
 7. **Composite actions are earned.** Add one only after real repeated step-level logic appears and cannot be expressed clearly through established Actions.
 8. **Static validation is honest.** A reusable workflow added in a PR may not be invocable remotely until it exists on an accessible ref/default branch. The PR therefore uses actionlint, template generation/update, policy checks, and executable fixtures. It does not claim remote runtime validation.
+
+The Copier configuration is at the repository root rather than under `templates/project/`. Copier records the VCS template root in its answers file; making the Git repository itself the template source is what allows a generated project to resolve old/new revisions during `copier update`. The rendered files remain isolated under `templates/project/template/` through `_subdirectory`.

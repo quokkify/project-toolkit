@@ -30,7 +30,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy gh:ylazakovich/project-toolkit templates/project my-project --vcs-ref v1.0.0 --trust
+copier copy gh:ylazakovich/project-toolkit my-project --vcs-ref v1.0.0 --trust
 cd my-project
 copier update --trust
 ```

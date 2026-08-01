@@ -1,6 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>quokkify/project-toolkit//renovate/default.json5"],
-  "labels": ["dependencies"],
-  "dependencyDashboard": true
+  "extends": [
+    "github>quokkify/project-toolkit//renovate/default.json",
+    "github>ylazakovich/renovate-config//presets/github-actions/default"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update the pinned Renovate config validator package.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "npx\\s+--yes\\s+--package\\s+renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s+renovate-config-validator"
+      ],
+      "depNameTemplate": "renovate",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    }
+  ]
 }

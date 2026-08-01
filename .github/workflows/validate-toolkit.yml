@@ -45,8 +45,10 @@ jobs:
           install -m 0755 actionlint "$HOME/.local/bin/actionlint"
       - name: Run repository validation
         run: python scripts/validate.py
-      - name: Validate Renovate preset
-        run: npx --yes --package renovate@44.4.6 renovate-config-validator --strict renovate/default.json5
+      - name: Validate Renovate configuration
+        run: >-
+          npx --yes --package renovate@44.4.6 renovate-config-validator
+          --strict --no-global renovate/default.json .github/renovate.json
       - name: Run actionlint on toolkit and examples
         run: actionlint .github/workflows/*.yml examples/*.yml
       - name: Check shell snippets

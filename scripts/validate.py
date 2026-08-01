@@ -538,6 +538,50 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "copier update did not persist inferred renovate_presets",
             )
 
+    config_only_data = tmp_path / "config-only.yml"
+    config_only_data.write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "fixture-config-only",
+                "toolkit_version": "v1.0.0",
+                "components": [],
+                "docker": False,
+                "release_please": True,
+                "renovate": True,
+                "renovate_config_repository": "quokkify/renovate-presets",
+                "renovate_presets": ["default", "github-actions"],
+            }
+        )
+    )
+    config_only_dest = tmp_path / "config-only"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data-file",
+            str(config_only_data),
+            str(template_source),
+            str(config_only_dest),
+        ]
+    )
+    check(
+        not (config_only_dest / ".github/workflows/ci.yml").exists(),
+        "config-only project unexpectedly generated toolkit CI",
+    )
+    check(
+        (config_only_dest / ".github/workflows/release.yml").exists(),
+        "config-only project lost Release Please workflow",
+    )
+    assert_generated_renovate_config(
+        config_only_dest / "renovate.json",
+        renovate_extends("quokkify/renovate-presets", ["default", "github-actions"]),
+        "config-only",
+    )
+
     no_renovate_data = tmp_path / "no-renovate.yml"
     no_renovate_data.write_text(
         yaml.safe_dump(

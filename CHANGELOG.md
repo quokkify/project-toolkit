@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.2](https://github.com/quokkify/project-toolkit/compare/v2.5.1...v2.5.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **actions:** use real token for gh-pages auth ([#44](https://github.com/quokkify/project-toolkit/issues/44)) ([c7cba31](https://github.com/quokkify/project-toolkit/commit/c7cba315692f61a4e17bd07536531a3d407c109b))
+
 ## [2.5.1](https://github.com/quokkify/project-toolkit/compare/v2.5.0...v2.5.1) (2026-08-01)
 
 

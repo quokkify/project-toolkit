@@ -6,4 +6,4 @@ components:
 docker: true
 release_please: false
 renovate: true
-renovate_config_repository: ylazakovich/renovate-config
+renovate_config_repository: quokkify/renovate-presets

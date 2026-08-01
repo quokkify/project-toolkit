@@ -499,7 +499,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
         assert_generated_renovate_config(
             dest / "renovate.json",
-            renovate_extends("ylazakovich/renovate-config", expected_presets),
+            renovate_extends("quokkify/renovate-presets", expected_presets),
             scenario,
         )
         if scenario == "polyglot":
@@ -530,7 +530,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             answers = yaml.safe_load((dest / ".copier-answers.yml").read_text())
             check(
                 answers.get("renovate_config_repository")
-                == "ylazakovich/renovate-config",
+                == "quokkify/renovate-presets",
                 "copier update did not persist renovate_config_repository",
             )
             check(

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.3](https://github.com/quokkify/project-toolkit/compare/v2.5.2...v2.5.3) (2026-08-01)
+
+
+### Bug Fixes
+
+* **actions:** authenticate gh-pages git with askpass ([#46](https://github.com/quokkify/project-toolkit/issues/46)) ([117229a](https://github.com/quokkify/project-toolkit/commit/117229addda82d2dd1a16a2d200e9aa19d0d79a7))
+
 ## [2.5.2](https://github.com/quokkify/project-toolkit/compare/v2.5.1...v2.5.2) (2026-08-01)
 
 

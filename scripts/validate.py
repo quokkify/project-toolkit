@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -13,8 +14,17 @@ from pathlib import Path
 
 import yaml
 
+from validate_fixtures import LANGUAGES, validate_fixtures
+
 ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
+PARSER = argparse.ArgumentParser(description=__doc__)
+PARSER.add_argument(
+    "--static",
+    action="store_true",
+    help="run shared policy, template, and static checks without language fixtures",
+)
+ARGS = PARSER.parse_args()
 
 
 def check(condition: bool, message: str) -> None:
@@ -128,6 +138,95 @@ def release_manifest_errors(manifest: object) -> list[str]:
     if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
         return ["root package version must be a well-formed SemVer string"]
     return []
+
+
+def validate_toolkit_workflow_errors(path: Path) -> list[str]:
+    """Validate that repository checks remain isolated in explicit micro-jobs."""
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    jobs = workflow.get("jobs")
+    require(isinstance(jobs, dict), "jobs block must be a mapping")
+    if not isinstance(jobs, dict):
+        return errors
+    require(
+        set(jobs) == {"lint", "python", "node", "java"},
+        "must define exactly lint, python, node, and java jobs",
+    )
+    expected = {
+        "lint": {
+            "setups": {"actions/setup-python", "actions/setup-node"},
+            "command": "python scripts/validate.py --static",
+        },
+        "python": {
+            "setups": {"actions/setup-python"},
+            "command": "python scripts/validate_fixtures.py python",
+        },
+        "node": {
+            "setups": {"actions/setup-node"},
+            "command": "python3 scripts/validate_fixtures.py node",
+        },
+        "java": {
+            "setups": {"actions/setup-java"},
+            "command": "python3 scripts/validate_fixtures.py java",
+        },
+    }
+    for name, contract in expected.items():
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            require(False, f"{name} job must be a mapping")
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            require(False, f"{name} job must define steps")
+            continue
+        setup_actions: set[str] = set()
+        commands: list[str] = []
+        checkout_found = False
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            use = step.get("uses")
+            if isinstance(use, str):
+                action = use.rpartition("@")[0]
+                if action == "actions/checkout":
+                    checkout_found = True
+                    require(
+                        step.get("with", {}).get("persist-credentials") is False,
+                        f"{name} checkout must set persist-credentials: false",
+                    )
+                if action.startswith("actions/setup-"):
+                    setup_actions.add(action)
+            command = step.get("run")
+            if isinstance(command, str):
+                commands.append(command)
+        require(checkout_found, f"{name} job must check out the repository")
+        require(
+            setup_actions == contract["setups"],
+            f"{name} job has unexpected toolchain setup actions: {sorted(setup_actions)}",
+        )
+        require(
+            contract["command"] in commands,
+            f"{name} job must run only its focused validation entrypoint",
+        )
+        other_commands = {
+            value["command"] for key, value in expected.items() if key != name
+        }
+        require(
+            not other_commands.intersection(commands),
+            f"{name} job invokes another job's validation entrypoint",
+        )
+    return errors
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
@@ -419,6 +518,9 @@ check(
     "Release Please config must preserve the simple project-toolkit SemVer contract",
 )
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
+ERRORS.extend(
+    validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
+)
 for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-*.yml")):
     check(
         bool(release_workflow_errors(fixture)),
@@ -776,51 +878,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 
 run([sys.executable, "tests/test_composite_actions.py"])
 
-with tempfile.TemporaryDirectory(prefix="project-toolkit-fixtures-") as tmp:
-    fixtures = Path(tmp)
-    python = shutil.copytree(ROOT / "tests/fixtures/python", fixtures / "python")
-    node = shutil.copytree(ROOT / "tests/fixtures/node", fixtures / "node")
-    java = shutil.copytree(ROOT / "tests/fixtures/java", fixtures / "java")
-    run([sys.executable, "-m", "compileall", "-q", "src"], python)
-    run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], python)
-    (python / "dist").mkdir()
-    run(
-        [sys.executable, "-m", "zipapp", "src", "-o", "dist/app.pyz", "-m", "app:main"],
-        python,
-    )
-    run(["npm", "run", "lint"], node)
-    run(["npm", "test"], node)
-    run(["npm", "run", "build"], node)
-    (java / "build/classes").mkdir(parents=True)
-    (java / "build/test-classes").mkdir(parents=True)
-    run(["javac", "-Xlint:all", "-d", "build/classes", "src/toolkit/App.java"], java)
-    run(
-        [
-            "javac",
-            "-Xlint:all",
-            "-cp",
-            "build/classes",
-            "-d",
-            "build/test-classes",
-            "test/toolkit/AppTest.java",
-        ],
-        java,
-    )
-    run(["java", "-cp", "build/classes:build/test-classes", "toolkit.AppTest"], java)
-    run(
-        [
-            "jar",
-            "--create",
-            "--file",
-            "build/toolkit-java-fixture.jar",
-            "-C",
-            "build/classes",
-            ".",
-        ],
-        java,
-    )
-    run(["mvn", "--batch-mode", "--no-transfer-progress", "test"], java)
+if not ARGS.static:
+    validate_fixtures(LANGUAGES)
 if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)
-print("validation: OK")
+print("static validation: OK" if ARGS.static else "validation: OK")

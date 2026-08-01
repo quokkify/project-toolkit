@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  lint:
+    name: Lint and static validation
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -26,12 +27,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.18.1"
-      - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Install pinned validation dependencies
+      - name: Install pinned static-validation dependencies
         run: python -m pip install PyYAML==6.0.3 copier==9.17.0
       - name: Install actionlint
         env:
@@ -44,8 +40,8 @@ jobs:
           tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
           mkdir -p "$HOME/.local/bin"
           install -m 0755 actionlint "$HOME/.local/bin/actionlint"
-      - name: Run repository validation
-        run: python scripts/validate.py
+      - name: Validate toolkit policies and templates
+        run: python scripts/validate.py --static
       - name: Validate Renovate configuration
         run: >-
           npx --yes --package renovate@44.5.3 renovate-config-validator
@@ -71,3 +67,52 @@ jobs:
           else
             git diff --check "$BASE_SHA..$HEAD_SHA"
           fi
+
+  python:
+    name: Python fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Compile, test, and package Python fixture
+        run: python scripts/validate_fixtures.py python
+
+  node:
+    name: Node.js fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.1"
+      - name: Lint, test, and build Node.js fixture
+        run: python3 scripts/validate_fixtures.py node
+
+  java:
+    name: Java fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile, test, and package Java fixture
+        run: python3 scripts/validate_fixtures.py java

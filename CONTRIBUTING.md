@@ -3,6 +3,11 @@
 Use Conventional Commits, create one focused branch/PR, and keep workflows atomic. Before opening a PR run:
 
 ```console
+python scripts/validate.py --static
+python scripts/validate_fixtures.py python
+python scripts/validate_fixtures.py node
+python scripts/validate_fixtures.py java
+# Or run the complete canonical suite:
 python scripts/validate.py
 actionlint .github/workflows/*.yml examples/*.yml
 git diff --check

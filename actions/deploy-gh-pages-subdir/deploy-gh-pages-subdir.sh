@@ -100,7 +100,7 @@ prune_old_reports() {
       keep+=("$rel")
     else
       echo "Pruning old gh-pages report: $rel"
-      rm -rf -- "$R/$rel"
+      rm -rf -- "${R:?}/${rel:?}"
     fi
   done < <(printf '%s\n' "${entries[@]}" | sort -t $'\t' -k1,1nr -k2,2)
 }

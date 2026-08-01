@@ -3,7 +3,7 @@
 A small, versioned toolkit for composing consistent GitHub automation across Python, Node.js, Java, Docker, and polyglot repositories—without Git submodules.
 
 - **Reusable workflows** own complete jobs and runner behavior.
-- **Composite actions** provide reusable setup/runtime primitives for Python, Node.js, Java/Gradle, and compose-readiness.
+- **Composite actions** provide reusable setup/runtime and JUnit reporting primitives for Python, Node.js, Java/Gradle, and Compose-based checks.
 - **Copier** creates and later updates small physical files in a consumer repository.
 - **Renovate** proposes version updates; **Release Please** prepares changelogs and releases.
 

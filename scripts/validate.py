@@ -173,11 +173,18 @@ BOOLEAN_INPUTS = {
     "build",
     "cache-dependencies",
     "down-on-timeout",
+    "fail-on-missing",
     "install-dependencies",
     "show-logs-on-failure",
     "wait-for-health",
 }
-EXPECTED_ACTIONS = {"compose-up", "setup-java-gradle", "setup-node", "setup-python"}
+EXPECTED_ACTIONS = {
+    "compose-up",
+    "junit-step-summary",
+    "setup-java-gradle",
+    "setup-node",
+    "setup-python",
+}
 
 
 def validate_action_metadata(data: object, label: str) -> list[str]:
@@ -248,7 +255,7 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
 action_paths = sorted((ROOT / "actions").glob("*/action.yml"))
 check(
     {path.parent.name for path in action_paths} == EXPECTED_ACTIONS,
-    "actions/: expected exactly the four documented pilot composite actions",
+    "actions/: expected exactly the five documented composite actions",
 )
 for action_path in action_paths:
     data = yaml.safe_load(action_path.read_text())

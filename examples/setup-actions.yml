@@ -74,3 +74,19 @@ jobs:
             --file docker-compose.yml \
             --file docker-compose.test.yml \
             down --remove-orphans
+
+  junit-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run tests with JUnit output
+        run: your-test-command --junit-output test-results/junit.xml
+      - name: Write JUnit job summary
+        if: ${{ always() }}
+        uses: quokkify/project-toolkit/actions/junit-step-summary@v2.1.0
+        with:
+          junit-paths: test-results/**/*.xml
+          title: Test results

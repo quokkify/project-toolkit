@@ -46,25 +46,25 @@ jobs:
   python:
     needs: changes
     if: ${{ needs.changes.outputs.python == 'true' }}
-    uses: ylazakovich/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
     with:
       working-directory: backend
   node:
     needs: changes
     if: ${{ needs.changes.outputs.node == 'true' }}
-    uses: ylazakovich/project-toolkit/.github/workflows/node-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v1.0.0
     with:
       working-directory: frontend
   java:
     needs: changes
     if: ${{ needs.changes.outputs.java == 'true' }}
-    uses: ylazakovich/project-toolkit/.github/workflows/java-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v1.0.0
     with:
       working-directory: worker
   integration:
     needs: [changes, python, node, java]
     if: ${{ always() && !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.integration == 'true' && (needs.python.result == 'success' || needs.python.result == 'skipped') && (needs.node.result == 'success' || needs.node.result == 'skipped') && (needs.java.result == 'success' || needs.java.result == 'skipped') }}
-    uses: ylazakovich/project-toolkit/.github/workflows/docker-build.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/docker-build.yml@v1.0.0
     with:
       context: .
       push: false

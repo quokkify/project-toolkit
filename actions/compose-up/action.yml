@@ -255,7 +255,7 @@ runs:
 
     - id: compose-health
       name: Start Compose with standalone health engine
-      uses: ylazakovich/compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0
+      uses: quokkify/compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0
       with:
         compose-files: ${{ env.COMPOSE_FILES_NORMALIZED }}
         compose-services: ${{ env.COMPOSE_SERVICES_NORMALIZED }}

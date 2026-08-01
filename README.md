@@ -18,7 +18,7 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: ylazakovich/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
     with:
       python-version: "3.12"
       test-command: pytest

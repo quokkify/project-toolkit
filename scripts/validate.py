@@ -337,8 +337,8 @@ for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
         target, sep, ref = use.rpartition("@")
         check(bool(sep), f"{path.relative_to(ROOT)}: action without ref: {use}")
         is_toolkit_reference = target.startswith(
-            "ylazakovich/project-toolkit/.github/workflows/"
-        ) or target.startswith("ylazakovich/project-toolkit/actions/")
+            "quokkify/project-toolkit/.github/workflows/"
+        ) or target.startswith("quokkify/project-toolkit/actions/")
         if is_toolkit_reference:
             check(
                 bool(re.fullmatch(r"v\d+\.\d+\.\d+", ref)),

@@ -19,7 +19,7 @@
     {
       "description": "Group non-breaking project-toolkit workflow updates.",
       "matchManagers": ["custom.regex"],
-      "matchPackageNames": ["ylazakovich/project-toolkit"],
+      "matchPackageNames": ["quokkify/project-toolkit"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "project-toolkit non-major updates"
     }
@@ -30,9 +30,9 @@
       "description": "Update exact SemVer references to reusable project-toolkit workflows.",
       "managerFilePatterns": ["/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
-        "uses:\\s*ylazakovich/project-toolkit/\\.github/workflows/[^@\\s]+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+        "uses:\\s*quokkify/project-toolkit/\\.github/workflows/[^@\\s]+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
-      "depNameTemplate": "ylazakovich/project-toolkit",
+      "depNameTemplate": "quokkify/project-toolkit",
       "datasourceTemplate": "github-tags",
       "versioningTemplate": "semver"
     }

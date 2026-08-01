@@ -1,0 +1,100 @@
+name: JUnit step summary
+description: Aggregate workspace-contained JUnit XML files into the GitHub job summary and numeric outputs.
+
+inputs:
+  junit-paths:
+    description: Newline-delimited JUnit XML paths or glob patterns relative to working-directory.
+    required: false
+    default: test-results/**/*.xml
+  working-directory:
+    description: Repository subpath used as the root for junit-paths.
+    required: false
+    default: .
+  title:
+    description: Single-line GitHub job-summary heading without Markdown heading markers.
+    required: false
+    default: Test results
+  fail-on-missing:
+    description: Fail when no regular JUnit XML files match junit-paths.
+    required: false
+    default: "false"
+  max-files:
+    description: Maximum number of unique JUnit XML files accepted.
+    required: false
+    default: "200"
+  max-file-bytes:
+    description: Maximum size in bytes accepted for each JUnit XML file.
+    required: false
+    default: "10485760"
+  max-total-bytes:
+    description: Maximum aggregate bytes accepted across all matched JUnit XML files.
+    required: false
+    default: "52428800"
+  max-scan-entries:
+    description: Maximum filesystem entries inspected below working-directory.
+    required: false
+    default: "100000"
+  max-depth:
+    description: Maximum directory depth inspected below working-directory.
+    required: false
+    default: "64"
+  cwd:
+    description: Deprecated CSP-compatible alias for working-directory; requires variant.
+    required: false
+    default: ""
+    deprecationMessage: Use working-directory and junit-paths instead.
+  variant:
+    description: Deprecated CSP-compatible report layout; requires cwd.
+    required: false
+    default: ""
+    deprecationMessage: Use an explicit junit-paths glob instead.
+
+outputs:
+  files:
+    description: Number of unique JUnit XML files aggregated.
+    value: ${{ steps.summary.outputs.files }}
+  tests:
+    description: Total test count.
+    value: ${{ steps.summary.outputs.tests }}
+  passed:
+    description: Passed test count.
+    value: ${{ steps.summary.outputs.passed }}
+  failures:
+    description: Assertion-failure count.
+    value: ${{ steps.summary.outputs.failures }}
+  errors:
+    description: Error count.
+    value: ${{ steps.summary.outputs.errors }}
+  skipped:
+    description: Skipped or disabled test count.
+    value: ${{ steps.summary.outputs.skipped }}
+  duration:
+    description: Aggregated duration in seconds.
+    value: ${{ steps.summary.outputs.duration }}
+  has-failures:
+    description: true when failures or errors are non-zero, otherwise false.
+    value: ${{ steps.summary.outputs.has-failures }}
+
+runs:
+  using: composite
+  steps:
+    - name: Aggregate JUnit XML
+      id: summary
+      shell: bash
+      env:
+        FAIL_ON_MISSING: ${{ inputs.fail-on-missing }}
+        JUNIT_PATHS: ${{ inputs.junit-paths }}
+        LEGACY_CWD: ${{ inputs.cwd }}
+        LEGACY_VARIANT: ${{ inputs.variant }}
+        MAX_FILE_BYTES: ${{ inputs.max-file-bytes }}
+        MAX_FILES: ${{ inputs.max-files }}
+        MAX_DEPTH: ${{ inputs.max-depth }}
+        MAX_SCAN_ENTRIES: ${{ inputs.max-scan-entries }}
+        MAX_TOTAL_BYTES: ${{ inputs.max-total-bytes }}
+        TITLE: ${{ inputs.title }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        export FAIL_ON_MISSING JUNIT_PATHS LEGACY_CWD LEGACY_VARIANT
+        export MAX_DEPTH MAX_FILES MAX_FILE_BYTES MAX_SCAN_ENTRIES MAX_TOTAL_BYTES
+        export TITLE WORKING_DIRECTORY
+        python3 "${GITHUB_ACTION_PATH}/junit_step_summary.py"

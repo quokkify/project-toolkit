@@ -4,6 +4,7 @@ import os
 import shlex
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -122,6 +123,335 @@ class SetupActionTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(output.read_text(), "gradle-command=backend/gradlew\n")
+
+
+class JUnitStepSummaryTests(unittest.TestCase):
+    script = ROOT / "actions/junit-step-summary/junit_step_summary.py"
+
+    def run_summary(
+        self,
+        workspace: Path,
+        *,
+        patterns: str = "results/**/*.xml",
+        fail_on_missing: str = "false",
+        working_directory: str = ".",
+        max_files: str = "200",
+        max_file_bytes: str = "10485760",
+        max_total_bytes: str = "52428800",
+        max_scan_entries: str = "100000",
+        max_depth: str = "64",
+        legacy_cwd: str = "",
+        legacy_variant: str = "",
+    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
+        summary = workspace / "github-summary.md"
+        output = workspace / "github-output.txt"
+        env = {
+            **os.environ,
+            "FAIL_ON_MISSING": fail_on_missing,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "GITHUB_WORKSPACE": str(workspace),
+            "JUNIT_PATHS": patterns,
+            "LEGACY_CWD": legacy_cwd,
+            "LEGACY_VARIANT": legacy_variant,
+            "MAX_FILE_BYTES": max_file_bytes,
+            "MAX_FILES": max_files,
+            "MAX_DEPTH": max_depth,
+            "MAX_SCAN_ENTRIES": max_scan_entries,
+            "MAX_TOTAL_BYTES": max_total_bytes,
+            "TITLE": "Portable test summary",
+            "WORKING_DIRECTORY": working_directory,
+        }
+        result = subprocess.run(
+            [sys.executable, str(self.script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        return (
+            result,
+            summary.read_text() if summary.exists() else "",
+            output.read_text() if output.exists() else "",
+        )
+
+    def test_aggregates_testcases_and_summary_only_documents(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-test-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            (results / "cases.xml").write_text(
+                """<testsuite name="cases">
+                <testcase name="pass" time="1" />
+                <testcase name="failure" time="2"><failure /></testcase>
+                <testcase name="error" time="3"><error /></testcase>
+                <testcase name="skip" time="4"><skipped /></testcase>
+                </testsuite>"""
+            )
+            (results / "summary.xml").write_text(
+                '<testsuites tests="2" failures="0" errors="0" skipped="1" time="0.5" />'
+            )
+            result, summary, output = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("### Portable test summary (failures)", summary)
+            self.assertIn("| 2 | 6 | 2 | 1 | 1 | 2 | 10.5s |", summary)
+            self.assertIn("files=2\n", output)
+            self.assertIn("tests=6\n", output)
+            self.assertIn("passed=2\n", output)
+            self.assertIn("failures=1\n", output)
+            self.assertIn("errors=1\n", output)
+            self.assertIn("skipped=2\n", output)
+            self.assertIn("duration=10.5\n", output)
+            self.assertIn("has-failures=true\n", output)
+
+            result, _, output = self.run_summary(workspace, patterns="./results/**/*.xml")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("files=2\n", output)
+
+    def test_aggregates_namespaced_nested_suites_without_testcases(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-nested-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            (results / "nested.xml").write_text(
+                """<testsuites xmlns="urn:junit">
+                <testsuite name="outer">
+                  <testsuite name="one" tests="2" failures="1" errors="0" skipped="0" time="1.25" />
+                  <testsuite name="two" tests="3" failures="0" errors="1" disabled="1" time="2.75" />
+                </testsuite>
+                </testsuites>"""
+            )
+            result, summary, output = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("| 1 | 5 | 2 | 1 | 1 | 1 | 4s |", summary)
+            self.assertIn("has-failures=true\n", output)
+
+    def test_missing_files_are_optional_or_fail_closed_by_input(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-missing-") as tmp:
+            workspace = Path(tmp)
+            result, summary, output = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("| 0 | 0 | 0 | 0 | 0 | 0 | 0s |", summary)
+            self.assertIn("files=0\n", output)
+            result, summary, output = self.run_summary(workspace, fail_on_missing="true")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("no regular JUnit XML files matched", result.stderr)
+
+    def test_rejects_traversal_entities_oversize_and_file_count_overflow(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-guards-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            (results / "entity.xml").write_text(
+                '<!DOCTYPE testsuite [<!ENTITY x "expanded">]><testsuite tests="0" />'
+            )
+            result, _, _ = self.run_summary(workspace, patterns="../outside.xml")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("without traversal", result.stderr)
+            result, _, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("DTD and entity declarations", result.stderr)
+            (results / "entity.xml").write_bytes(
+                (
+                    '<?xml version="1.0" encoding="UTF-16"?>'
+                    '<!DOCTYPE testsuite [<!ENTITY x "expanded">]>'
+                    '<testsuite tests="0" />'
+                ).encode("utf-16")
+            )
+            result, _, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("DTD and entity declarations", result.stderr)
+            (results / "entity.xml").write_text('<testsuite tests="0" />')
+            result, _, _ = self.run_summary(workspace, max_file_bytes="10")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("exceeds max-file-bytes", result.stderr)
+            (results / "second.xml").write_text('<testsuite tests="0" />')
+            result, _, _ = self.run_summary(workspace, max_files="1")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("more than max-files=1", result.stderr)
+
+    def test_rejects_extreme_duration_exponents_and_prefers_suite_totals(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-duration-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            report = results / "junit.xml"
+            report.write_text('<testsuite tests="1" failures="0" time="1e100000000" />')
+            result, _, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("at most", result.stderr)
+
+            report.write_text(
+                """<testsuite tests="5" failures="1" errors="0" skipped="1" time="7">
+                <testcase name="only-physical-case" time="999" />
+                </testsuite>"""
+            )
+            result, summary, output = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("| 1 | 5 | 3 | 1 | 0 | 1 | 7s |", summary)
+            self.assertIn("duration=7\n", output)
+
+    def test_bounds_scan_total_bytes_and_ignores_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-scan-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            (results / "one.xml").write_text('<testsuite tests="0" />')
+            (results / "two.xml").write_text('<testsuite tests="0" />')
+            (results / "loop").symlink_to(".", target_is_directory=True)
+
+            result, _, _ = self.run_summary(workspace, max_scan_entries="2")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("max-scan-entries=2", result.stderr)
+            result, _, _ = self.run_summary(workspace, max_total_bytes="30")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("max-total-bytes=30", result.stderr)
+
+        with tempfile.TemporaryDirectory(prefix="junit-summary-symlink-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            outside = workspace / "outside.xml"
+            outside.write_text('<testsuite tests="1" />')
+            (results / "linked.xml").symlink_to(outside)
+            result, _, _ = self.run_summary(workspace, fail_on_missing="true")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("no regular JUnit XML files matched", result.stderr)
+
+    def test_prunes_irrelevant_trees_and_bounds_directory_depth(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-prefix-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "test-results"
+            results.mkdir()
+            (results / "junit.xml").write_text('<testsuite tests="1" />')
+            irrelevant = workspace / "node_modules"
+            irrelevant.mkdir()
+            current = irrelevant
+            for index in range(80):
+                current = current / f"package-{index}"
+                current.mkdir()
+                (current / "metadata.json").write_text("{}")
+
+            result, summary, output = self.run_summary(
+                workspace,
+                patterns="test-results/**/*.xml",
+                max_scan_entries="2",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("| 1 | 1 | 1 | 0 | 0 | 0 | 0s |", summary)
+            self.assertIn("files=1\n", output)
+
+            nonmatching = results / "irrelevant"
+            nonmatching.mkdir()
+            for index in range(5):
+                nonmatching = nonmatching / f"deep-{index}"
+                nonmatching.mkdir()
+            result, summary, output = self.run_summary(
+                workspace,
+                patterns="test-results/*.xml",
+                max_depth="2",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("files=1\n", output)
+
+            recursive = workspace / "recursive" / "nested"
+            recursive.mkdir(parents=True)
+            (recursive / "report.xml").write_text('<testsuite tests="1" />')
+            result, _, output = self.run_summary(
+                workspace,
+                patterns="test-results/*.xml\nrecursive/**/*.xml",
+                max_scan_entries="4",
+                max_depth="3",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("files=2\n", output)
+
+            covered = workspace / "covered" / "unit"
+            covered.mkdir(parents=True)
+            (covered / "report.xml").write_text('<testsuite tests="1" />')
+            result, _, output = self.run_summary(
+                workspace,
+                patterns="covered/**/*.xml\ncovered/unit/*.xml",
+                max_scan_entries="2",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("files=1\n", output)
+
+            nested = results
+            for index in range(5):
+                nested = nested / f"level-{index}"
+                nested.mkdir()
+            (nested / "deep.xml").write_text('<testsuite tests="0" />')
+            result, _, _ = self.run_summary(
+                workspace,
+                patterns="test-results/**/*.xml",
+                max_depth="3",
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("max-depth=3", result.stderr)
+
+    def test_supports_deprecated_csp_contract_without_silent_zero_results(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-legacy-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "frontend/test-results"
+            results.mkdir(parents=True)
+            (results / "junit.xml").write_text(
+                '<testsuite tests="3" failures="1" errors="0" skipped="0" time="2.5" />'
+            )
+            result, summary, output = self.run_summary(
+                workspace,
+                patterns="test-results/**/*.xml",
+                legacy_cwd="frontend",
+                legacy_variant="frontend-single",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("| 1 | 3 | 2 | 1 | 0 | 0 | 2.5s |", summary)
+            self.assertIn("files=1\n", output)
+
+    def test_bounds_pattern_contract_and_suite_nesting(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="junit-summary-structure-") as tmp:
+            workspace = Path(tmp)
+            results = workspace / "results"
+            results.mkdir()
+            nested = '<testsuite tests="0" />'
+            for _ in range(130):
+                nested = f"<testsuite>{nested}</testsuite>"
+            (results / "nested.xml").write_text(nested)
+
+            result, _, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("testsuite nesting exceeds 128", result.stderr)
+            result, _, _ = self.run_summary(
+                workspace,
+                patterns="\n".join(f"results/report-{index}.xml" for index in range(65)),
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("more than 64 entries", result.stderr)
+            result, _, _ = self.run_summary(workspace, patterns="a" * 1025)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("1024 characters", result.stderr)
+            for pattern in ("foo**bar/report.xml", "foo/**bar/report.xml"):
+                result, _, _ = self.run_summary(workspace, patterns=pattern)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("complete path segment", result.stderr)
+
+    def test_action_metadata_is_self_contained_and_exposes_numeric_outputs(self) -> None:
+        data = action("junit-step-summary")
+        step = data["runs"]["steps"][0]
+        self.assertEqual(step["id"], "summary")
+        self.assertIn("${GITHUB_ACTION_PATH}/junit_step_summary.py", step["run"])
+        self.assertNotIn("github.workspace", step["run"])
+        self.assertEqual(data["inputs"]["fail-on-missing"]["default"], "false")
+        self.assertIn("deprecationMessage", data["inputs"]["cwd"])
+        self.assertIn("deprecationMessage", data["inputs"]["variant"])
+        self.assertEqual(data["inputs"]["max-total-bytes"]["default"], "52428800")
+        self.assertEqual(data["inputs"]["max-scan-entries"]["default"], "100000")
+        self.assertEqual(data["inputs"]["max-depth"]["default"], "64")
+        self.assertEqual(
+            set(data["outputs"]),
+            {"files", "tests", "passed", "failures", "errors", "skipped", "duration", "has-failures"},
+        )
 
 
 class ComposeActionTests(unittest.TestCase):

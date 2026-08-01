@@ -4,9 +4,9 @@ Use Conventional Commits, create one focused branch/PR, and keep workflows atomi
 
 ```console
 python scripts/validate.py --static
-python scripts/validate_fixtures.py python
-python scripts/validate_fixtures.py node
-python scripts/validate_fixtures.py java
+python scripts/validate_python_fixture.py
+node scripts/validate_node_fixture.mjs
+bash scripts/validate_java_fixture.sh
 # Or run the complete canonical suite:
 python scripts/validate.py
 actionlint .github/workflows/*.yml examples/*.yml

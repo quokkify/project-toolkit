@@ -5,13 +5,28 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  detect-runner:
+    uses: ./.github/workflows/reusable-detect-runner.yml
+    with:
+      strategy: ${{ github.event_name == 'pull_request' && 'pr_trusted' || 'push_any' }}
+      same_repo: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name }}
+      trusted_author: ${{ github.event_name == 'pull_request' && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+      is_renovate_bot: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'renovate[bot]' }}
+    secrets: inherit
+
   lint:
     name: Lint and static validation
-    runs-on: ubuntu-latest
+    needs: detect-runner
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -70,7 +85,9 @@ jobs:
 
   python:
     name: Python fixture
-    runs-on: ubuntu-latest
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 5
     steps:
       - name: Check out repository
@@ -82,11 +99,13 @@ jobs:
         with:
           python-version: "3.14"
       - name: Compile, test, and package Python fixture
-        run: python scripts/validate_fixtures.py python
+        run: python scripts/validate_python_fixture.py
 
   node:
     name: Node.js fixture
-    runs-on: ubuntu-latest
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 5
     steps:
       - name: Check out repository
@@ -98,11 +117,13 @@ jobs:
         with:
           node-version: "24.18.1"
       - name: Lint, test, and build Node.js fixture
-        run: python3 scripts/validate_fixtures.py node
+        run: node scripts/validate_node_fixture.mjs
 
   java:
     name: Java fixture
-    runs-on: ubuntu-latest
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -115,4 +136,24 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Compile, test, and package Java fixture
-        run: python3 scripts/validate_fixtures.py java
+        run: bash scripts/validate_java_fixture.sh
+
+  validate:
+    name: Validation pipeline complete
+    needs: [detect-runner, lint, python, node, java]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ always() && github.event_name != 'pull_request_target' }}
+    timeout-minutes: 5
+    steps:
+      - name: Validate stage results
+        shell: bash
+        run: |
+          if [[ "${{ needs.detect-runner.result }}" != "success" ||
+                "${{ needs.lint.result }}" != "success" ||
+                "${{ needs.python.result }}" != "success" ||
+                "${{ needs.node.result }}" != "success" ||
+                "${{ needs.java.result }}" != "success" ]]; then
+            echo "One or more required validation stages did not succeed." >&2
+            exit 1
+          fi
+          echo "All required validation stages completed successfully."

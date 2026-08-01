@@ -1,0 +1,101 @@
+name: Reusable runner detection
+
+on:
+  workflow_call:
+    inputs:
+      strategy:
+        description: One of pr_trusted or push_any
+        required: true
+        type: string
+      same_repo:
+        description: Whether the pull request source and target repositories match
+        required: false
+        type: boolean
+        default: false
+      trusted_author:
+        description: Whether the pull request author is OWNER, MEMBER, or COLLABORATOR
+        required: false
+        type: boolean
+        default: false
+      is_renovate_bot:
+        description: Whether the pull request author is renovate[bot]
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      runs_on:
+        description: Runner labels as a JSON array
+        value: ${{ jobs.detect-runner.outputs.runs_on }}
+      is_self_hosted:
+        description: Whether a self-hosted runner was selected
+        value: ${{ jobs.detect-runner.outputs.is_self_hosted }}
+
+permissions:
+  contents: read
+  actions: none
+
+jobs:
+  detect-runner:
+    name: Select runner
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on: ${{ steps.select.outputs.runs_on }}
+      is_self_hosted: ${{ steps.select.outputs.is_self_hosted }}
+    steps:
+      - name: Choose runner
+        id: select
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          github-token: ${{ secrets.RUNNER_DISCOVERY_TOKEN || github.token }}
+          script: |
+            const labels = ['self-hosted', 'compose', 'internal'];
+            const strategy = '${{ inputs.strategy }}';
+
+            const setHosted = () => {
+              core.setOutput('runs_on', JSON.stringify(['ubuntu-latest']));
+              core.setOutput('is_self_hosted', 'false');
+            };
+            const setSelfHosted = () => {
+              core.setOutput('runs_on', JSON.stringify(labels));
+              core.setOutput('is_self_hosted', 'true');
+            };
+
+            let allowSelfHosted = false;
+            if (strategy === 'push_any') {
+              allowSelfHosted = true;
+            } else if (strategy === 'pr_trusted') {
+              allowSelfHosted =
+                ${{ inputs.same_repo }} &&
+                (${{ inputs.trusted_author }} || ${{ inputs.is_renovate_bot }});
+            } else {
+              core.warning(`Unknown strategy '${strategy}', using github-hosted runner.`);
+            }
+
+            if (!allowSelfHosted) {
+              setHosted();
+              return;
+            }
+
+            try {
+              const { data } = await github.rest.actions.listSelfHostedRunnersForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              const requiredLabels = new Set(labels);
+              const available = data.runners.some(runner =>
+                runner.status === 'online' &&
+                runner.labels.filter(label => requiredLabels.has(label.name)).length === requiredLabels.size
+              );
+              if (!available) {
+                core.warning('No compatible self-hosted runner is online. Falling back to github-hosted.');
+                setHosted();
+                return;
+              }
+            } catch (error) {
+              core.warning(`Runner discovery failed: ${error.message}. Falling back to github-hosted.`);
+              setHosted();
+              return;
+            }
+
+            setSelfHosted();

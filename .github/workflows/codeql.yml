@@ -9,16 +9,27 @@ on:
     - cron: "0 0 * * 6"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  detect-runner:
+    uses: ./.github/workflows/reusable-detect-runner.yml
+    with:
+      strategy: ${{ github.event_name == 'pull_request' && 'pr_trusted' || 'push_any' }}
+      same_repo: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name }}
+      trusted_author: ${{ github.event_name == 'pull_request' && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+      is_renovate_bot: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'renovate[bot]' }}
+    secrets: inherit
+
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    needs: detect-runner
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false

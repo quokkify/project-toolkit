@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from validate_fixtures import LANGUAGES, validate_fixtures
+from validate_python_fixture import validate_python_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
@@ -141,7 +141,7 @@ def release_manifest_errors(manifest: object) -> list[str]:
 
 
 def validate_toolkit_workflow_errors(path: Path) -> list[str]:
-    """Validate that repository checks remain isolated in explicit micro-jobs."""
+    """Validate the runner-selection DAG and isolated repository micro-jobs."""
     errors: list[str] = []
     rel = path.relative_to(ROOT)
 
@@ -160,25 +160,44 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
     if not isinstance(jobs, dict):
         return errors
     require(
-        set(jobs) == {"lint", "python", "node", "java"},
-        "must define exactly lint, python, node, and java jobs",
+        set(jobs) == {"detect-runner", "lint", "python", "node", "java", "validate"},
+        "must define detect-runner, lint, language, and aggregate jobs",
     )
+    selector = jobs.get("detect-runner")
+    require(isinstance(selector, dict), "detect-runner job must be a mapping")
+    if isinstance(selector, dict):
+        require(
+            selector.get("uses") == "./.github/workflows/reusable-detect-runner.yml",
+            "detect-runner must call the local reusable selector",
+        )
+        require(selector.get("secrets") == "inherit", "only detect-runner may inherit secrets")
+        selector_inputs = selector.get("with", {})
+        require(
+            isinstance(selector_inputs, dict)
+            and set(selector_inputs)
+            == {"strategy", "same_repo", "trusted_author", "is_renovate_bot"},
+            "detect-runner must pass the complete trust context",
+        )
     expected = {
         "lint": {
             "setups": {"actions/setup-python", "actions/setup-node"},
             "command": "python scripts/validate.py --static",
+            "needs": {"detect-runner"},
         },
         "python": {
             "setups": {"actions/setup-python"},
-            "command": "python scripts/validate_fixtures.py python",
+            "command": "python scripts/validate_python_fixture.py",
+            "needs": {"detect-runner", "lint"},
         },
         "node": {
             "setups": {"actions/setup-node"},
-            "command": "python3 scripts/validate_fixtures.py node",
+            "command": "node scripts/validate_node_fixture.mjs",
+            "needs": {"detect-runner", "lint"},
         },
         "java": {
             "setups": {"actions/setup-java"},
-            "command": "python3 scripts/validate_fixtures.py java",
+            "command": "bash scripts/validate_java_fixture.sh",
+            "needs": {"detect-runner", "lint"},
         },
     }
     for name, contract in expected.items():
@@ -190,6 +209,18 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
         if not isinstance(steps, list):
             require(False, f"{name} job must define steps")
             continue
+        needs = job.get("needs", [])
+        needs_set = {needs} if isinstance(needs, str) else set(needs)
+        require(needs_set == contract["needs"], f"{name} job has incorrect dependencies")
+        require(
+            job.get("runs-on") == "${{ fromJson(needs.detect-runner.outputs.runs_on) }}",
+            f"{name} job must use the detected runner",
+        )
+        require(
+            "pull_request_target" in str(job.get("if")),
+            f"{name} must reject pull_request_target",
+        )
+        require("secrets" not in job, f"{name} job must not inherit secrets")
         setup_actions: set[str] = set()
         commands: list[str] = []
         checkout_found = False
@@ -226,6 +257,172 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
             not other_commands.intersection(commands),
             f"{name} job invokes another job's validation entrypoint",
         )
+    aggregate = jobs.get("validate")
+    require(isinstance(aggregate, dict), "validate aggregate must be a mapping")
+    if isinstance(aggregate, dict):
+        needs = aggregate.get("needs", [])
+        require(
+            set(needs) == {"detect-runner", "lint", "python", "node", "java"},
+            "validate aggregate must depend on every required stage",
+        )
+        require("always()" in str(aggregate.get("if")), "validate aggregate must always evaluate")
+        require(
+            aggregate.get("runs-on")
+            == "${{ fromJson(needs.detect-runner.outputs.runs_on) }}",
+            "validate aggregate must use the detected runner",
+        )
+        aggregate_text = json.dumps(aggregate)
+        for stage in ("detect-runner", "lint", "python", "node", "java"):
+            require(
+                f"needs.{stage}.result" in aggregate_text,
+                f"validate aggregate must fail closed on {stage}",
+            )
+        require("exit 1" in aggregate_text, "validate aggregate must fail with a non-zero status")
+    return errors
+
+
+def runner_selection_allows_self_hosted(
+    strategy: str,
+    *,
+    same_repo: bool = False,
+    trusted_author: bool = False,
+    is_renovate_bot: bool = False,
+) -> bool:
+    """Model the reusable selector's trust gate for negative policy probes."""
+    if strategy == "push_any":
+        return True
+    if strategy == "pr_trusted":
+        return same_repo and (trusted_author or is_renovate_bot)
+    return False
+
+
+def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
+    """Model the aggregate job's requirement that every stage succeeds."""
+    required = {"detect-runner", "lint", "python", "node", "java"}
+    return set(results) == required and all(result == "success" for result in results.values())
+
+
+def reusable_runner_workflow_errors(path: Path) -> list[str]:
+    """Validate fail-closed runner discovery and its reusable outputs."""
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    workflow = yaml.safe_load(path.read_text())
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    triggers = workflow.get("on", workflow.get(True))
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    require(isinstance(call, dict), "must expose workflow_call")
+    if isinstance(call, dict):
+        require(
+            set(call.get("inputs", {}))
+            == {"strategy", "same_repo", "trusted_author", "is_renovate_bot"},
+            "workflow_call inputs must expose the complete trust context",
+        )
+        require(
+            set(call.get("outputs", {})) == {"runs_on", "is_self_hosted"},
+            "workflow_call outputs must expose runner labels and hosting mode",
+        )
+    require(
+        workflow.get("permissions") == {"contents": "read", "actions": "none"},
+        "permissions must be exactly contents:read and actions:none",
+    )
+    jobs = workflow.get("jobs", {})
+    require(
+        isinstance(jobs, dict) and set(jobs) == {"detect-runner"},
+        "must define one selector job",
+    )
+    job = jobs.get("detect-runner", {}) if isinstance(jobs, dict) else {}
+    require(job.get("runs-on") == "ubuntu-latest", "selector must bootstrap on ubuntu-latest")
+    steps = job.get("steps", []) if isinstance(job, dict) else []
+    script_steps = [step for step in steps if isinstance(step, dict) and step.get("id") == "select"]
+    require(len(script_steps) == 1, "must define exactly one select step")
+    if script_steps:
+        step = script_steps[0]
+        use = step.get("uses", "")
+        require(
+            re.fullmatch(r"actions/github-script@[0-9a-f]{40}", use) is not None,
+            "github-script must be pinned to a full SHA",
+        )
+        script = str(step.get("with", {}).get("script", ""))
+        for marker in (
+            "strategy === 'push_any'",
+            "strategy === 'pr_trusted'",
+            "inputs.same_repo",
+            "inputs.trusted_author",
+            "inputs.is_renovate_bot",
+            "listSelfHostedRunnersForRepo",
+            "runner.status === 'online'",
+            "setHosted();",
+            "catch (error)",
+        ):
+            require(marker in script, f"selector script is missing fail-closed marker: {marker}")
+    probes = {
+        "fork trusted author": runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=False, trusted_author=True
+        ),
+        "same-repo untrusted author": runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True
+        ),
+        "unknown strategy": runner_selection_allows_self_hosted("unknown"),
+    }
+    for label, selected in probes.items():
+        require(not selected, f"negative runner-selection probe allowed {label}")
+    require(
+        runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True, trusted_author=True
+        ),
+        "trusted same-repository PR probe must allow discovery",
+    )
+    require(
+        runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True, is_renovate_bot=True
+        ),
+        "same-repository Renovate probe must allow discovery",
+    )
+    require(
+        runner_selection_allows_self_hosted("push_any"),
+        "push strategy probe must allow discovery",
+    )
+    successful_results = {
+        stage: "success" for stage in ("detect-runner", "lint", "python", "node", "java")
+    }
+    require(
+        validation_aggregate_succeeds(successful_results),
+        "aggregate positive probe must accept all-success results",
+    )
+    for failed_stage in successful_results:
+        failed_results = dict(successful_results)
+        failed_results[failed_stage] = "failure"
+        require(
+            not validation_aggregate_succeeds(failed_results),
+            f"aggregate negative probe accepted failed stage: {failed_stage}",
+        )
+    return errors
+
+
+def codeql_runner_workflow_errors(path: Path) -> list[str]:
+    """Validate that CodeQL remains separate and uses the trusted runner selector."""
+    workflow = yaml.safe_load(path.read_text())
+    rel = path.relative_to(ROOT)
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict) or set(jobs) != {"detect-runner", "analyze"}:
+        return [f"{rel}: must define exactly detect-runner and analyze jobs"]
+    errors: list[str] = []
+    selector = jobs["detect-runner"]
+    analyze = jobs["analyze"]
+    if selector.get("uses") != "./.github/workflows/reusable-detect-runner.yml":
+        errors.append(f"{rel}: detect-runner must call the local reusable selector")
+    if analyze.get("needs") != "detect-runner":
+        errors.append(f"{rel}: analyze must depend on detect-runner")
+    if analyze.get("runs-on") != "${{ fromJson(needs.detect-runner.outputs.runs_on) }}":
+        errors.append(f"{rel}: analyze must use the detected runner")
     return errors
 
 
@@ -521,6 +718,10 @@ ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
 ERRORS.extend(
     validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
 )
+ERRORS.extend(
+    reusable_runner_workflow_errors(ROOT / ".github/workflows/reusable-detect-runner.yml")
+)
+ERRORS.extend(codeql_runner_workflow_errors(ROOT / ".github/workflows/codeql.yml"))
 for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-*.yml")):
     check(
         bool(release_workflow_errors(fixture)),
@@ -879,7 +1080,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 run([sys.executable, "tests/test_composite_actions.py"])
 
 if not ARGS.static:
-    validate_fixtures(LANGUAGES)
+    validate_python_fixture()
+    run(["node", "scripts/validate_node_fixture.mjs"])
+    run(["bash", "scripts/validate_java_fixture.sh"])
 if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)

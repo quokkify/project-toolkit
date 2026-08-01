@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/project-toolkit//renovate/default.json",
-    "github>ylazakovich/renovate-config//presets/github-actions/default"
+    "github>quokkify/renovate-presets//presets/github-actions/default"
   ],
   "customManagers": [
     {

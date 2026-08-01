@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/quokkify/project-toolkit/compare/v2.1.0...v2.2.0) (2026-08-01)
+
+
+### Features
+
+* **copier:** support config-only projects ([#24](https://github.com/quokkify/project-toolkit/issues/24)) ([d932533](https://github.com/quokkify/project-toolkit/commit/d932533b27c3d2d1b7117cab994fce7eb6ce0379))
+
 ## [2.1.0](https://github.com/quokkify/project-toolkit/compare/v2.0.1...v2.1.0) (2026-08-01)
 
 

@@ -18,6 +18,10 @@ inputs:
     description: Branch that hosts the published pages
     required: false
     default: gh-pages
+  retention-count:
+    description: Number of newest pr-N report directories to keep; 0 disables pruning
+    required: false
+    default: "0"
 
 runs:
   using: composite
@@ -29,6 +33,7 @@ runs:
         INPUT_PUBLISH_DIR: ${{ inputs.publish-dir }}
         INPUT_DESTINATION_DIR: ${{ inputs.destination-dir }}
         INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_RETENTION_COUNT: ${{ inputs.retention-count }}
       run: |
-        : "${INPUT_TOKEN:?}" "${INPUT_PUBLISH_DIR:?}" "${INPUT_DESTINATION_DIR:?}" "${INPUT_BRANCH:?}"
+        : "${INPUT_TOKEN:?}" "${INPUT_PUBLISH_DIR:?}" "${INPUT_DESTINATION_DIR:?}" "${INPUT_BRANCH:?}" "${INPUT_RETENTION_COUNT:?}"
         bash "${GITHUB_ACTION_PATH}/deploy-gh-pages-subdir.sh"

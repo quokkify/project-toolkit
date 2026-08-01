@@ -23,6 +23,9 @@ validate_relative_path() {
 validate_relative_path "$INPUT_PUBLISH_DIR" "publish-dir"
 validate_relative_path "$INPUT_DESTINATION_DIR" "destination-dir"
 
+RETENTION_COUNT="${INPUT_RETENTION_COUNT:-0}"
+[[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]] || error "retention-count must be a non-negative integer"
+
 BRANCH="${INPUT_BRANCH:-gh-pages}"
 [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || error "branch contains unsupported characters"
 [[ "$BRANCH" != -* && "$BRANCH" != */ && "$BRANCH" != */. && "$BRANCH" != *..* && "$BRANCH" != *'@{'* ]] || error "branch is not a safe Git ref"
@@ -50,13 +53,13 @@ export GIT_CONFIG_VALUE_0="Authorization: Bearer ${INPUT_TOKEN}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git"
-git clone --quiet "$REPO_URL" "$WORK/repo"
+git clone --quiet --no-checkout "$REPO_URL" "$WORK/repo"
 R="$WORK/repo"
 cd "$R"
 
 if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  git fetch --quiet origin "$BRANCH:$BRANCH"
-  git checkout --quiet "$BRANCH"
+  git fetch --quiet origin "$BRANCH"
+  git checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 else
   git checkout --quiet --orphan "$BRANCH"
   git rm -rf --quiet . 2>/dev/null || true
@@ -64,6 +67,45 @@ fi
 
 mkdir -p "$R/$INPUT_DESTINATION_DIR"
 rsync -a --delete "$PUB/" "$R/$INPUT_DESTINATION_DIR/"
+
+prune_old_reports() {
+  (( RETENTION_COUNT > 0 )) || return 0
+
+  local parent dest_name candidate rel timestamp
+  parent="${INPUT_DESTINATION_DIR%/*}"
+  [[ "$parent" != "$INPUT_DESTINATION_DIR" ]] || parent="."
+  dest_name="${INPUT_DESTINATION_DIR##*/}"
+  [[ "$dest_name" =~ ^pr-[0-9]+$ ]] || error "retention-count requires destination-dir basename pr-N"
+
+  local -a entries=()
+  for candidate in "$R/$parent"/pr-*; do
+    [[ -d "$candidate" ]] || continue
+    dest_name="${candidate##*/}"
+    [[ "$dest_name" =~ ^pr-[0-9]+$ ]] || continue
+    rel="${parent%/.}/$dest_name"
+    [[ "$parent" != "." ]] || rel="$dest_name"
+    if [[ "$rel" == "$INPUT_DESTINATION_DIR" ]]; then
+      timestamp="$(date +%s)"
+    else
+      timestamp="$(git log -1 --format=%ct -- "$rel" 2>/dev/null || true)"
+      [[ "$timestamp" =~ ^[0-9]+$ ]] || timestamp=0
+    fi
+    entries+=("${timestamp}"$'\t'"${rel}")
+  done
+
+  local -a keep=()
+  while IFS=$'\t' read -r timestamp rel; do
+    [[ -n "$rel" ]] || continue
+    if (( ${#keep[@]} < RETENTION_COUNT )); then
+      keep+=("$rel")
+    else
+      echo "Pruning old gh-pages report: $rel"
+      rm -rf -- "$R/$rel"
+    fi
+  done < <(printf '%s\n' "${entries[@]}" | sort -t $'\t' -k1,1nr -k2,2)
+}
+
+prune_old_reports
 touch "$R/.nojekyll"
 
 git config user.name "github-actions[bot]"

@@ -710,7 +710,7 @@ class ComposeActionTests(unittest.TestCase):
 class DeployGhPagesSubdirTests(unittest.TestCase):
     script = ROOT / "actions/deploy-gh-pages-subdir/deploy-gh-pages-subdir.sh"
 
-    def run_rejected(self, *, publish_dir: str = "report", destination_dir: str = "reports/example", branch: str = "gh-pages") -> subprocess.CompletedProcess[str]:
+    def run_rejected(self, *, publish_dir: str = "report", destination_dir: str = "reports/example", branch: str = "gh-pages", retention_count: str = "0") -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory(prefix="deploy-pages-validation-") as tmp:
             workspace = Path(tmp)
             (workspace / "report").mkdir()
@@ -723,6 +723,7 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
                 "INPUT_PUBLISH_DIR": publish_dir,
                 "INPUT_DESTINATION_DIR": destination_dir,
                 "INPUT_BRANCH": branch,
+                "INPUT_RETENTION_COUNT": retention_count,
                 "GITHUB_ACTION_PATH": str(self.script.parent),
             }
             return subprocess.run(
@@ -741,12 +742,65 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
             ({"publish_dir": "../report"}, "publish-dir"),
             ({"destination_dir": "../other"}, "destination-dir"),
             ({"branch": "../gh-pages"}, "branch"),
+            ({"retention_count": "twenty"}, "retention-count"),
         ):
             with self.subTest(kwargs=kwargs):
                 result = self.run_rejected(**kwargs)
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(expected, result.stderr)
                 self.assertNotIn("dummy-token", result.stdout + result.stderr)
+
+    def test_retention_keeps_newest_pr_reports_and_preserves_other_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="deploy-pages-retention-") as tmp:
+            root = Path(tmp)
+            remote = root / "repo.git"
+            seed = root / "seed"
+            subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "init", "-b", "gh-pages", str(seed)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(seed), "config", "user.name", "test"], check=True)
+            subprocess.run(["git", "-C", str(seed), "config", "user.email", "test@example.com"], check=True)
+            for number in range(1, 4):
+                report = seed / f"allure/pr-{number}"
+                report.mkdir(parents=True)
+                (report / "index.html").write_text(f"report {number}\n")
+                subprocess.run(["git", "-C", str(seed), "add", "."], check=True)
+                subprocess.run(
+                    ["git", "-C", str(seed), "-c", f"user.name=test", "-c", "user.email=test@example.com", "commit", "-m", f"report {number}"],
+                    env={**os.environ, "GIT_AUTHOR_DATE": f"2020-01-0{number}T00:00:00Z", "GIT_COMMITTER_DATE": f"2020-01-0{number}T00:00:00Z"},
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            (seed / "docs").mkdir()
+            (seed / "docs/keep.txt").write_text("keep\n")
+            subprocess.run(["git", "-C", str(seed), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(seed), "commit", "-m", "unrelated"], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(seed), "remote", "add", "origin", str(remote)], check=True)
+            subprocess.run(["git", "-C", str(seed), "push", "origin", "gh-pages"], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(remote), "symbolic-ref", "HEAD", "refs/heads/gh-pages"], check=True)
+
+            workspace = root / "workspace"
+            (workspace / "report").mkdir(parents=True)
+            (workspace / "report/index.html").write_text("report 4\n")
+            env = {
+                **os.environ,
+                "GITHUB_WORKSPACE": str(workspace),
+                "GITHUB_REPOSITORY": "repo",
+                "GITHUB_SERVER_URL": f"file://{root}",
+                "INPUT_TOKEN": "dummy-token",
+                "INPUT_PUBLISH_DIR": "report",
+                "INPUT_DESTINATION_DIR": "allure/pr-4",
+                "INPUT_BRANCH": "gh-pages",
+                "INPUT_RETENTION_COUNT": "2",
+                "GITHUB_ACTION_PATH": str(self.script.parent),
+            }
+            result = subprocess.run(["bash", str(self.script)], env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            checkout = root / "checkout"
+            subprocess.run(["git", "clone", "--quiet", str(remote), str(checkout)], check=True, capture_output=True, text=True)
+            reports = sorted(path.name for path in (checkout / "allure").iterdir() if path.is_dir())
+            self.assertEqual(reports, ["pr-3", "pr-4"])
+            self.assertEqual((checkout / "docs/keep.txt").read_text(), "keep\n")
 
 
 if __name__ == "__main__":

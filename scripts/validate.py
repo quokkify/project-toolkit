@@ -160,7 +160,8 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
     if not isinstance(jobs, dict):
         return errors
     require(
-        set(jobs) == {"detect-runner", "lint", "python", "node", "java", "validate"},
+        set(jobs)
+        == {"detect-runner", "lint", "python", "node", "java", "validation-complete"},
         "must define detect-runner, lint, language, and aggregate jobs",
     )
     selector = jobs.get("detect-runner")
@@ -259,8 +260,11 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
             not other_commands.intersection(commands),
             f"{name} job invokes another job's validation entrypoint",
         )
-    aggregate = jobs.get("validate")
-    require(isinstance(aggregate, dict), "validate aggregate must be a mapping")
+    aggregate = jobs.get("validation-complete")
+    require(
+        isinstance(aggregate, dict),
+        "validation-complete aggregate must be a mapping",
+    )
     if isinstance(aggregate, dict):
         needs = aggregate.get("needs", [])
         require(

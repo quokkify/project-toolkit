@@ -138,7 +138,7 @@ jobs:
       - name: Compile, test, and package Java fixture
         run: bash scripts/validate_java_fixture.sh
 
-  validate:
+  validation-complete:
     name: Validation pipeline complete
     needs: [detect-runner, lint, python, node, java]
     runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}

@@ -495,6 +495,11 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
             re.fullmatch(r"actions/github-script@[0-9a-f]{40}", use) is not None,
             "github-script must be pinned to a full SHA",
         )
+        require(
+            step.get("env")
+            == {"DISCOVERY_TOKEN_AVAILABLE": "${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}"},
+            "selector must detect whether the privileged discovery token is configured",
+        )
         script = str(step.get("with", {}).get("script", ""))
         for marker in (
             "strategy === 'push_any'",
@@ -504,6 +509,8 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
             "inputs.is_renovate_bot",
             "listSelfHostedRunnersForRepo",
             "runner.status === 'online'",
+            "process.env.DISCOVERY_TOKEN_AVAILABLE !== 'true'",
+            "Runner discovery token is not configured",
             "setHosted();",
             "catch (error)",
         ):

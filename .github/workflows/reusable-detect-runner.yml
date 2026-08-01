@@ -45,6 +45,8 @@ jobs:
       - name: Choose runner
         id: select
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          DISCOVERY_TOKEN_AVAILABLE: ${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}
         with:
           github-token: ${{ secrets.RUNNER_DISCOVERY_TOKEN || github.token }}
           script: |
@@ -72,6 +74,12 @@ jobs:
             }
 
             if (!allowSelfHosted) {
+              setHosted();
+              return;
+            }
+
+            if (process.env.DISCOVERY_TOKEN_AVAILABLE !== 'true') {
+              core.notice('Runner discovery token is not configured. Using github-hosted runner.');
               setHosted();
               return;
             }

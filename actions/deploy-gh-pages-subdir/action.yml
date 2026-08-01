@@ -2,7 +2,7 @@ name: Deploy gh-pages subdirectory
 description: >
   Publishes a workspace directory to a subdirectory on a GitHub Pages branch,
   preserving sibling paths and using a lease-protected push.
-author: quokkify
+author: Yaraslau Lazakovich
 
 inputs:
   token:

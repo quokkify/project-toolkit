@@ -738,6 +738,9 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
         data = action("deploy-gh-pages-subdir")
         self.assertEqual(data["runs"]["using"], "composite")
         self.assertEqual(data["inputs"]["branch"]["default"], "gh-pages")
+        script_text = self.script.read_text()
+        self.assertIn('GIT_CONFIG_VALUE_0="Authorization: Bearer ${INPUT_TOKEN}"', script_text)
+        self.assertNotIn('GIT_CONFIG_VALUE_0="Authorization: Bearer ***"', script_text)
         for kwargs, expected in (
             ({"publish_dir": "../report"}, "publish-dir"),
             ({"destination_dir": "../other"}, "destination-dir"),

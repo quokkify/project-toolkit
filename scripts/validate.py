@@ -140,7 +140,9 @@ def release_manifest_errors(manifest: object) -> list[str]:
     return []
 
 
-def validate_toolkit_workflow_errors(path: Path) -> list[str]:
+def validate_toolkit_workflow_errors(
+    path: Path, workflow_override: object | None = None
+) -> list[str]:
     """Validate the runner-selection DAG and isolated repository micro-jobs."""
     errors: list[str] = []
     rel = path.relative_to(ROOT)
@@ -149,10 +151,13 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
         if not condition:
             errors.append(f"{rel}: {message}")
 
-    try:
-        workflow = yaml.safe_load(path.read_text())
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-        return [f"{rel}: YAML parse failed: {exc}"]
+    if workflow_override is None:
+        try:
+            workflow = yaml.safe_load(path.read_text())
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            return [f"{rel}: YAML parse failed: {exc}"]
+    else:
+        workflow = workflow_override
     if not isinstance(workflow, dict):
         return [f"{rel}: workflow root must be a mapping"]
     jobs = workflow.get("jobs")
@@ -161,8 +166,16 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
         return errors
     require(
         set(jobs)
-        == {"detect-runner", "lint", "python", "node", "java", "validation-complete"},
-        "must define detect-runner, lint, language, and aggregate jobs",
+        == {
+            "detect-runner",
+            "lint",
+            "gitleaks",
+            "python",
+            "node",
+            "java",
+            "validation-complete",
+        },
+        "must define detect-runner, lint, gitleaks, language, and aggregate jobs",
     )
     selector = jobs.get("detect-runner")
     require(isinstance(selector, dict), "detect-runner job must be a mapping")
@@ -183,6 +196,11 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
         "lint": {
             "setups": {"actions/setup-python", "actions/setup-node"},
             "command": "python scripts/validate.py --static",
+            "needs": {"detect-runner"},
+        },
+        "gitleaks": {
+            "setups": set(),
+            "command": None,
             "needs": {"detect-runner"},
         },
         "python": {
@@ -249,16 +267,83 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
             setup_actions == contract["setups"],
             f"{name} job has unexpected toolchain setup actions: {sorted(setup_actions)}",
         )
-        require(
-            contract["command"] in commands,
-            f"{name} job must run only its focused validation entrypoint",
-        )
+        if contract["command"] is not None:
+            require(
+                contract["command"] in commands,
+                f"{name} job must run only its focused validation entrypoint",
+            )
         other_commands = {
-            value["command"] for key, value in expected.items() if key != name
+            value["command"]
+            for key, value in expected.items()
+            if key != name and value["command"] is not None
         }
         require(
             not other_commands.intersection(commands),
             f"{name} job invokes another job's validation entrypoint",
+        )
+    gitleaks = jobs.get("gitleaks")
+    if isinstance(gitleaks, dict):
+        steps = gitleaks.get("steps", [])
+        checkout_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+        require(len(checkout_steps) == 1, "gitleaks must define exactly one checkout step")
+        if checkout_steps:
+            checkout_inputs = checkout_steps[0].get("with", {})
+            require(
+                isinstance(checkout_inputs, dict) and checkout_inputs.get("fetch-depth") == 0,
+                "gitleaks checkout must fetch full history",
+            )
+        install_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Install checksum-verified Gitleaks"
+        ]
+        require(len(install_steps) == 1, "gitleaks must define one checksum-verified install")
+        if install_steps:
+            install = install_steps[0]
+            install_env = install.get("env", {})
+            version = install_env.get("GITLEAKS_VERSION") if isinstance(install_env, dict) else None
+            checksum = install_env.get("GITLEAKS_SHA256") if isinstance(install_env, dict) else None
+            require(
+                isinstance(version, str) and SEMVER_RE.fullmatch(version) is not None,
+                "gitleaks release version must be pinned to exact SemVer",
+            )
+            require(
+                isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum) is not None,
+                "gitleaks release archive must use a pinned SHA-256 checksum",
+            )
+            install_script = str(install.get("run", ""))
+            for marker in (
+                "gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}",
+                'printf \'%s  %s\\n\' "$GITLEAKS_SHA256" "$archive" | sha256sum -c -',
+                'install -m 0755 gitleaks "$HOME/.local/bin/gitleaks"',
+            ):
+                require(marker in install_script, f"gitleaks install is missing marker: {marker}")
+        scan_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Scan Git history and current tree"
+        ]
+        require(len(scan_steps) == 1, "gitleaks must define one history and tree scan")
+        if scan_steps:
+            scan_script = str(scan_steps[0].get("run", ""))
+            for command in (
+                "gitleaks git --redact --no-banner .",
+                "gitleaks dir --redact --no-banner .",
+            ):
+                require(command in scan_script, f"gitleaks scan must run redacted command: {command}")
+            require("--report-path" not in scan_script, "gitleaks must not persist a findings report")
+        require(
+            not any(
+                isinstance(step, dict)
+                and str(step.get("uses", "")).startswith("actions/upload-artifact@")
+                for step in steps
+            ),
+            "gitleaks must not upload potentially secret-bearing artifacts",
         )
     aggregate = jobs.get("validation-complete")
     require(
@@ -268,7 +353,7 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
     if isinstance(aggregate, dict):
         needs = aggregate.get("needs", [])
         require(
-            set(needs) == {"detect-runner", "lint", "python", "node", "java"},
+            set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java"},
             "validate aggregate must depend on every required stage",
         )
         require("always()" in str(aggregate.get("if")), "validate aggregate must always evaluate")
@@ -278,7 +363,7 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
             "validate aggregate must use the detected runner",
         )
         aggregate_text = json.dumps(aggregate)
-        for stage in ("detect-runner", "lint", "python", "node", "java"):
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java"):
             require(
                 f"needs.{stage}.result" in aggregate_text,
                 f"validate aggregate must fail closed on {stage}",
@@ -304,8 +389,64 @@ def runner_selection_allows_self_hosted(
 
 def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
     """Model the aggregate job's requirement that every stage succeeds."""
-    required = {"detect-runner", "lint", "python", "node", "java"}
+    required = {"detect-runner", "lint", "gitleaks", "python", "node", "java"}
     return set(results) == required and all(result == "success" for result in results.values())
+
+
+def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
+    """Prove the workflow contract rejects Gitleaks bypass mutations."""
+    workflow = yaml.safe_load(path.read_text())
+    if not isinstance(workflow, dict):
+        return [f"{path.relative_to(ROOT)}: negative probes require a mapping"]
+    errors: list[str] = []
+
+    def clone() -> dict:
+        return json.loads(json.dumps(workflow))
+
+    def require_rejection(mutated: object, marker: str, label: str) -> None:
+        probe_errors = validate_toolkit_workflow_errors(path, mutated)
+        if not any(marker in error for error in probe_errors):
+            errors.append(f"{path.relative_to(ROOT)}: negative probe accepted {label}")
+
+    mutated = clone()
+    del mutated["jobs"]["gitleaks"]
+    require_rejection(mutated, "must define detect-runner, lint, gitleaks", "missing gitleaks job")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["needs"] = []
+    require_rejection(mutated, "gitleaks job has incorrect dependencies", "detector bypass")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["runs-on"] = "ubuntu-latest"
+    require_rejection(mutated, "gitleaks job must use the detected runner", "runner wiring bypass")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["steps"][0]["with"]["fetch-depth"] = 1
+    require_rejection(mutated, "gitleaks checkout must fetch full history", "shallow checkout")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["steps"][1]["env"]["GITLEAKS_VERSION"] = "latest"
+    require_rejection(mutated, "version must be pinned", "unpinned release")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["steps"][1]["run"] = "install gitleaks"
+    require_rejection(mutated, "sha256sum -c", "checksum bypass")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["steps"][2]["run"] = "gitleaks git .\ngitleaks dir ."
+    require_rejection(mutated, "redacted command", "redaction bypass")
+
+    mutated = clone()
+    mutated["jobs"]["validation-complete"]["needs"].remove("gitleaks")
+    require_rejection(mutated, "depend on every required stage", "aggregate dependency bypass")
+
+    mutated = clone()
+    aggregate_script = mutated["jobs"]["validation-complete"]["steps"][0]["run"]
+    mutated["jobs"]["validation-complete"]["steps"][0]["run"] = "\n".join(
+        line for line in aggregate_script.splitlines() if "needs.gitleaks.result" not in line
+    )
+    require_rejection(mutated, "fail closed on gitleaks", "aggregate result bypass")
+    return errors
 
 
 def reusable_runner_workflow_errors(path: Path) -> list[str]:
@@ -395,7 +536,8 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
         "push strategy probe must allow discovery",
     )
     successful_results = {
-        stage: "success" for stage in ("detect-runner", "lint", "python", "node", "java")
+        stage: "success"
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java")
     }
     require(
         validation_aggregate_succeeds(successful_results),
@@ -748,6 +890,9 @@ check(
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
 ERRORS.extend(
     validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
+)
+ERRORS.extend(
+    validate_toolkit_workflow_negative_probes(ROOT / ".github/workflows/validate-toolkit.yml")
 )
 ERRORS.extend(
     reusable_runner_workflow_errors(ROOT / ".github/workflows/reusable-detect-runner.yml")

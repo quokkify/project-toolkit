@@ -5,6 +5,7 @@ _templates_suffix: .jinja
 _exclude:
   - "{% if not renovate %}renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
+  - "{% if not components and not docker %}.github/workflows/ci.yml{% endif %}"
 
 project_name:
   type: str
@@ -19,12 +20,11 @@ toolkit_version:
 
 components:
   type: yaml
-  help: "List of mappings such as [{type: python, path: backend}]. Supported types: python, node, java."
+  help: "Optional list of mappings such as [{type: python, path: backend}]. Leave empty when the project owns a custom CI workflow. Supported types: python, node, java."
   default:
     - type: python
       path: .
   validator: >-
-    {% if not components %}Choose at least one component.{% endif %}
     {% for component in components %}
     {% if component is not mapping %}Every component must be a mapping with type and path.{% else %}
     {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}

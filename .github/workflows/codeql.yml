@@ -34,10 +34,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language:
-          - python
-          - javascript-typescript
-          - java-kotlin
+        include:
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: java-kotlin
+            build-mode: none
     permissions:
       actions: read
       contents: read
@@ -52,16 +55,8 @@ jobs:
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
           config-file: .github/codeql/codeql-config.yml
-      - name: Set up Java
-        if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Build Java fixture
-        if: matrix.language == 'java-kotlin'
-        run: mvn --batch-mode --no-transfer-progress -f tests/fixtures/java/pom.xml test
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:

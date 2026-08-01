@@ -24,7 +24,7 @@ PARSER.add_argument(
     action="store_true",
     help="run shared policy, template, and static checks without language fixtures",
 )
-ARGS = PARSER.parse_args()
+ARGS = PARSER.parse_args() if __name__ == "__main__" else PARSER.parse_args([])
 
 
 def check(condition: bool, message: str) -> None:
@@ -232,8 +232,10 @@ def validate_toolkit_workflow_errors(path: Path) -> list[str]:
                 action = use.rpartition("@")[0]
                 if action == "actions/checkout":
                     checkout_found = True
+                    action_inputs = step.get("with")
                     require(
-                        step.get("with", {}).get("persist-credentials") is False,
+                        isinstance(action_inputs, dict)
+                        and action_inputs.get("persist-credentials") is False,
                         f"{name} checkout must set persist-credentials: false",
                     )
                 if action.startswith("actions/setup-"):
@@ -423,6 +425,31 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
         errors.append(f"{rel}: analyze must depend on detect-runner")
     if analyze.get("runs-on") != "${{ fromJson(needs.detect-runner.outputs.runs_on) }}":
         errors.append(f"{rel}: analyze must use the detected runner")
+    matrix = analyze.get("strategy", {}).get("matrix", {})
+    include = matrix.get("include", []) if isinstance(matrix, dict) else []
+    expected_languages = {
+        ("python", "none"),
+        ("javascript-typescript", "none"),
+        ("java-kotlin", "none"),
+    }
+    configured_languages = {
+        (entry.get("language"), entry.get("build-mode"))
+        for entry in include
+        if isinstance(entry, dict)
+    }
+    if configured_languages != expected_languages:
+        errors.append(f"{rel}: every CodeQL language must use explicit build-mode none")
+    steps = analyze.get("steps", [])
+    init_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("github/codeql-action/init@")
+    ]
+    if len(init_steps) != 1 or init_steps[0].get("with", {}).get("build-mode") != (
+        "${{ matrix.build-mode }}"
+    ):
+        errors.append(f"{rel}: CodeQL init must receive the explicit matrix build mode")
     return errors
 
 
@@ -1080,9 +1107,16 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 run([sys.executable, "tests/test_composite_actions.py"])
 
 if not ARGS.static:
-    validate_python_fixture()
-    run(["node", "scripts/validate_node_fixture.mjs"])
-    run(["bash", "scripts/validate_java_fixture.sh"])
+    fixture_commands = (
+        ("Python", validate_python_fixture),
+        ("Node.js", lambda: run(["node", "scripts/validate_node_fixture.mjs"])),
+        ("Java", lambda: run(["bash", "scripts/validate_java_fixture.sh"])),
+    )
+    for language, validate_fixture in fixture_commands:
+        try:
+            validate_fixture()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            ERRORS.append(f"{language} fixture validation failed: {exc}")
 if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)

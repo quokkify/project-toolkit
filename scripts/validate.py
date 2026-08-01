@@ -122,12 +122,49 @@ def release_workflow_errors(path: Path) -> list[str]:
     return errors
 
 
-SEMVER_RE = re.compile(
-    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
-    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+def is_semver(value: object) -> bool:
+    """Return whether value is SemVer 2.0.0, using only linear-time parsing."""
+    if not isinstance(value, str) or not value:
+        return False
+
+    version_and_prerelease, separator, build = value.partition("+")
+    if separator and (
+        not build
+        or "+" in build
+        or any(
+            not identifier
+            or any(character not in ALPHANUMERIC_HYPHEN for character in identifier)
+            for identifier in build.split(".")
+        )
+    ):
+        return False
+
+    core, separator, prerelease = version_and_prerelease.partition("-")
+    if separator:
+        if not prerelease:
+            return False
+        for identifier in prerelease.split("."):
+            if not identifier or any(
+                character not in ALPHANUMERIC_HYPHEN for character in identifier
+            ):
+                return False
+            if is_ascii_digits(identifier) and len(identifier) > 1 and identifier[0] == "0":
+                return False
+
+    core_parts = core.split(".")
+    return len(core_parts) == 3 and all(
+        is_ascii_digits(part) and (part == "0" or part[0] != "0")
+        for part in core_parts
+    )
+
+
+ALPHANUMERIC_HYPHEN = frozenset(
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-"
 )
+
+
+def is_ascii_digits(value: str) -> bool:
+    return bool(value) and all("0" <= character <= "9" for character in value)
 
 
 def release_manifest_errors(manifest: object) -> list[str]:
@@ -135,7 +172,7 @@ def release_manifest_errors(manifest: object) -> list[str]:
     if not isinstance(manifest, dict) or set(manifest) != {"."}:
         return ["manifest must contain exactly the root package key '.'"]
     version = manifest["."]
-    if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
+    if not is_semver(version):
         return ["root package version must be a well-formed SemVer string"]
     return []
 
@@ -331,7 +368,7 @@ def validate_toolkit_workflow_errors(
             version = install_env.get("GITLEAKS_VERSION") if isinstance(install_env, dict) else None
             checksum = install_env.get("GITLEAKS_SHA256") if isinstance(install_env, dict) else None
             require(
-                isinstance(version, str) and SEMVER_RE.fullmatch(version) is not None,
+                is_semver(version),
                 "gitleaks release version must be pinned to exact SemVer",
             )
             require(
@@ -969,6 +1006,10 @@ for invalid_manifest in (
         bool(release_manifest_errors(invalid_manifest)),
         f"invalid release manifest must be rejected: {invalid_manifest}",
     )
+check(
+    bool(release_manifest_errors({".": "0.0.0-0." + "--." * 10_000})),
+    "pathological SemVer input must be rejected without regex backtracking",
+)
 release_config = json.loads((ROOT / ".github/release-please/config.json").read_text())
 check(
     release_config.get("release-type") == "simple"
@@ -1007,9 +1048,7 @@ for path in sorted(p for p in ROOT.rglob("*") if p.is_file() and ".git" not in p
         continue
     for pattern in secret_patterns:
         if re.search(pattern, text):
-            ERRORS.append(
-                f"{path.relative_to(ROOT)}: prohibited secret/personal-path pattern: {pattern}"
-            )
+            ERRORS.append(f"{path.relative_to(ROOT)}: prohibited secret/personal-path pattern")
 
 if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)

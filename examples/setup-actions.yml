@@ -90,3 +90,21 @@ jobs:
         with:
           junit-paths: test-results/**/*.xml
           title: Test results
+
+  deploy-pages-subdirectory:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build static report
+        run: mkdir -p report && printf '%s\n' '<h1>Report</h1>' > report/index.html
+      - name: Publish report under a stable subdirectory
+        uses: quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.3.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          publish-dir: report
+          destination-dir: reports/example

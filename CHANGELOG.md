@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.1](https://github.com/quokkify/project-toolkit/compare/v2.5.0...v2.5.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **actions:** pass token to gh-pages git auth ([#42](https://github.com/quokkify/project-toolkit/issues/42)) ([41b2e36](https://github.com/quokkify/project-toolkit/commit/41b2e3697f3d41905bf95e7b6b0f2a03e50ef2b6))
+
 ## [2.5.0](https://github.com/quokkify/project-toolkit/compare/v2.4.0...v2.5.0) (2026-08-01)
 
 

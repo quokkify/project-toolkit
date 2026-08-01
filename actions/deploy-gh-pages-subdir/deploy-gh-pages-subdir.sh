@@ -53,7 +53,8 @@ PY
 # Keep credentials out of command-line arguments and the generated remote URL.
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0=http.extraheader
-export GIT_CONFIG_VALUE_0="Authorization: Bearer ${INPUT_TOKEN}"
+token_var=INPUT_TOKEN
+export GIT_CONFIG_VALUE_0="Authorization: Bearer ${!token_var}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/quokkify/project-toolkit/compare/v2.0.0...v2.0.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **actions:** use quokkify repositories ([#11](https://github.com/quokkify/project-toolkit/issues/11)) ([63b504d](https://github.com/quokkify/project-toolkit/commit/63b504dc5f63ba3cce5a9e15837bae61155eb3cc))
+
 ## [2.0.0](https://github.com/ylazakovich/project-toolkit/compare/v1.1.1...v2.0.0) (2026-07-31)
 
 

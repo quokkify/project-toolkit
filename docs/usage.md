@@ -7,7 +7,7 @@ Copy a small caller workflow from [`examples/`](../examples/) and replace comman
 ```yaml
 jobs:
   backend:
-    uses: ylazakovich/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -45,7 +45,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy gh:ylazakovich/project-toolkit my-project --vcs-ref v1.0.0 --trust
+copier copy gh:quokkify/project-toolkit my-project --vcs-ref v1.0.0 --trust
 cd my-project
 copier update --trust
 ```
@@ -60,4 +60,4 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 
 New Copier-generated projects extend selected presets from `ylazakovich/renovate-config` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
 
-The legacy `github>ylazakovich/project-toolkit//renovate/default.json5` preset remains available for existing consumers. New generated projects intentionally follow the shared preset repository's default branch unless the generated `renovate.json` is manually pinned to a tag or commit later.
+The bundled `github>quokkify/project-toolkit//renovate/default.json5` preset remains available for existing consumers. New generated projects intentionally follow the shared preset repository's default branch unless the generated `renovate.json` is manually pinned to a tag or commit later.

@@ -147,11 +147,11 @@ class ComposeActionTests(unittest.TestCase):
 
     def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
         text = (ROOT / "actions/compose-up/action.yml").read_text()
-        self.assertEqual(text.count("uses: ylazakovich/compose-health-check-action@"), 1)
+        self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
         self.assertIn("@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0", text)
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
-        self.assertEqual(sum(step.get("uses", "").startswith("ylazakovich/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
+        self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
         standalone = self.steps["Start Compose with standalone health engine"]
         self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
         self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")

@@ -8,7 +8,7 @@ permissions:
   pull-requests: write
 jobs:
   release:
-    uses: ylazakovich/project-toolkit/.github/workflows/release-please.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/release-please.yml@v1.0.0
     with:
       mode: single
       release-type: simple

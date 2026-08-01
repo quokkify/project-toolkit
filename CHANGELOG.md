@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.0](https://github.com/quokkify/project-toolkit/compare/v2.2.0...v2.3.0) (2026-08-01)
+
+
+### Features
+
+* **renovate:** track validation dependencies ([#30](https://github.com/quokkify/project-toolkit/issues/30)) ([8707332](https://github.com/quokkify/project-toolkit/commit/870733296b04f650249b96f80f70dc11e3aa9525))
+
+
+### Bug Fixes
+
+* **renovate:** use quokkify shared preset ([#28](https://github.com/quokkify/project-toolkit/issues/28)) ([583d403](https://github.com/quokkify/project-toolkit/commit/583d40315cd5587b1570635f51a8866215d44d20))
+
 ## [2.2.0](https://github.com/quokkify/project-toolkit/compare/v2.1.0...v2.2.0) (2026-08-01)
 
 

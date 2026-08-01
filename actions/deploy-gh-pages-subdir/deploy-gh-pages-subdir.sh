@@ -25,6 +25,11 @@ validate_relative_path "$INPUT_DESTINATION_DIR" "destination-dir"
 
 RETENTION_COUNT="${INPUT_RETENTION_COUNT:-0}"
 [[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]] || error "retention-count must be a non-negative integer"
+RETENTION_COUNT=$((10#$RETENTION_COUNT))
+if (( RETENTION_COUNT > 0 )); then
+  retention_dest_name="${INPUT_DESTINATION_DIR##*/}"
+  [[ "$retention_dest_name" =~ ^pr-[0-9]+$ ]] || error "retention-count requires destination-dir basename pr-N"
+fi
 
 BRANCH="${INPUT_BRANCH:-gh-pages}"
 [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || error "branch contains unsupported characters"
@@ -74,8 +79,6 @@ prune_old_reports() {
   local parent dest_name candidate rel timestamp
   parent="${INPUT_DESTINATION_DIR%/*}"
   [[ "$parent" != "$INPUT_DESTINATION_DIR" ]] || parent="."
-  dest_name="${INPUT_DESTINATION_DIR##*/}"
-  [[ "$dest_name" =~ ^pr-[0-9]+$ ]] || error "retention-count requires destination-dir basename pr-N"
 
   local -a entries=()
   for candidate in "$R/$parent"/pr-*; do

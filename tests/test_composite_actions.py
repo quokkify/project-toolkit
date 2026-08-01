@@ -743,6 +743,7 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
             ({"destination_dir": "../other"}, "destination-dir"),
             ({"branch": "../gh-pages"}, "branch"),
             ({"retention_count": "twenty"}, "retention-count"),
+            ({"retention_count": "2", "destination_dir": "reports/example"}, "pr-N"),
         ):
             with self.subTest(kwargs=kwargs):
                 result = self.run_rejected(**kwargs)
@@ -765,7 +766,7 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
                 (report / "index.html").write_text(f"report {number}\n")
                 subprocess.run(["git", "-C", str(seed), "add", "."], check=True)
                 subprocess.run(
-                    ["git", "-C", str(seed), "-c", f"user.name=test", "-c", "user.email=test@example.com", "commit", "-m", f"report {number}"],
+                    ["git", "-C", str(seed), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", f"report {number}"],
                     env={**os.environ, "GIT_AUTHOR_DATE": f"2020-01-0{number}T00:00:00Z", "GIT_COMMITTER_DATE": f"2020-01-0{number}T00:00:00Z"},
                     check=True,
                     capture_output=True,
@@ -791,7 +792,7 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
                 "INPUT_PUBLISH_DIR": "report",
                 "INPUT_DESTINATION_DIR": "allure/pr-4",
                 "INPUT_BRANCH": "gh-pages",
-                "INPUT_RETENTION_COUNT": "2",
+                "INPUT_RETENTION_COUNT": "02",
                 "GITHUB_ACTION_PATH": str(self.script.parent),
             }
             result = subprocess.run(["bash", str(self.script)], env=env, text=True, capture_output=True, check=False)

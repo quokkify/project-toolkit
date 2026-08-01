@@ -1,0 +1,32 @@
+name: Deploy gh-pages subdirectory
+description: >
+  Publishes a workspace directory to a subdirectory on a GitHub Pages branch,
+  preserving sibling paths and using a lease-protected push.
+author: quokkify
+
+inputs:
+  token:
+    description: GitHub token with contents:write for the target repository
+    required: true
+  publish-dir:
+    description: Directory to publish, relative to the workspace
+    required: true
+  destination-dir:
+    description: Target subdirectory on the pages branch (for example allure/pr-42)
+    required: true
+  branch:
+    description: Branch that hosts the published pages
+    required: false
+    default: gh-pages
+
+runs:
+  using: composite
+  steps:
+    - name: Validate and publish gh-pages subdirectory
+      shell: bash
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_PUBLISH_DIR: ${{ inputs.publish-dir }}
+        INPUT_DESTINATION_DIR: ${{ inputs.destination-dir }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+      run: bash "${GITHUB_ACTION_PATH}/deploy-gh-pages-subdir.sh"

@@ -12,6 +12,8 @@ Examples use the current toolkit release, `v2.3.0`. Renovate updates the referen
   - setup-java + Gradle-only caching with wrapper validation enabled by default and workspace-relative wrapper resolution
 - `actions/compose-up/action.yml`
   - validates safe Compose paths, delegates one startup and container-health check to the immutable `compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99` (`v2.3.0`), and optionally waits for HTTP readiness
+- `actions/deploy-gh-pages-subdir/action.yml`
+  - publishes one workspace directory into a validated subdirectory on a Pages branch, preserving sibling deployments and using a lease-protected push
 - `actions/junit-step-summary/action.yml`
   - safely aggregates bounded, workspace-contained JUnit XML globs into a GitHub job-summary table and numeric outputs
 

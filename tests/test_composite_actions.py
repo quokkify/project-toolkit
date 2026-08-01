@@ -707,5 +707,47 @@ class ComposeActionTests(unittest.TestCase):
             self.assertNotIn("deploy/deploy", command)
 
 
+class DeployGhPagesSubdirTests(unittest.TestCase):
+    script = ROOT / "actions/deploy-gh-pages-subdir/deploy-gh-pages-subdir.sh"
+
+    def run_rejected(self, *, publish_dir: str = "report", destination_dir: str = "reports/example", branch: str = "gh-pages") -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory(prefix="deploy-pages-validation-") as tmp:
+            workspace = Path(tmp)
+            (workspace / "report").mkdir()
+            env = {
+                **os.environ,
+                "GITHUB_WORKSPACE": str(workspace),
+                "GITHUB_REPOSITORY": "quokkify/project-toolkit",
+                "GITHUB_SERVER_URL": "https://github.com",
+                "INPUT_TOKEN": "dummy-token",
+                "INPUT_PUBLISH_DIR": publish_dir,
+                "INPUT_DESTINATION_DIR": destination_dir,
+                "INPUT_BRANCH": branch,
+                "GITHUB_ACTION_PATH": str(self.script.parent),
+            }
+            return subprocess.run(
+                ["bash", str(self.script)],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def test_action_contract_and_safe_path_guards(self) -> None:
+        data = action("deploy-gh-pages-subdir")
+        self.assertEqual(data["runs"]["using"], "composite")
+        self.assertEqual(data["inputs"]["branch"]["default"], "gh-pages")
+        for kwargs, expected in (
+            ({"publish_dir": "../report"}, "publish-dir"),
+            ({"destination_dir": "../other"}, "destination-dir"),
+            ({"branch": "../gh-pages"}, "branch"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                result = self.run_rejected(**kwargs)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(expected, result.stderr)
+                self.assertNotIn("dummy-token", result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

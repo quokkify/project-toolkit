@@ -1383,6 +1383,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
 
 run([sys.executable, "tests/test_composite_actions.py"])
+run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
 
 if not ARGS.static:
     fixture_commands = (

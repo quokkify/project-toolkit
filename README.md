@@ -34,8 +34,9 @@ Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/nod
 
 ## Documentation
 
+- **[Human guide: create, update, extend, and roll out projects](docs/human-guide.md)**
 - [Architecture and researched constraints](docs/architecture.md)
-- [Usage, Copier, Release Please, and Renovate](docs/usage.md)
+- [Detailed usage, Copier, Release Please, and Renovate](docs/usage.md)
 - [Versioning](docs/versioning.md)
 - [Security model](docs/security.md)
 - [Contributing](CONTRIBUTING.md)

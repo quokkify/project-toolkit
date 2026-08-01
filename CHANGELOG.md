@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/quokkify/project-toolkit/compare/v2.3.0...v2.4.0) (2026-08-01)
+
+
+### Features
+
+* **actions:** add gh-pages subdirectory deploy action ([#38](https://github.com/quokkify/project-toolkit/issues/38)) ([5aaca14](https://github.com/quokkify/project-toolkit/commit/5aaca142a43b998e0756b2995d13f4bec1bf2990))
+
 ## [2.3.0](https://github.com/quokkify/project-toolkit/compare/v2.2.0...v2.3.0) (2026-08-01)
 
 

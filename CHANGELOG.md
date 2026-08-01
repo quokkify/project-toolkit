@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0](https://github.com/quokkify/project-toolkit/compare/v2.4.0...v2.5.0) (2026-08-01)
+
+
+### Features
+
+* **actions:** add gh-pages report retention ([#40](https://github.com/quokkify/project-toolkit/issues/40)) ([7f797ab](https://github.com/quokkify/project-toolkit/commit/7f797abd4a2efa95989fe341eba8392f76e636b3))
+
 ## [2.4.0](https://github.com/quokkify/project-toolkit/compare/v2.3.0...v2.4.0) (2026-08-01)
 
 

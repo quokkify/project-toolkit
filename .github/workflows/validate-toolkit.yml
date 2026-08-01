@@ -5,12 +5,29 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
+  detect-runner:
+    uses: ./.github/workflows/reusable-detect-runner.yml
+    with:
+      strategy: ${{ github.event_name == 'pull_request' && 'pr_trusted' || 'push_any' }}
+      same_repo: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name }}
+      trusted_author: ${{ github.event_name == 'pull_request' && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+      is_renovate_bot: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'renovate[bot]' }}
+    secrets:
+      RUNNER_DISCOVERY_TOKEN: ${{ secrets.RUNNER_DISCOVERY_TOKEN }}
+
+  lint:
+    name: Lint and static validation
+    needs: detect-runner
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -26,12 +43,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.18.1"
-      - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Install pinned validation dependencies
+      - name: Install pinned static-validation dependencies
         run: python -m pip install PyYAML==6.0.3 copier==9.17.0
       - name: Install actionlint
         env:
@@ -44,8 +56,8 @@ jobs:
           tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
           mkdir -p "$HOME/.local/bin"
           install -m 0755 actionlint "$HOME/.local/bin/actionlint"
-      - name: Run repository validation
-        run: python scripts/validate.py
+      - name: Validate toolkit policies and templates
+        run: python scripts/validate.py --static
       - name: Validate Renovate configuration
         run: >-
           npx --yes --package renovate@44.5.3 renovate-config-validator
@@ -71,3 +83,111 @@ jobs:
           else
             git diff --check "$BASE_SHA..$HEAD_SHA"
           fi
+
+  gitleaks:
+    name: Gitleaks
+    needs: detect-runner
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out full repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install checksum-verified Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLo "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          printf '%s  %s\n' "$GITLEAKS_SHA256" "$archive" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 gitleaks "$HOME/.local/bin/gitleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Scan Git history and current tree
+        run: |
+          gitleaks git --redact --no-banner .
+          gitleaks dir --redact --no-banner .
+
+  python:
+    name: Python fixture
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Compile, test, and package Python fixture
+        run: python scripts/validate_python_fixture.py
+
+  node:
+    name: Node.js fixture
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.1"
+      - name: Lint, test, and build Node.js fixture
+        run: node scripts/validate_node_fixture.mjs
+
+  java:
+    name: Java fixture
+    needs: [detect-runner, lint]
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile, test, and package Java fixture
+        env:
+          REQUIRE_MAVEN: "1"
+        run: bash scripts/validate_java_fixture.sh
+
+  validation-complete:
+    name: Validation pipeline complete
+    needs: [detect-runner, lint, gitleaks, python, node, java]
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.event_name != 'pull_request_target' }}
+    timeout-minutes: 5
+    steps:
+      - name: Validate stage results
+        shell: bash
+        run: |
+          if [[ "${{ needs.detect-runner.result }}" != "success" ||
+                "${{ needs.lint.result }}" != "success" ||
+                "${{ needs.gitleaks.result }}" != "success" ||
+                "${{ needs.python.result }}" != "success" ||
+                "${{ needs.node.result }}" != "success" ||
+                "${{ needs.java.result }}" != "success" ]]; then
+            echo "One or more required validation stages did not succeed." >&2
+            exit 1
+          fi
+          echo "All required validation stages completed successfully."

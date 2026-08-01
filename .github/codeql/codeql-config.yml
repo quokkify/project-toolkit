@@ -1,0 +1,8 @@
+name: Project toolkit CodeQL config
+
+paths:
+  - scripts
+  - tests
+
+paths-ignore:
+  - "tests/fixtures/release-workflows/**"

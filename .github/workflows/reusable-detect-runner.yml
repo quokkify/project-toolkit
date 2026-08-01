@@ -1,0 +1,117 @@
+name: Reusable runner detection
+
+on:
+  workflow_call:
+    inputs:
+      strategy:
+        description: One of pr_trusted or push_any
+        required: true
+        type: string
+      same_repo:
+        description: Whether the pull request source and target repositories match
+        required: false
+        type: boolean
+        default: false
+      trusted_author:
+        description: Whether the pull request author is OWNER, MEMBER, or COLLABORATOR
+        required: false
+        type: boolean
+        default: false
+      is_renovate_bot:
+        description: Whether the pull request author is renovate[bot]
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      RUNNER_DISCOVERY_TOKEN:
+        description: Token used only to list repository self-hosted runners
+        required: false
+    outputs:
+      runs_on:
+        description: Runner labels as a JSON array
+        value: ${{ jobs.detect-runner.outputs.runs_on }}
+      is_self_hosted:
+        description: Whether a self-hosted runner was selected
+        value: ${{ jobs.detect-runner.outputs.is_self_hosted }}
+
+permissions:
+  contents: read
+  actions: none
+
+jobs:
+  detect-runner:
+    name: Select runner
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on: ${{ steps.select.outputs.runs_on }}
+      is_self_hosted: ${{ steps.select.outputs.is_self_hosted }}
+    steps:
+      - name: Choose runner
+        id: select
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          DISCOVERY_TOKEN_AVAILABLE: ${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}
+          STRATEGY: ${{ inputs.strategy }}
+          SAME_REPO: ${{ inputs.same_repo }}
+          TRUSTED_AUTHOR: ${{ inputs.trusted_author }}
+          IS_RENOVATE_BOT: ${{ inputs.is_renovate_bot }}
+        with:
+          github-token: ${{ secrets.RUNNER_DISCOVERY_TOKEN || github.token }}
+          script: |
+            const labels = ['self-hosted', 'compose', 'internal'];
+            const strategy = process.env.STRATEGY;
+            const sameRepo = process.env.SAME_REPO === 'true';
+            const trustedAuthor = process.env.TRUSTED_AUTHOR === 'true';
+            const isRenovateBot = process.env.IS_RENOVATE_BOT === 'true';
+
+            const setHosted = () => {
+              core.setOutput('runs_on', JSON.stringify(['ubuntu-latest']));
+              core.setOutput('is_self_hosted', 'false');
+            };
+            const setSelfHosted = () => {
+              core.setOutput('runs_on', JSON.stringify(labels));
+              core.setOutput('is_self_hosted', 'true');
+            };
+
+            let allowSelfHosted = false;
+            if (strategy === 'push_any') {
+              allowSelfHosted = true;
+            } else if (strategy === 'pr_trusted') {
+              allowSelfHosted = sameRepo && (trustedAuthor || isRenovateBot);
+            } else {
+              core.warning(`Unknown strategy '${strategy}', using github-hosted runner.`);
+            }
+
+            if (!allowSelfHosted) {
+              setHosted();
+              return;
+            }
+
+            if (process.env.DISCOVERY_TOKEN_AVAILABLE !== 'true') {
+              core.notice('Runner discovery token is not configured. Using github-hosted runner.');
+              setHosted();
+              return;
+            }
+
+            try {
+              const { data } = await github.rest.actions.listSelfHostedRunnersForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              const available = data.runners.some(runner =>
+                runner.status === 'online' &&
+                labels.every(required => runner.labels.some(label => label.name === required))
+              );
+              if (!available) {
+                core.warning('No compatible self-hosted runner is online. Falling back to github-hosted.');
+                setHosted();
+                return;
+              }
+            } catch (error) {
+              core.warning(`Runner discovery failed: ${error.message}. Falling back to github-hosted.`);
+              setHosted();
+              return;
+            }
+
+            setSelfHosted();

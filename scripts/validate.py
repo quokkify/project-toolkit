@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -13,8 +14,17 @@ from pathlib import Path
 
 import yaml
 
+from validate_python_fixture import validate_python_fixture
+
 ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
+PARSER = argparse.ArgumentParser(description=__doc__)
+PARSER.add_argument(
+    "--static",
+    action="store_true",
+    help="run shared policy, template, and static checks without language fixtures",
+)
+ARGS = PARSER.parse_args() if __name__ == "__main__" else PARSER.parse_args([])
 
 
 def check(condition: bool, message: str) -> None:
@@ -128,6 +138,555 @@ def release_manifest_errors(manifest: object) -> list[str]:
     if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
         return ["root package version must be a well-formed SemVer string"]
     return []
+
+
+def validate_toolkit_workflow_errors(
+    path: Path, workflow_override: object | None = None
+) -> list[str]:
+    """Validate the runner-selection DAG and isolated repository micro-jobs."""
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    if workflow_override is None:
+        try:
+            workflow = yaml.safe_load(path.read_text())
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            return [f"{rel}: YAML parse failed: {exc}"]
+    else:
+        workflow = workflow_override
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    jobs = workflow.get("jobs")
+    require(isinstance(jobs, dict), "jobs block must be a mapping")
+    if not isinstance(jobs, dict):
+        return errors
+    require(
+        set(jobs)
+        == {
+            "detect-runner",
+            "lint",
+            "gitleaks",
+            "python",
+            "node",
+            "java",
+            "validation-complete",
+        },
+        "must define detect-runner, lint, gitleaks, language, and aggregate jobs",
+    )
+    selector = jobs.get("detect-runner")
+    require(isinstance(selector, dict), "detect-runner job must be a mapping")
+    if isinstance(selector, dict):
+        require(
+            selector.get("uses") == "./.github/workflows/reusable-detect-runner.yml",
+            "detect-runner must call the local reusable selector",
+        )
+        require(
+            selector.get("secrets")
+            == {"RUNNER_DISCOVERY_TOKEN": "${{ secrets.RUNNER_DISCOVERY_TOKEN }}"},
+            "detect-runner must receive only the runner discovery token",
+        )
+        selector_inputs = selector.get("with", {})
+        require(
+            isinstance(selector_inputs, dict)
+            and set(selector_inputs)
+            == {"strategy", "same_repo", "trusted_author", "is_renovate_bot"},
+            "detect-runner must pass the complete trust context",
+        )
+    expected = {
+        "lint": {
+            "setups": {"actions/setup-python", "actions/setup-node"},
+            "command": "python scripts/validate.py --static",
+            "needs": {"detect-runner"},
+        },
+        "gitleaks": {
+            "setups": set(),
+            "command": None,
+            "needs": {"detect-runner"},
+        },
+        "python": {
+            "setups": {"actions/setup-python"},
+            "command": "python scripts/validate_python_fixture.py",
+            "needs": {"detect-runner", "lint"},
+        },
+        "node": {
+            "setups": {"actions/setup-node"},
+            "command": "node scripts/validate_node_fixture.mjs",
+            "needs": {"detect-runner", "lint"},
+        },
+        "java": {
+            "setups": {"actions/setup-java"},
+            "command": "bash scripts/validate_java_fixture.sh",
+            "needs": {"detect-runner", "lint"},
+        },
+    }
+    for name, contract in expected.items():
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            require(False, f"{name} job must be a mapping")
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            require(False, f"{name} job must define steps")
+            continue
+        needs = job.get("needs")
+        needs_set = (
+            {needs}
+            if isinstance(needs, str)
+            else set(needs)
+            if isinstance(needs, list)
+            else set()
+        )
+        require(needs_set == contract["needs"], f"{name} job has incorrect dependencies")
+        require(
+            job.get("runs-on") == "${{ fromJson(needs.detect-runner.outputs.runs_on) }}",
+            f"{name} job must use the detected runner",
+        )
+        require(
+            "github.event_name != 'pull_request_target'" in str(job.get("if", "")),
+            f"{name} must reject pull_request_target",
+        )
+        require("secrets" not in job, f"{name} job must not inherit secrets")
+        setup_actions: set[str] = set()
+        commands: list[str] = []
+        checkout_found = False
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            use = step.get("uses")
+            if isinstance(use, str):
+                action = use.rpartition("@")[0]
+                if action == "actions/checkout":
+                    checkout_found = True
+                    action_inputs = step.get("with")
+                    require(
+                        isinstance(action_inputs, dict)
+                        and action_inputs.get("persist-credentials") is False,
+                        f"{name} checkout must set persist-credentials: false",
+                    )
+                if action.startswith("actions/setup-"):
+                    setup_actions.add(action)
+            command = step.get("run")
+            if isinstance(command, str):
+                commands.append(command)
+        require(checkout_found, f"{name} job must check out the repository")
+        require(
+            setup_actions == contract["setups"],
+            f"{name} job has unexpected toolchain setup actions: {sorted(setup_actions)}",
+        )
+        if contract["command"] is not None:
+            require(
+                contract["command"] in commands,
+                f"{name} job must run only its focused validation entrypoint",
+            )
+        if name == "java":
+            java_steps = [
+                step
+                for step in steps
+                if isinstance(step, dict)
+                and step.get("run") == "bash scripts/validate_java_fixture.sh"
+            ]
+            require(
+                len(java_steps) == 1
+                and java_steps[0].get("env") == {"REQUIRE_MAVEN": "1"},
+                "java CI validation must require Maven",
+            )
+        other_commands = {
+            value["command"]
+            for key, value in expected.items()
+            if key != name and value["command"] is not None
+        }
+        require(
+            not other_commands.intersection(commands),
+            f"{name} job invokes another job's validation entrypoint",
+        )
+    gitleaks = jobs.get("gitleaks")
+    if isinstance(gitleaks, dict):
+        steps = gitleaks.get("steps", [])
+        checkout_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+        require(len(checkout_steps) == 1, "gitleaks must define exactly one checkout step")
+        if checkout_steps:
+            checkout_inputs = checkout_steps[0].get("with", {})
+            require(
+                isinstance(checkout_inputs, dict) and checkout_inputs.get("fetch-depth") == 0,
+                "gitleaks checkout must fetch full history",
+            )
+        install_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Install checksum-verified Gitleaks"
+        ]
+        require(len(install_steps) == 1, "gitleaks must define one checksum-verified install")
+        if install_steps:
+            install = install_steps[0]
+            install_env = install.get("env", {})
+            version = install_env.get("GITLEAKS_VERSION") if isinstance(install_env, dict) else None
+            checksum = install_env.get("GITLEAKS_SHA256") if isinstance(install_env, dict) else None
+            require(
+                isinstance(version, str) and SEMVER_RE.fullmatch(version) is not None,
+                "gitleaks release version must be pinned to exact SemVer",
+            )
+            require(
+                isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum) is not None,
+                "gitleaks release archive must use a pinned SHA-256 checksum",
+            )
+            install_script = str(install.get("run", ""))
+            for marker in (
+                "gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}",
+                'printf \'%s  %s\\n\' "$GITLEAKS_SHA256" "$archive" | sha256sum -c -',
+                'install -m 0755 gitleaks "$HOME/.local/bin/gitleaks"',
+                'echo "$HOME/.local/bin" >> "$GITHUB_PATH"',
+            ):
+                require(marker in install_script, f"gitleaks install is missing marker: {marker}")
+        scan_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Scan Git history and current tree"
+        ]
+        require(len(scan_steps) == 1, "gitleaks must define one history and tree scan")
+        if scan_steps:
+            scan_script = str(scan_steps[0].get("run", ""))
+            for command in (
+                "gitleaks git --redact --no-banner .",
+                "gitleaks dir --redact --no-banner .",
+            ):
+                require(command in scan_script, f"gitleaks scan must run redacted command: {command}")
+            require("--report-path" not in scan_script, "gitleaks must not persist a findings report")
+        require(
+            not any(
+                isinstance(step, dict)
+                and str(step.get("uses", "")).startswith("actions/upload-artifact@")
+                for step in steps
+            ),
+            "gitleaks must not upload potentially secret-bearing artifacts",
+        )
+    aggregate = jobs.get("validation-complete")
+    require(
+        isinstance(aggregate, dict),
+        "validation-complete aggregate must be a mapping",
+    )
+    if isinstance(aggregate, dict):
+        needs = aggregate.get("needs")
+        require(
+            isinstance(needs, list)
+            and set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java"},
+            "validate aggregate must depend on every required stage",
+        )
+        require(
+            aggregate.get("if")
+            == "${{ always() && github.event_name != 'pull_request_target' }}",
+            "validate aggregate must always evaluate and reject pull_request_target",
+        )
+        require(
+            aggregate.get("runs-on") == "ubuntu-latest",
+            "validate aggregate must use a fixed fallback runner",
+        )
+        aggregate_text = json.dumps(aggregate)
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java"):
+            require(
+                f"needs.{stage}.result" in aggregate_text,
+                f"validate aggregate must fail closed on {stage}",
+            )
+        require("exit 1" in aggregate_text, "validate aggregate must fail with a non-zero status")
+    return errors
+
+
+def runner_selection_allows_self_hosted(
+    strategy: str,
+    *,
+    same_repo: bool = False,
+    trusted_author: bool = False,
+    is_renovate_bot: bool = False,
+) -> bool:
+    """Model the reusable selector's trust gate for negative policy probes."""
+    if strategy == "push_any":
+        return True
+    if strategy == "pr_trusted":
+        return same_repo and (trusted_author or is_renovate_bot)
+    return False
+
+
+def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
+    """Model the aggregate job's requirement that every stage succeeds."""
+    required = {"detect-runner", "lint", "gitleaks", "python", "node", "java"}
+    return set(results) == required and all(result == "success" for result in results.values())
+
+
+def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
+    """Prove the workflow contract rejects Gitleaks bypass mutations."""
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{path.relative_to(ROOT)}: negative probe YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{path.relative_to(ROOT)}: negative probes require a mapping"]
+    errors: list[str] = []
+
+    def clone() -> dict:
+        return json.loads(json.dumps(workflow))
+
+    def step_by_name(mutated: dict, job_name: str, step_name: str) -> dict:
+        jobs = mutated.get("jobs")
+        job = jobs.get(job_name) if isinstance(jobs, dict) else None
+        steps = job.get("steps") if isinstance(job, dict) else None
+        if isinstance(steps, list):
+            for step in steps:
+                if isinstance(step, dict) and step.get("name") == step_name:
+                    return step
+        return {}
+
+    def require_rejection(mutated: object, marker: str, label: str) -> None:
+        probe_errors = validate_toolkit_workflow_errors(path, mutated)
+        if not any(marker in error for error in probe_errors):
+            errors.append(f"{path.relative_to(ROOT)}: negative probe accepted {label}")
+
+    mutated = clone()
+    del mutated["jobs"]["gitleaks"]
+    require_rejection(mutated, "must define detect-runner, lint, gitleaks", "missing gitleaks job")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["needs"] = []
+    require_rejection(mutated, "gitleaks job has incorrect dependencies", "detector bypass")
+
+    mutated = clone()
+    mutated["jobs"]["gitleaks"]["runs-on"] = "ubuntu-latest"
+    require_rejection(mutated, "gitleaks job must use the detected runner", "runner wiring bypass")
+
+    mutated = clone()
+    checkout = step_by_name(mutated, "gitleaks", "Check out full repository history")
+    checkout.setdefault("with", {})["fetch-depth"] = 1
+    require_rejection(mutated, "gitleaks checkout must fetch full history", "shallow checkout")
+
+    mutated = clone()
+    install = step_by_name(mutated, "gitleaks", "Install checksum-verified Gitleaks")
+    install.setdefault("env", {})["GITLEAKS_VERSION"] = "latest"
+    require_rejection(mutated, "version must be pinned", "unpinned release")
+
+    mutated = clone()
+    step_by_name(mutated, "gitleaks", "Install checksum-verified Gitleaks")["run"] = (
+        "install gitleaks"
+    )
+    require_rejection(mutated, "sha256sum -c", "checksum bypass")
+
+    mutated = clone()
+    step_by_name(mutated, "gitleaks", "Scan Git history and current tree")["run"] = (
+        "gitleaks git .\ngitleaks dir ."
+    )
+    require_rejection(mutated, "redacted command", "redaction bypass")
+
+    mutated = clone()
+    aggregate_needs = mutated["jobs"]["validation-complete"].get("needs")
+    mutated["jobs"]["validation-complete"]["needs"] = [
+        need for need in aggregate_needs if need != "gitleaks"
+    ] if isinstance(aggregate_needs, list) else []
+    require_rejection(mutated, "depend on every required stage", "aggregate dependency bypass")
+
+    mutated = clone()
+    aggregate_step = step_by_name(mutated, "validation-complete", "Validate stage results")
+    aggregate_script = str(aggregate_step.get("run", ""))
+    aggregate_step["run"] = "\n".join(
+        line for line in aggregate_script.splitlines() if "needs.gitleaks.result" not in line
+    )
+    require_rejection(mutated, "fail closed on gitleaks", "aggregate result bypass")
+
+    successful_results = {
+        stage: "success"
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java")
+    }
+    if not validation_aggregate_succeeds(successful_results):
+        errors.append(f"{path.relative_to(ROOT)}: aggregate positive probe rejected success")
+    for failed_stage in successful_results:
+        failed_results = dict(successful_results)
+        failed_results[failed_stage] = "failure"
+        if validation_aggregate_succeeds(failed_results):
+            errors.append(
+                f"{path.relative_to(ROOT)}: aggregate negative probe accepted {failed_stage}"
+            )
+    return errors
+
+
+def reusable_runner_workflow_errors(path: Path) -> list[str]:
+    """Validate fail-closed runner discovery and its reusable outputs."""
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    triggers = workflow.get("on", workflow.get(True))
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    require(isinstance(call, dict), "must expose workflow_call")
+    if isinstance(call, dict):
+        call_inputs = call.get("inputs")
+        require(
+            isinstance(call_inputs, dict)
+            and set(call_inputs)
+            == {"strategy", "same_repo", "trusted_author", "is_renovate_bot"},
+            "workflow_call inputs must expose the complete trust context",
+        )
+        require(
+            call.get("secrets")
+            == {
+                "RUNNER_DISCOVERY_TOKEN": {
+                    "description": "Token used only to list repository self-hosted runners",
+                    "required": False,
+                }
+            },
+            "workflow_call must declare only the optional runner discovery token",
+        )
+        require(
+            set(call.get("outputs", {})) == {"runs_on", "is_self_hosted"},
+            "workflow_call outputs must expose runner labels and hosting mode",
+        )
+    require(
+        workflow.get("permissions") == {"contents": "read", "actions": "none"},
+        "permissions must be exactly contents:read and actions:none",
+    )
+    jobs = workflow.get("jobs", {})
+    require(
+        isinstance(jobs, dict) and set(jobs) == {"detect-runner"},
+        "must define one selector job",
+    )
+    job = jobs.get("detect-runner", {}) if isinstance(jobs, dict) else {}
+    if not isinstance(job, dict):
+        job = {}
+    require(job.get("runs-on") == "ubuntu-latest", "selector must bootstrap on ubuntu-latest")
+    steps = job.get("steps", []) if isinstance(job, dict) else []
+    script_steps = [step for step in steps if isinstance(step, dict) and step.get("id") == "select"]
+    require(len(script_steps) == 1, "must define exactly one select step")
+    if script_steps:
+        step = script_steps[0]
+        use = step.get("uses", "")
+        require(
+            re.fullmatch(r"actions/github-script@[0-9a-f]{40}", use) is not None,
+            "github-script must be pinned to a full SHA",
+        )
+        require(
+            step.get("env")
+            == {
+                "DISCOVERY_TOKEN_AVAILABLE": "${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}",
+                "STRATEGY": "${{ inputs.strategy }}",
+                "SAME_REPO": "${{ inputs.same_repo }}",
+                "TRUSTED_AUTHOR": "${{ inputs.trusted_author }}",
+                "IS_RENOVATE_BOT": "${{ inputs.is_renovate_bot }}",
+            },
+            "selector must pass trust inputs through the environment",
+        )
+        script = str(step.get("with", {}).get("script", ""))
+        for marker in (
+            "strategy === 'push_any'",
+            "strategy === 'pr_trusted'",
+            "process.env.STRATEGY",
+            "process.env.SAME_REPO",
+            "process.env.TRUSTED_AUTHOR",
+            "process.env.IS_RENOVATE_BOT",
+            "listSelfHostedRunnersForRepo",
+            "runner.status === 'online'",
+            "process.env.DISCOVERY_TOKEN_AVAILABLE !== 'true'",
+            "Runner discovery token is not configured",
+            "setHosted();",
+            "catch (error)",
+        ):
+            require(marker in script, f"selector script is missing fail-closed marker: {marker}")
+    probes = {
+        "fork trusted author": runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=False, trusted_author=True
+        ),
+        "same-repo untrusted author": runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True
+        ),
+        "unknown strategy": runner_selection_allows_self_hosted("unknown"),
+    }
+    for label, selected in probes.items():
+        require(not selected, f"negative runner-selection probe allowed {label}")
+    require(
+        runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True, trusted_author=True
+        ),
+        "trusted same-repository PR probe must allow discovery",
+    )
+    require(
+        runner_selection_allows_self_hosted(
+            "pr_trusted", same_repo=True, is_renovate_bot=True
+        ),
+        "same-repository Renovate probe must allow discovery",
+    )
+    require(
+        runner_selection_allows_self_hosted("push_any"),
+        "push strategy probe must allow discovery",
+    )
+    return errors
+
+
+def codeql_runner_workflow_errors(path: Path) -> list[str]:
+    """Validate that CodeQL remains separate and uses the trusted runner selector."""
+    rel = path.relative_to(ROOT)
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict) or set(jobs) != {"detect-runner", "analyze"}:
+        return [f"{rel}: must define exactly detect-runner and analyze jobs"]
+    errors: list[str] = []
+    selector = jobs["detect-runner"]
+    analyze = jobs["analyze"]
+    if not isinstance(selector, dict) or not isinstance(analyze, dict):
+        return [f"{rel}: detect-runner and analyze jobs must be mappings"]
+    if selector.get("uses") != "./.github/workflows/reusable-detect-runner.yml":
+        errors.append(f"{rel}: detect-runner must call the local reusable selector")
+    if selector.get("secrets") != {
+        "RUNNER_DISCOVERY_TOKEN": "${{ secrets.RUNNER_DISCOVERY_TOKEN }}"
+    }:
+        errors.append(f"{rel}: detect-runner must receive only the runner discovery token")
+    if analyze.get("needs") != "detect-runner":
+        errors.append(f"{rel}: analyze must depend on detect-runner")
+    if analyze.get("runs-on") != "${{ fromJson(needs.detect-runner.outputs.runs_on) }}":
+        errors.append(f"{rel}: analyze must use the detected runner")
+    analyze_strategy = analyze.get("strategy")
+    matrix = analyze_strategy.get("matrix", {}) if isinstance(analyze_strategy, dict) else {}
+    include = matrix.get("include", []) if isinstance(matrix, dict) else []
+    expected_languages = {
+        ("python", "none"),
+        ("javascript-typescript", "none"),
+        ("java-kotlin", "none"),
+    }
+    configured_languages = {
+        (entry.get("language"), entry.get("build-mode"))
+        for entry in include
+        if isinstance(entry, dict)
+    }
+    if configured_languages != expected_languages:
+        errors.append(f"{rel}: every CodeQL language must use explicit build-mode none")
+    steps = analyze.get("steps", [])
+    init_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("github/codeql-action/init@")
+    ]
+    if len(init_steps) != 1 or init_steps[0].get("with", {}).get("build-mode") != (
+        "${{ matrix.build-mode }}"
+    ):
+        errors.append(f"{rel}: CodeQL init must receive the explicit matrix build mode")
+    return errors
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
@@ -419,6 +978,16 @@ check(
     "Release Please config must preserve the simple project-toolkit SemVer contract",
 )
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
+ERRORS.extend(
+    validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
+)
+ERRORS.extend(
+    validate_toolkit_workflow_negative_probes(ROOT / ".github/workflows/validate-toolkit.yml")
+)
+ERRORS.extend(
+    reusable_runner_workflow_errors(ROOT / ".github/workflows/reusable-detect-runner.yml")
+)
+ERRORS.extend(codeql_runner_workflow_errors(ROOT / ".github/workflows/codeql.yml"))
 for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-*.yml")):
     check(
         bool(release_workflow_errors(fixture)),
@@ -776,51 +1345,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 
 run([sys.executable, "tests/test_composite_actions.py"])
 
-with tempfile.TemporaryDirectory(prefix="project-toolkit-fixtures-") as tmp:
-    fixtures = Path(tmp)
-    python = shutil.copytree(ROOT / "tests/fixtures/python", fixtures / "python")
-    node = shutil.copytree(ROOT / "tests/fixtures/node", fixtures / "node")
-    java = shutil.copytree(ROOT / "tests/fixtures/java", fixtures / "java")
-    run([sys.executable, "-m", "compileall", "-q", "src"], python)
-    run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], python)
-    (python / "dist").mkdir()
-    run(
-        [sys.executable, "-m", "zipapp", "src", "-o", "dist/app.pyz", "-m", "app:main"],
-        python,
+if not ARGS.static:
+    fixture_commands = (
+        ("Python", validate_python_fixture),
+        ("Node.js", lambda: run(["node", "scripts/validate_node_fixture.mjs"])),
+        ("Java", lambda: run(["bash", "scripts/validate_java_fixture.sh"])),
     )
-    run(["npm", "run", "lint"], node)
-    run(["npm", "test"], node)
-    run(["npm", "run", "build"], node)
-    (java / "build/classes").mkdir(parents=True)
-    (java / "build/test-classes").mkdir(parents=True)
-    run(["javac", "-Xlint:all", "-d", "build/classes", "src/toolkit/App.java"], java)
-    run(
-        [
-            "javac",
-            "-Xlint:all",
-            "-cp",
-            "build/classes",
-            "-d",
-            "build/test-classes",
-            "test/toolkit/AppTest.java",
-        ],
-        java,
-    )
-    run(["java", "-cp", "build/classes:build/test-classes", "toolkit.AppTest"], java)
-    run(
-        [
-            "jar",
-            "--create",
-            "--file",
-            "build/toolkit-java-fixture.jar",
-            "-C",
-            "build/classes",
-            ".",
-        ],
-        java,
-    )
-    run(["mvn", "--batch-mode", "--no-transfer-progress", "test"], java)
+    for language, validate_fixture in fixture_commands:
+        try:
+            validate_fixture()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            ERRORS.append(f"{language} fixture validation failed: {exc}")
 if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)
-print("validation: OK")
+print("static validation: OK" if ARGS.static else "validation: OK")

@@ -40,9 +40,11 @@
     {
       "customType": "regex",
       "description": "Keep documentation and examples on the latest project-toolkit release.",
-      "managerFilePatterns": ["/(^|/)(README\\.md|docs/[^/]+\\.md|examples/[^/]+\\.ya?ml)$/"],
+      "managerFilePatterns": ["/(^|/)(README\\.md|docs/[^/]+\\.md|examples/[^/]+\\.ya?ml)$/", "/^copier\\.yml$/"],
       "matchStrings": [
-        "(?:quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+        "(?:quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "such as\\s+`@(?<currentValue>v\\d+\\.\\d+\\.\\d+)`"
       ],
       "depNameTemplate": "quokkify/project-toolkit",
       "datasourceTemplate": "github-tags",

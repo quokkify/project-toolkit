@@ -14,6 +14,13 @@ javac -Xlint:all -d build/classes src/toolkit/App.java
 javac -Xlint:all -cp build/classes -d build/test-classes test/toolkit/AppTest.java
 java -cp build/classes:build/test-classes toolkit.AppTest
 jar --create --file build/toolkit-java-fixture.jar -C build/classes .
-mvn --batch-mode --no-transfer-progress test
+if command -v mvn >/dev/null 2>&1; then
+  mvn --batch-mode --no-transfer-progress test
+elif [[ "${REQUIRE_MAVEN:-0}" == "1" ]]; then
+  echo "Maven is required but not installed." >&2
+  exit 1
+else
+  echo "Maven is not installed; skipping the Maven test stage." >&2
+fi
 
 echo "java fixture: OK"

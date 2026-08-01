@@ -20,7 +20,8 @@ jobs:
       same_repo: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name }}
       trusted_author: ${{ github.event_name == 'pull_request' && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
       is_renovate_bot: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'renovate[bot]' }}
-    secrets: inherit
+    secrets:
+      RUNNER_DISCOVERY_TOKEN: ${{ secrets.RUNNER_DISCOVERY_TOKEN }}
 
   lint:
     name: Lint and static validation
@@ -107,6 +108,7 @@ jobs:
           tar -xzf "$archive" gitleaks
           mkdir -p "$HOME/.local/bin"
           install -m 0755 gitleaks "$HOME/.local/bin/gitleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Scan Git history and current tree
         run: |
           gitleaks git --redact --no-banner .
@@ -165,12 +167,14 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Compile, test, and package Java fixture
+        env:
+          REQUIRE_MAVEN: "1"
         run: bash scripts/validate_java_fixture.sh
 
   validation-complete:
     name: Validation pipeline complete
     needs: [detect-runner, lint, gitleaks, python, node, java]
-    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    runs-on: ubuntu-latest
     if: ${{ always() && github.event_name != 'pull_request_target' }}
     timeout-minutes: 5
     steps:

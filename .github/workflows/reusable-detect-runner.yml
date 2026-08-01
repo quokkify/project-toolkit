@@ -22,6 +22,10 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      RUNNER_DISCOVERY_TOKEN:
+        description: Token used only to list repository self-hosted runners
+        required: false
     outputs:
       runs_on:
         description: Runner labels as a JSON array
@@ -47,11 +51,18 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           DISCOVERY_TOKEN_AVAILABLE: ${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}
+          STRATEGY: ${{ inputs.strategy }}
+          SAME_REPO: ${{ inputs.same_repo }}
+          TRUSTED_AUTHOR: ${{ inputs.trusted_author }}
+          IS_RENOVATE_BOT: ${{ inputs.is_renovate_bot }}
         with:
           github-token: ${{ secrets.RUNNER_DISCOVERY_TOKEN || github.token }}
           script: |
             const labels = ['self-hosted', 'compose', 'internal'];
-            const strategy = '${{ inputs.strategy }}';
+            const strategy = process.env.STRATEGY;
+            const sameRepo = process.env.SAME_REPO === 'true';
+            const trustedAuthor = process.env.TRUSTED_AUTHOR === 'true';
+            const isRenovateBot = process.env.IS_RENOVATE_BOT === 'true';
 
             const setHosted = () => {
               core.setOutput('runs_on', JSON.stringify(['ubuntu-latest']));
@@ -66,9 +77,7 @@ jobs:
             if (strategy === 'push_any') {
               allowSelfHosted = true;
             } else if (strategy === 'pr_trusted') {
-              allowSelfHosted =
-                ${{ inputs.same_repo }} &&
-                (${{ inputs.trusted_author }} || ${{ inputs.is_renovate_bot }});
+              allowSelfHosted = sameRepo && (trustedAuthor || isRenovateBot);
             } else {
               core.warning(`Unknown strategy '${strategy}', using github-hosted runner.`);
             }
@@ -90,10 +99,9 @@ jobs:
                 repo: context.repo.repo,
                 per_page: 100
               });
-              const requiredLabels = new Set(labels);
               const available = data.runners.some(runner =>
                 runner.status === 'online' &&
-                runner.labels.filter(label => requiredLabels.has(label.name)).length === requiredLabels.size
+                labels.every(required => runner.labels.some(label => label.name === required))
               );
               if (!available) {
                 core.warning('No compatible self-hosted runner is online. Falling back to github-hosted.');

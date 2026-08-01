@@ -184,7 +184,11 @@ def validate_toolkit_workflow_errors(
             selector.get("uses") == "./.github/workflows/reusable-detect-runner.yml",
             "detect-runner must call the local reusable selector",
         )
-        require(selector.get("secrets") == "inherit", "only detect-runner may inherit secrets")
+        require(
+            selector.get("secrets")
+            == {"RUNNER_DISCOVERY_TOKEN": "${{ secrets.RUNNER_DISCOVERY_TOKEN }}"},
+            "detect-runner must receive only the runner discovery token",
+        )
         selector_inputs = selector.get("with", {})
         require(
             isinstance(selector_inputs, dict)
@@ -228,15 +232,21 @@ def validate_toolkit_workflow_errors(
         if not isinstance(steps, list):
             require(False, f"{name} job must define steps")
             continue
-        needs = job.get("needs", [])
-        needs_set = {needs} if isinstance(needs, str) else set(needs)
+        needs = job.get("needs")
+        needs_set = (
+            {needs}
+            if isinstance(needs, str)
+            else set(needs)
+            if isinstance(needs, list)
+            else set()
+        )
         require(needs_set == contract["needs"], f"{name} job has incorrect dependencies")
         require(
             job.get("runs-on") == "${{ fromJson(needs.detect-runner.outputs.runs_on) }}",
             f"{name} job must use the detected runner",
         )
         require(
-            "pull_request_target" in str(job.get("if")),
+            "github.event_name != 'pull_request_target'" in str(job.get("if", "")),
             f"{name} must reject pull_request_target",
         )
         require("secrets" not in job, f"{name} job must not inherit secrets")
@@ -271,6 +281,18 @@ def validate_toolkit_workflow_errors(
             require(
                 contract["command"] in commands,
                 f"{name} job must run only its focused validation entrypoint",
+            )
+        if name == "java":
+            java_steps = [
+                step
+                for step in steps
+                if isinstance(step, dict)
+                and step.get("run") == "bash scripts/validate_java_fixture.sh"
+            ]
+            require(
+                len(java_steps) == 1
+                and java_steps[0].get("env") == {"REQUIRE_MAVEN": "1"},
+                "java CI validation must require Maven",
             )
         other_commands = {
             value["command"]
@@ -321,6 +343,7 @@ def validate_toolkit_workflow_errors(
                 "gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}",
                 'printf \'%s  %s\\n\' "$GITLEAKS_SHA256" "$archive" | sha256sum -c -',
                 'install -m 0755 gitleaks "$HOME/.local/bin/gitleaks"',
+                'echo "$HOME/.local/bin" >> "$GITHUB_PATH"',
             ):
                 require(marker in install_script, f"gitleaks install is missing marker: {marker}")
         scan_steps = [
@@ -351,16 +374,20 @@ def validate_toolkit_workflow_errors(
         "validation-complete aggregate must be a mapping",
     )
     if isinstance(aggregate, dict):
-        needs = aggregate.get("needs", [])
+        needs = aggregate.get("needs")
         require(
-            set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java"},
+            isinstance(needs, list)
+            and set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java"},
             "validate aggregate must depend on every required stage",
         )
-        require("always()" in str(aggregate.get("if")), "validate aggregate must always evaluate")
         require(
-            aggregate.get("runs-on")
-            == "${{ fromJson(needs.detect-runner.outputs.runs_on) }}",
-            "validate aggregate must use the detected runner",
+            aggregate.get("if")
+            == "${{ always() && github.event_name != 'pull_request_target' }}",
+            "validate aggregate must always evaluate and reject pull_request_target",
+        )
+        require(
+            aggregate.get("runs-on") == "ubuntu-latest",
+            "validate aggregate must use a fixed fallback runner",
         )
         aggregate_text = json.dumps(aggregate)
         for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java"):
@@ -395,13 +422,26 @@ def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
 
 def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
     """Prove the workflow contract rejects Gitleaks bypass mutations."""
-    workflow = yaml.safe_load(path.read_text())
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{path.relative_to(ROOT)}: negative probe YAML parse failed: {exc}"]
     if not isinstance(workflow, dict):
         return [f"{path.relative_to(ROOT)}: negative probes require a mapping"]
     errors: list[str] = []
 
     def clone() -> dict:
         return json.loads(json.dumps(workflow))
+
+    def step_by_name(mutated: dict, job_name: str, step_name: str) -> dict:
+        jobs = mutated.get("jobs")
+        job = jobs.get(job_name) if isinstance(jobs, dict) else None
+        steps = job.get("steps") if isinstance(job, dict) else None
+        if isinstance(steps, list):
+            for step in steps:
+                if isinstance(step, dict) and step.get("name") == step_name:
+                    return step
+        return {}
 
     def require_rejection(mutated: object, marker: str, label: str) -> None:
         probe_errors = validate_toolkit_workflow_errors(path, mutated)
@@ -421,31 +461,55 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
     require_rejection(mutated, "gitleaks job must use the detected runner", "runner wiring bypass")
 
     mutated = clone()
-    mutated["jobs"]["gitleaks"]["steps"][0]["with"]["fetch-depth"] = 1
+    checkout = step_by_name(mutated, "gitleaks", "Check out full repository history")
+    checkout.setdefault("with", {})["fetch-depth"] = 1
     require_rejection(mutated, "gitleaks checkout must fetch full history", "shallow checkout")
 
     mutated = clone()
-    mutated["jobs"]["gitleaks"]["steps"][1]["env"]["GITLEAKS_VERSION"] = "latest"
+    install = step_by_name(mutated, "gitleaks", "Install checksum-verified Gitleaks")
+    install.setdefault("env", {})["GITLEAKS_VERSION"] = "latest"
     require_rejection(mutated, "version must be pinned", "unpinned release")
 
     mutated = clone()
-    mutated["jobs"]["gitleaks"]["steps"][1]["run"] = "install gitleaks"
+    step_by_name(mutated, "gitleaks", "Install checksum-verified Gitleaks")["run"] = (
+        "install gitleaks"
+    )
     require_rejection(mutated, "sha256sum -c", "checksum bypass")
 
     mutated = clone()
-    mutated["jobs"]["gitleaks"]["steps"][2]["run"] = "gitleaks git .\ngitleaks dir ."
+    step_by_name(mutated, "gitleaks", "Scan Git history and current tree")["run"] = (
+        "gitleaks git .\ngitleaks dir ."
+    )
     require_rejection(mutated, "redacted command", "redaction bypass")
 
     mutated = clone()
-    mutated["jobs"]["validation-complete"]["needs"].remove("gitleaks")
+    aggregate_needs = mutated["jobs"]["validation-complete"].get("needs")
+    mutated["jobs"]["validation-complete"]["needs"] = [
+        need for need in aggregate_needs if need != "gitleaks"
+    ] if isinstance(aggregate_needs, list) else []
     require_rejection(mutated, "depend on every required stage", "aggregate dependency bypass")
 
     mutated = clone()
-    aggregate_script = mutated["jobs"]["validation-complete"]["steps"][0]["run"]
-    mutated["jobs"]["validation-complete"]["steps"][0]["run"] = "\n".join(
+    aggregate_step = step_by_name(mutated, "validation-complete", "Validate stage results")
+    aggregate_script = str(aggregate_step.get("run", ""))
+    aggregate_step["run"] = "\n".join(
         line for line in aggregate_script.splitlines() if "needs.gitleaks.result" not in line
     )
     require_rejection(mutated, "fail closed on gitleaks", "aggregate result bypass")
+
+    successful_results = {
+        stage: "success"
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java")
+    }
+    if not validation_aggregate_succeeds(successful_results):
+        errors.append(f"{path.relative_to(ROOT)}: aggregate positive probe rejected success")
+    for failed_stage in successful_results:
+        failed_results = dict(successful_results)
+        failed_results[failed_stage] = "failure"
+        if validation_aggregate_succeeds(failed_results):
+            errors.append(
+                f"{path.relative_to(ROOT)}: aggregate negative probe accepted {failed_stage}"
+            )
     return errors
 
 
@@ -458,17 +522,32 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
         if not condition:
             errors.append(f"{rel}: {message}")
 
-    workflow = yaml.safe_load(path.read_text())
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
     if not isinstance(workflow, dict):
         return [f"{rel}: workflow root must be a mapping"]
     triggers = workflow.get("on", workflow.get(True))
     call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
     require(isinstance(call, dict), "must expose workflow_call")
     if isinstance(call, dict):
+        call_inputs = call.get("inputs")
         require(
-            set(call.get("inputs", {}))
+            isinstance(call_inputs, dict)
+            and set(call_inputs)
             == {"strategy", "same_repo", "trusted_author", "is_renovate_bot"},
             "workflow_call inputs must expose the complete trust context",
+        )
+        require(
+            call.get("secrets")
+            == {
+                "RUNNER_DISCOVERY_TOKEN": {
+                    "description": "Token used only to list repository self-hosted runners",
+                    "required": False,
+                }
+            },
+            "workflow_call must declare only the optional runner discovery token",
         )
         require(
             set(call.get("outputs", {})) == {"runs_on", "is_self_hosted"},
@@ -484,6 +563,8 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
         "must define one selector job",
     )
     job = jobs.get("detect-runner", {}) if isinstance(jobs, dict) else {}
+    if not isinstance(job, dict):
+        job = {}
     require(job.get("runs-on") == "ubuntu-latest", "selector must bootstrap on ubuntu-latest")
     steps = job.get("steps", []) if isinstance(job, dict) else []
     script_steps = [step for step in steps if isinstance(step, dict) and step.get("id") == "select"]
@@ -497,16 +578,23 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
         )
         require(
             step.get("env")
-            == {"DISCOVERY_TOKEN_AVAILABLE": "${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}"},
-            "selector must detect whether the privileged discovery token is configured",
+            == {
+                "DISCOVERY_TOKEN_AVAILABLE": "${{ secrets.RUNNER_DISCOVERY_TOKEN != '' }}",
+                "STRATEGY": "${{ inputs.strategy }}",
+                "SAME_REPO": "${{ inputs.same_repo }}",
+                "TRUSTED_AUTHOR": "${{ inputs.trusted_author }}",
+                "IS_RENOVATE_BOT": "${{ inputs.is_renovate_bot }}",
+            },
+            "selector must pass trust inputs through the environment",
         )
         script = str(step.get("with", {}).get("script", ""))
         for marker in (
             "strategy === 'push_any'",
             "strategy === 'pr_trusted'",
-            "inputs.same_repo",
-            "inputs.trusted_author",
-            "inputs.is_renovate_bot",
+            "process.env.STRATEGY",
+            "process.env.SAME_REPO",
+            "process.env.TRUSTED_AUTHOR",
+            "process.env.IS_RENOVATE_BOT",
             "listSelfHostedRunnersForRepo",
             "runner.status === 'online'",
             "process.env.DISCOVERY_TOKEN_AVAILABLE !== 'true'",
@@ -542,28 +630,16 @@ def reusable_runner_workflow_errors(path: Path) -> list[str]:
         runner_selection_allows_self_hosted("push_any"),
         "push strategy probe must allow discovery",
     )
-    successful_results = {
-        stage: "success"
-        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java")
-    }
-    require(
-        validation_aggregate_succeeds(successful_results),
-        "aggregate positive probe must accept all-success results",
-    )
-    for failed_stage in successful_results:
-        failed_results = dict(successful_results)
-        failed_results[failed_stage] = "failure"
-        require(
-            not validation_aggregate_succeeds(failed_results),
-            f"aggregate negative probe accepted failed stage: {failed_stage}",
-        )
     return errors
 
 
 def codeql_runner_workflow_errors(path: Path) -> list[str]:
     """Validate that CodeQL remains separate and uses the trusted runner selector."""
-    workflow = yaml.safe_load(path.read_text())
     rel = path.relative_to(ROOT)
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
     if not isinstance(workflow, dict):
         return [f"{rel}: workflow root must be a mapping"]
     jobs = workflow.get("jobs", {})
@@ -572,13 +648,20 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
     errors: list[str] = []
     selector = jobs["detect-runner"]
     analyze = jobs["analyze"]
+    if not isinstance(selector, dict) or not isinstance(analyze, dict):
+        return [f"{rel}: detect-runner and analyze jobs must be mappings"]
     if selector.get("uses") != "./.github/workflows/reusable-detect-runner.yml":
         errors.append(f"{rel}: detect-runner must call the local reusable selector")
+    if selector.get("secrets") != {
+        "RUNNER_DISCOVERY_TOKEN": "${{ secrets.RUNNER_DISCOVERY_TOKEN }}"
+    }:
+        errors.append(f"{rel}: detect-runner must receive only the runner discovery token")
     if analyze.get("needs") != "detect-runner":
         errors.append(f"{rel}: analyze must depend on detect-runner")
     if analyze.get("runs-on") != "${{ fromJson(needs.detect-runner.outputs.runs_on) }}":
         errors.append(f"{rel}: analyze must use the detected runner")
-    matrix = analyze.get("strategy", {}).get("matrix", {})
+    analyze_strategy = analyze.get("strategy")
+    matrix = analyze_strategy.get("matrix", {}) if isinstance(analyze_strategy, dict) else {}
     include = matrix.get("include", []) if isinstance(matrix, dict) else []
     expected_languages = {
         ("python", "none"),

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/quokkify/project-toolkit/compare/v2.0.1...v2.1.0) (2026-08-01)
+
+
+### Features
+
+* **actions:** add JUnit step summary ([#13](https://github.com/quokkify/project-toolkit/issues/13)) ([b3dfca7](https://github.com/quokkify/project-toolkit/commit/b3dfca76183b306e57624885c67d8069f3e15d21))
+
 ## [2.0.1](https://github.com/quokkify/project-toolkit/compare/v2.0.0...v2.0.1) (2026-08-01)
 
 

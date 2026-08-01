@@ -32,6 +32,7 @@ copier copy \
   gh:quokkify/project-toolkit \
   my-project \
   --vcs-ref "$TOOLKIT_REF" \
+  --data "toolkit_version=$TOOLKIT_REF" \
   --trust
 ```
 
@@ -69,6 +70,7 @@ git switch -c "chore/update-project-toolkit-${TOOLKIT_REF}"
 
 copier update \
   --vcs-ref "$TOOLKIT_REF" \
+  --data "toolkit_version=$TOOLKIT_REF" \
   --trust
 
 git diff

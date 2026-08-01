@@ -50,14 +50,22 @@ PY
 )"
 [[ -d "$PUB" ]] || error "publish-dir not found: $INPUT_PUBLISH_DIR"
 
-# Keep credentials out of command-line arguments and the generated remote URL.
-export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0=http.extraheader
-token_var=INPUT_TOKEN
-export GIT_CONFIG_VALUE_0="Authorization: Bearer ${!token_var}"
-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# Keep credentials out of command-line arguments and the generated remote URL.
+cat > "$WORK/git-askpass" <<'ASKPASS'
+#!/usr/bin/env bash
+case "${1:-}" in
+  *Username*) printf '%s\n' x-access-token ;;
+  *Password*) printf '%s\n' "${INPUT_TOKEN}" ;;
+  *) printf '\n' ;;
+esac
+ASKPASS
+chmod 700 "$WORK/git-askpass"
+export GIT_ASKPASS="$WORK/git-askpass"
+export GIT_TERMINAL_PROMPT=0
+
 REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}.git"
 git clone --quiet --no-checkout "$REPO_URL" "$WORK/repo"
 R="$WORK/repo"

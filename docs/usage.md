@@ -1,13 +1,13 @@
 # Usage
 
-Examples pin immutable release refs. Existing setup examples retain `v1.0.0`; the new JUnit action targets planned `v2.1.0`, where that action is first published.
+Examples pin an exact immutable project-toolkit release. All toolkit references in this page are managed by Renovate and move together when a new release is published.
 
 Copy a small caller workflow from [`examples/`](../examples/) and replace commands/paths. Production callers use an exact released tag:
 
 ```yaml
 jobs:
   backend:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.3.0
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -48,7 +48,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy gh:quokkify/project-toolkit my-project --vcs-ref v1.0.0 --trust
+copier copy gh:quokkify/project-toolkit my-project --vcs-ref v2.3.0 --trust
 cd my-project
 copier update --trust
 ```
@@ -64,3 +64,11 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 New Copier-generated projects extend selected presets from `quokkify/renovate-presets` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
 
 The bundled `github>quokkify/project-toolkit//renovate/default.json` preset remains available for toolkit-specific workflow reference updates. New generated projects intentionally follow the shared preset repository's default branch unless the generated `renovate.json` is manually pinned to a tag or commit later.
+
+The repository also manages versions that are easy to miss with Renovate's built-in managers:
+
+- `_min_copier_version` in the root `copier.yml` uses the PyPI `copier` datasource.
+- Toolkit release tags in Markdown and example YAML use the GitHub tags datasource.
+- The documented Compose health action release follows the same GitHub tag as the pinned action implementation.
+
+This keeps the version shown to readers consistent with the version executed by CI. Review the generated PR as usual; Renovate never automerges these changes.

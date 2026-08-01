@@ -28,6 +28,41 @@
     },
     {
       "customType": "regex",
+      "description": "Update the minimum Copier version required by the template.",
+      "managerFilePatterns": ["/^copier\\.yml$/"],
+      "matchStrings": [
+        "_min_copier_version:\\s*[\\\"](?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]"
+      ],
+      "depNameTemplate": "copier",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep documentation and examples on the latest project-toolkit release.",
+      "managerFilePatterns": ["/(^|/)(README\\.md|docs/[^/]+\\.md|examples/[^/]+\\.ya?ml)$/", "/^copier\\.yml$/"],
+      "matchStrings": [
+        "(?:quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "such as\\s+`@(?<currentValue>v\\d+\\.\\d+\\.\\d+)`"
+      ],
+      "depNameTemplate": "quokkify/project-toolkit",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep documentation aligned with the pinned Compose health action.",
+      "managerFilePatterns": ["/^actions/README\\.md$/", "/^docs/usage\\.md$/"],
+      "matchStrings": [
+        "compose-health-check-action@[^\\s)]+.*?\\((?<currentValue>v\\d+\\.\\d+\\.\\d+)\\)"
+      ],
+      "depNameTemplate": "quokkify/compose-health-check-action",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
       "description": "Update the pinned actionlint release.",
       "managerFilePatterns": ["/^\\.github/workflows/validate-toolkit\\.ya?ml$/"],
       "matchStrings": [

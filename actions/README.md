@@ -1,6 +1,8 @@
 # Composite actions
 
-This toolkit now ships reusable composite actions for common setup and runtime patterns:
+This toolkit now ships reusable composite actions for common setup and runtime patterns.
+
+Examples use the current toolkit release, `v2.3.0`. Renovate updates the references in `examples/`, `README.md`, and `docs/` together with workflow references.
 
 - `actions/setup-python/action.yml`
   - setup-python with dependency cache and install handling

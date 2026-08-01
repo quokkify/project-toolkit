@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">project-toolkit architecture</title>
+  <desc id="desc">A consuming repository uses versioned project-toolkit workflows and composite actions. Copier creates local project files, while Renovate proposes updates and Release Please publishes immutable releases.</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient>
+    <linearGradient id="violet" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#5b21b6"/></linearGradient>
+    <marker id="arrow" markerHeight="8" markerWidth="8" orient="auto" refX="7" refY="4"><path d="M0 0 8 4 0 8Z" fill="#64748b"/></marker>
+    <style>text{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#0f172a} .label{font-size:18px;font-weight:700} .small{font-size:15px;fill:#475569} .white{fill:#fff} .line{stroke:#64748b;stroke-width:2.5;fill:none;marker-end:url(#arrow)} </style>
+  </defs>
+  <rect width="1200" height="560" rx="24" fill="#f8fafc"/>
+  <text x="60" y="58" font-size="30" font-weight="800">One toolkit, two safe upgrade paths</text>
+  <text x="60" y="86" class="small">Reusable jobs stay centralized; generated project files stay local and reviewable.</text>
+
+  <rect x="60" y="145" width="300" height="260" rx="18" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="88" y="184" class="label">Consuming repository</text>
+  <rect x="88" y="210" width="244" height="58" rx="12" fill="#dbeafe"/><text x="108" y="245" font-size="17" font-weight="700">Caller workflows</text>
+  <rect x="88" y="282" width="244" height="58" rx="12" fill="#e0e7ff"/><text x="108" y="317" font-size="17" font-weight="700">Local config + tests</text>
+  <text x="88" y="374" class="small">Owns triggers, paths, permissions</text>
+
+  <rect x="450" y="120" width="300" height="310" rx="18" fill="url(#blue)"/>
+  <text x="480" y="166" class="label white">project-toolkit</text>
+  <text x="480" y="192" class="small white">versioned GitHub repository</text>
+  <rect x="480" y="220" width="240" height="52" rx="10" fill="#fff" fill-opacity=".95"/><text x="500" y="252" font-size="16" font-weight="700">Reusable workflows</text>
+  <rect x="480" y="284" width="240" height="52" rx="10" fill="#fff" fill-opacity=".95"/><text x="500" y="316" font-size="16" font-weight="700">Composite actions</text>
+  <rect x="480" y="348" width="240" height="52" rx="10" fill="#fff" fill-opacity=".95"/><text x="500" y="380" font-size="16" font-weight="700">Copier template</text>
+
+  <rect x="840" y="145" width="300" height="260" rx="18" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="868" y="184" class="label">Automation around it</text>
+  <rect x="868" y="210" width="244" height="58" rx="12" fill="#fef3c7"/><text x="888" y="245" font-size="17" font-weight="700">Renovate → review PR</text>
+  <rect x="868" y="282" width="244" height="58" rx="12" fill="#ede9fe"/><text x="888" y="317" font-size="17" font-weight="700">Release Please → tag</text>
+  <text x="868" y="374" class="small">Exact tags, no @main contract</text>
+
+  <path class="line" d="M360 275H440"/><path class="line" d="M760 275H830"/>
+  <path class="line" d="M600 430V492H210V414"/><text x="390" y="487" class="small">copier copy / copier update</text>
+  <path class="line" d="M990 405V492H600V440"/><text x="760" y="487" class="small">version PRs + immutable releases</text>
+
+  <rect x="60" y="520" width="1080" height="2" fill="#cbd5e1"/>
+</svg>

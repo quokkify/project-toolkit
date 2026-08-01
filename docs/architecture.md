@@ -1,5 +1,9 @@
 # Architecture
 
+![project-toolkit architecture](assets/project-toolkit-architecture.svg)
+
+The diagram shows the central boundary: consuming repositories own orchestration, while this toolkit owns reusable implementation. Renovate proposes dependency and documentation updates; Release Please publishes immutable toolkit tags.
+
 ## Researched constraints
 
 - GitHub reusable workflows must live directly under `.github/workflows`, opt in through `workflow_call`, and are invoked at job level. Inputs and secrets are explicitly declared; nested workflows receive only permissions/secrets passed through the chain. A called workflow cannot elevate the caller token permissions. Public workflow repositories are callable by accessible repositories; private reuse additionally depends on repository/organization Actions access policy. See [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) and [access to private reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/share-across-private-repositories).
@@ -14,7 +18,7 @@
 1. **Atomic language workflows.** Python, Node.js, Java, Docker, and release remain independent reusable workflows rather than one universal matrix/generator.
 2. **Caller composition.** A consuming repository owns triggers, path filtering, dependencies, environments, and composition. One polyglot repository can invoke several toolkit workflows in one local orchestrator.
 3. **Copier owns physical project files.** It creates the small local workflow and optional local configs. It does not copy CI implementation.
-4. **Renovate owns version movement.** Production references use immutable release tags such as `@v1.2.0`; Renovate proposes upgrades through PRs. `@main` is not a production contract.
+4. **Renovate owns version movement.** Production references use immutable release tags such as `@v2.3.0`; Renovate proposes upgrades through PRs. `@main` is not a production contract.
 5. **No submodules.** Job-level reuse and template updates solve the sharing problems without coupling consumer Git history to toolkit Git state.
 6. **Two release modes.** A polyglot product may share one version (`single`) or use independent component versions (`manifest`); these are deliberately distinct configurations.
 7. **Composite actions are earned and bounded.** Keep step-level abstractions focused to core setup/runtime tasks that recur across workflows. Do not reference repository-relative toolkit actions from reusable workflows: after checkout, relative actions resolve against the caller repository.

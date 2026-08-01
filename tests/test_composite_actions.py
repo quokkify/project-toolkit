@@ -739,9 +739,9 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
         self.assertEqual(data["runs"]["using"], "composite")
         self.assertEqual(data["inputs"]["branch"]["default"], "gh-pages")
         script_text = self.script.read_text()
-        self.assertIn('token_var=INPUT_TOKEN', script_text)
-        self.assertIn('GIT_CONFIG_VALUE_0="Authorization: Bearer ${!token_var}"', script_text)
-        self.assertNotIn('GIT_CONFIG_VALUE_0="Authorization: Bearer ***"', script_text)
+        self.assertIn('export GIT_ASKPASS="$WORK/git-askpass"', script_text)
+        self.assertIn('*Password*) printf \'%s\\n\' "${INPUT_TOKEN}"', script_text)
+        self.assertNotIn('GIT_CONFIG_VALUE_0=', script_text)
         for kwargs, expected in (
             ({"publish_dir": "../report"}, "publish-dir"),
             ({"destination_dir": "../other"}, "destination-dir"),

@@ -1,5 +1,5 @@
 name: Product release
-# Requires the separately approved and published immutable v1.0.0 toolkit tag.
+# Requires the latest published immutable v2.3.0 toolkit tag.
 on:
   push:
     branches: [main]
@@ -8,7 +8,7 @@ permissions:
   pull-requests: write
 jobs:
   release:
-    uses: quokkify/project-toolkit/.github/workflows/release-please.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/release-please.yml@v2.3.0
     with:
       mode: single
       release-type: simple

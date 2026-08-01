@@ -1,15 +1,21 @@
 # project-toolkit
 
-A small, versioned toolkit for composing consistent GitHub automation across Python, Node.js, Java, Docker, and polyglot repositories—without Git submodules.
+> Reusable GitHub Actions workflows and Copier templates for reliable, versioned CI in Python, Node.js, Java, Docker, and polyglot repositories.
 
-- **Reusable workflows** own complete jobs and runner behavior.
-- **Composite actions** provide reusable setup/runtime and JUnit reporting primitives for Python, Node.js, Java/Gradle, and Compose-based checks.
-- **Copier** creates and later updates small physical files in a consumer repository.
-- **Renovate** proposes version updates; **Release Please** prepares changelogs and releases.
+![project-toolkit architecture](docs/assets/project-toolkit-architecture.svg)
+
+project-toolkit keeps CI implementation in one repository while letting each consuming project own its triggers, paths, permissions, and release policy. It deliberately avoids Git submodules: consumers upgrade through small, reviewable Renovate PRs and template updates.
+
+## What is included?
+
+- **Reusable workflows** for Python, Node.js, Java, Docker, and Release Please. They own complete jobs and runner behavior.
+- **Composite actions** for language setup, Gradle validation, Compose readiness, and JUnit summaries.
+- **Copier templates** that create and later update only the small project-local files.
+- **Renovate presets and rules** that keep workflow references, action pins, validation tools, and this documentation current.
 
 ## Quick start
 
-The exact `v1.0.0` references below are the intended first-release production contract. They become runnable only after the owner publishes that immutable tag; this task intentionally does not create it.
+Examples use an exact immutable toolkit release reference. Renovate updates these references when a newer release is published.
 
 ```yaml
 name: CI
@@ -18,7 +24,7 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v1.0.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.3.0
     with:
       python-version: "3.12"
       test-command: pytest
@@ -36,7 +42,7 @@ Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/nod
 
 The root [`copier.yml`](copier.yml) points at `templates/project/template/`. Keeping the Copier entry point at the Git root is required for reliable VCS-aware `copier update` operations.
 
-Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; update workflow versions through Renovate or a reviewed manual change.
+Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; Renovate updates workflow versions in examples and documentation as well as in workflows.
 
 Copier-generated `renovate.json` files extend presets from the central shared repository `quokkify/renovate-presets` by default. Set the `renovate_config_repository` answer to another GitHub `owner/repo` slug to use a different shared preset repository; this answer names the preset repository, not the generated consumer repository. The `renovate_presets` YAML list selects preset names in order: `default` -> `presets/base`, `python` -> `presets/python/default`, `javascript` -> `presets/npm/default`, `java` -> `presets/gradle/default`, `docker` -> `presets/docker/default`, and `github-actions` -> `presets/github-actions/default`. New projects infer `default` plus language and Docker presets from Copier answers, while `github-actions` remains explicit opt-in. Generated extends intentionally follow the preset repository's default branch; projects with stricter stability requirements can manually pin entries later.
 

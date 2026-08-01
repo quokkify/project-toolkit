@@ -29,4 +29,6 @@ runs:
         INPUT_PUBLISH_DIR: ${{ inputs.publish-dir }}
         INPUT_DESTINATION_DIR: ${{ inputs.destination-dir }}
         INPUT_BRANCH: ${{ inputs.branch }}
-      run: bash "${GITHUB_ACTION_PATH}/deploy-gh-pages-subdir.sh"
+      run: |
+        : "${INPUT_TOKEN:?}" "${INPUT_PUBLISH_DIR:?}" "${INPUT_DESTINATION_DIR:?}" "${INPUT_BRANCH:?}"
+        bash "${GITHUB_ACTION_PATH}/deploy-gh-pages-subdir.sh"

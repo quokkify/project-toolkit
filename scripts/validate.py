@@ -919,6 +919,8 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
             errors.append(f"gh-pages-subdir regex probe failed to match {label}: {text}")
 
     for label, text in {
+        "missing-separator": "gh-pages-subdir-actionv2.5.3",
+        "version-suffix": "gh-pages-subdir-action v2.5.3-beta",
         "ownerless-prefix": "myquokkify/gh-pages-subdir-action v2.5.3",
         "ownerful-prefix": "foo/gh-pages-subdir-action v2.5.3",
         "suffix-no-space": "gh-pages-subdir-action-extra v2.5.3",

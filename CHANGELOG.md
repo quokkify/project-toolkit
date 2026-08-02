@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.6.0](https://github.com/quokkify/project-toolkit/compare/v2.5.3...v2.6.0) (2026-08-02)
+
+
+### Features
+
+* **ci:** split validation jobs and add CodeQL ([#49](https://github.com/quokkify/project-toolkit/issues/49)) ([cedeea9](https://github.com/quokkify/project-toolkit/commit/cedeea98dd085ce8496202fd0eec141e28938640))
+* wire gh-pages subdirectory compatibility wrapper to immutable standalone action ([#55](https://github.com/quokkify/project-toolkit/issues/55)) ([5bd0355](https://github.com/quokkify/project-toolkit/commit/5bd03558151e7d8159b94d3a3cff12642760f000))
+
+
+### Bug Fixes
+
+* **security:** resolve CodeQL validation alerts ([#51](https://github.com/quokkify/project-toolkit/issues/51)) ([a3a6978](https://github.com/quokkify/project-toolkit/commit/a3a697891447e09fc5e778a0e72c271a6a1cc8b8))
+
 ## [2.5.3](https://github.com/quokkify/project-toolkit/compare/v2.5.2...v2.5.3) (2026-08-01)
 
 

@@ -909,22 +909,22 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
         return [f"renovate.json invalid gh-pages-subdir-action regex: {exc}"]
 
     positive = {
-        "plain-text": "`gh-pages-subdir-action` `v2.5.3`",
-        "markdown-link": "[quokkify/gh-pages-subdir-action](https://github.com/quokkify/gh-pages-subdir-action) `v2.5.3`",
-        "comment-context": "delegates to gh-pages-subdir-action v2.5.3",
+        "plain-text": "`gh-pages-subdir-action` `v2.6.0`",
+        "markdown-link": "[quokkify/gh-pages-subdir-action](https://github.com/quokkify/gh-pages-subdir-action) `v2.6.0`",
+        "comment-context": "delegates to gh-pages-subdir-action v2.6.0",
     }
     for label, text in positive.items():
         match = matcher.search(text)
-        if not match or match.group("currentValue") != "v2.5.3":
+        if not match or match.group("currentValue") != "v2.6.0":
             errors.append(f"gh-pages-subdir regex probe failed to match {label}: {text}")
 
     for label, text in {
-        "missing-separator": "gh-pages-subdir-actionv2.5.3",
-        "version-suffix": "gh-pages-subdir-action v2.5.3-beta",
-        "ownerless-prefix": "myquokkify/gh-pages-subdir-action v2.5.3",
-        "ownerful-prefix": "foo/gh-pages-subdir-action v2.5.3",
-        "suffix-no-space": "gh-pages-subdir-action-extra v2.5.3",
-        "inline-use": "random quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.5.3",
+        "missing-separator": "gh-pages-subdir-actionv2.6.0",
+        "version-suffix": "gh-pages-subdir-action v2.6.0-beta",
+        "ownerless-prefix": "myquokkify/gh-pages-subdir-action v2.6.0",
+        "ownerful-prefix": "foo/gh-pages-subdir-action v2.6.0",
+        "suffix-no-space": "gh-pages-subdir-action-extra v2.6.0",
+        "inline-use": "random quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.6.0",
     }.items():
         if matcher.search(text):
             errors.append(f"gh-pages-subdir regex probe over-matched {label}: {text}")

@@ -21,7 +21,7 @@ export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tag
 echo "$TOOLKIT_REF"
 ```
 
-Always use a released tag such as `v2.5.3`. Do not generate production files from `main` or `HEAD`.
+Always use a released tag such as `v2.6.0`. Do not generate production files from `main` or `HEAD`.
 
 ## 1. Create a new project from the template
 
@@ -165,7 +165,7 @@ gh repo clone quokkify/project-toolkit
 cd project-toolkit
 git switch main
 git pull --ff-only
-export TOOLKIT_REF="v2.5.3" # use the exact tag you reviewed above
+export TOOLKIT_REF="v2.6.0" # use the exact tag you reviewed above
 scripts/rollout_project_toolkit.sh "$HOME/project-toolkit-rollout"
 ```
 

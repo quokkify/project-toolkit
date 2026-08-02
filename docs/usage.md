@@ -7,7 +7,7 @@ Copy a small caller workflow from [`examples/`](../examples/) and replace comman
 ```yaml
 jobs:
   backend:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.5.3
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.6.0
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -32,7 +32,7 @@ Use examples in [`examples/setup-actions.yml`](../examples/setup-actions.yml). T
 
 The Python and Node actions install dependencies by default; set `install-dependencies: "false"` when only the language runtime and cache are needed. The Java/Gradle action prepares Java, Gradle caches, and a workspace-relative wrapper command; callers run their own Gradle dependency/build command. `compose-up` is Linux-only, delegates exactly once to the immutable standalone `compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99` (`v2.3.0`), accepts newline-separated `compose-files` and `wait-urls`, and validates and prefixes `working-directory`-relative compose paths so Compose derives its project directory from the first normalized file. With explicit `services`, it passes a normalized union with `completed-services`; without explicit services, standalone default coverage remains active and includes successful one-shot containers. `wait-for-health: "false"` and `show-logs-on-failure: "false"` fail closed; migrate to the standalone-owned defaults instead. It requires no write permissions by itself. Callers remain responsible for granting only the permissions required by their surrounding job and for running normal `docker compose down` cleanup when needed. `down-on-timeout: "true"` enables only failure cleanup scoped to the validated Compose files, without `-v`.
 
-`deploy-gh-pages-subdir` preserves the toolkit input contract in this docset's pinned tag references (including the currently documented `v2.5.3` examples). In this repository source, the wrapper now delegates exactly once to the immutable standalone [`quokkify/gh-pages-subdir-action`](https://github.com/quokkify/gh-pages-subdir-action) `v0.1.0` release (commit `816d85aa756f480457befb42168633cb6ccf09c7`) with unchanged inputs; this keeps existing input consumers stable. The standalone action validates workspace and destination paths, preserves sibling directories, keeps the token out of the remote URL and command arguments, and uses `--force-with-lease` with one concurrent-update retry. The caller must grant `contents: write`; normal branch protection and deployment policy remain the caller's responsibility. Use it for isolated paths such as `allure/pr-42`, not for replacing an entire Pages branch. New consumers can call the standalone root action directly.
+`deploy-gh-pages-subdir` in toolkit `v2.6.0` delegates exactly once to the immutable standalone [`quokkify/gh-pages-subdir-action`](https://github.com/quokkify/gh-pages-subdir-action) `v0.1.0` release (commit `816d85aa756f480457befb42168633cb6ccf09c7`) with unchanged inputs; this keeps existing input consumers stable. The standalone action validates workspace and destination paths, preserves sibling directories, keeps the token out of the remote URL and command arguments, and uses `--force-with-lease` with one concurrent-update retry. The caller must grant `contents: write`; normal branch protection and deployment policy remain the caller's responsibility. Use it for isolated paths such as `allure/pr-42`, not for replacing an entire Pages branch. New consumers can call the standalone root action directly.
 
 Call `junit-step-summary` with `if: always()` after a test step. It accepts one or more workspace-relative JUnit XML paths or `*`, `?`, and `**` globs (`**` must be a complete path segment), aggregates standard `testsuite`/`testsuites` documents, appends a Markdown table to `GITHUB_STEP_SUMMARY`, and exposes counts and duration as action outputs. It warns when no files match unless `fail-on-missing: "true"`. Literal prefixes prevent unrelated repository trees from being scanned. Directory depth, scanned entries, matched files, per-file bytes, and aggregate bytes are bounded; symlinks, traversal, DTD/entity declarations, malformed numbers, and unsafe file replacements are rejected. Python 3.9 or newer must be available on a POSIX runner. Deprecated CSP `cwd`/`variant` inputs are supported only as a migration bridge and cannot be mixed with the generic inputs.
 
@@ -51,7 +51,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy gh:quokkify/project-toolkit my-project --vcs-ref v2.5.3 --trust
+copier copy gh:quokkify/project-toolkit my-project --vcs-ref v2.6.0 --trust
 cd my-project
 copier update --trust
 ```

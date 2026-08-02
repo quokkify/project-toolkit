@@ -17,7 +17,7 @@ Examples use the current toolkit release, `v2.6.0`. Renovate updates the referen
 - `actions/junit-step-summary/action.yml`
   - safely aggregates bounded, workspace-contained JUnit XML globs into a GitHub job-summary table and numeric outputs
 - `actions/allure-report/action.yml`
-  - compatibility wrapper that forwards the CSP Allure 3 HTML/badge/PR-comment contract once to standalone `allure-report-action` `v0.1.0` (`e97473b629e65ca3cf02ed55596821ec82486811`)
+  - compatibility wrapper that forwards the CSP Allure 3 HTML/badge/PR-comment contract once to standalone `allure-report-action` `v0.1.1` (`8c79c827179d2ea135b9a14dd50d5c17d908636b`)
 
 Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. Run `actions/checkout` before these setup actions; in particular, `setup-java-gradle` must see the checked-out caller repository so its default wrapper validation can scan repository-contained `gradle-wrapper.jar` files. The toolkit reusable workflows remain self-contained because their checkout is the caller repository, not this toolkit repository.
 

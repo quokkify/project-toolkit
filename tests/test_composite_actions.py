@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -706,6 +707,97 @@ class ComposeActionTests(unittest.TestCase):
             command = log.read_text()
             self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml down", command)
             self.assertNotIn("deploy/deploy", command)
+
+
+class AllureReportActionTests(unittest.TestCase):
+    script = ROOT / "actions/allure-report/allure-ci.mjs"
+
+    def test_metadata_keeps_pages_optional_and_comments_last(self) -> None:
+        data = action("allure-report")
+        self.assertTrue(data["inputs"]["github-token"]["required"])
+        self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
+        self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
+        self.assertEqual(
+            data["inputs"]["comment-marker"]["default"],
+            "<!-- project-toolkit-allure-ci -->",
+        )
+        steps = data["runs"]["steps"]
+        self.assertEqual(steps[-1]["name"], "Post or update Allure comment on PR")
+        self.assertEqual(
+            steps[-1]["with"]["github-token"], "${{ inputs.github-token }}"
+        )
+        script = steps[-1]["with"]["script"]
+        self.assertIn("owner: context.repo.owner", script)
+        self.assertIn("repo: context.repo.repo", script)
+        self.assertNotIn("api.github.com", script)
+
+    def test_pr_summary_counts_results_without_epic_as_other(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="allure-report-action-") as tmp:
+            root = Path(tmp)
+            results = root / "results"
+            report = root / "report"
+            widgets = report / "widgets"
+            results.mkdir()
+            widgets.mkdir(parents=True)
+            (results / "unit-result.json").write_text(
+                json.dumps(
+                    {
+                        "uuid": "unit",
+                        "name": "labeled",
+                        "status": "passed",
+                        "labels": [{"name": "epic", "value": "unit"}],
+                    }
+                )
+            )
+            (results / "plain-result.json").write_text(
+                json.dumps(
+                    {
+                        "uuid": "plain",
+                        "name": "without metadata",
+                        "status": "passed",
+                    }
+                )
+            )
+            (widgets / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "statistic": {
+                            "total": 2,
+                            "passed": 2,
+                            "failed": 0,
+                            "broken": 0,
+                            "skipped": 0,
+                            "unknown": 0,
+                        }
+                    }
+                )
+            )
+            comment = root / "comment.md"
+            marker = "<!-- private-or-public-repo-allure -->"
+            result = subprocess.run(
+                [
+                    "node",
+                    str(self.script),
+                    "pr-body",
+                    "--results",
+                    str(results),
+                    "--report",
+                    str(report),
+                    "--output",
+                    str(comment),
+                    "--comment-marker",
+                    marker,
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            body = comment.read_text()
+            self.assertIn("**2** tests · **2** passed · 100% pass rate", body)
+            self.assertIn("| Unit | 1 | 1 | 0 | 0 | 0 | 100% |", body)
+            self.assertIn("| Other | 1 | 1 | 0 | 0 | 0 | 100% |", body)
+            self.assertTrue(body.endswith(marker))
 
 
 class DeployGhPagesSubdirTests(unittest.TestCase):

@@ -770,11 +770,15 @@ BOOLEAN_INPUTS = {
     "cache-dependencies",
     "down-on-timeout",
     "fail-on-missing",
+    "fork-pr",
     "install-dependencies",
+    "publish-pages",
+    "pyramid-enabled",
     "show-logs-on-failure",
     "wait-for-health",
 }
 EXPECTED_ACTIONS = {
+    "allure-report",
     "compose-up",
     "deploy-gh-pages-subdir",
     "junit-step-summary",

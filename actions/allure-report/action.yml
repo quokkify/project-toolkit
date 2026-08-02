@@ -1,0 +1,221 @@
+name: Build and comment Allure report
+description: >
+  Generates the existing Allure HTML report, badges, optional test-pyramid
+  artifacts, optional GitHub Pages preview, and an upserted PR summary comment.
+author: Yaraslau Lazakovich
+
+inputs:
+  github-token:
+    description: GitHub token with pull-requests:write; contents:write is also required when publish-pages is true
+    required: true
+  results-directory:
+    description: Merged Allure results directory, relative to the workspace
+    required: false
+    default: artifacts/allure-results
+  report-directory:
+    description: Generated Allure HTML directory, relative to the workspace
+    required: false
+    default: allure-report
+  config-file:
+    description: Allure 3 configuration file, relative to the workspace
+    required: true
+  categories-file:
+    description: Optional Allure categories JSON file, relative to the workspace
+    required: false
+    default: ""
+  allure-version:
+    description: Exact Allure CLI version
+    required: false
+    default: "3.14.2"
+  pr-number:
+    description: Pull request number to comment on; an empty value skips the comment
+    required: false
+    default: ""
+  pages-url:
+    description: Optional full report URL included in the PR comment
+    required: false
+    default: ""
+  fork-pr:
+    description: Whether the source pull request comes from a fork
+    required: false
+    default: "false"
+  source-run-id:
+    description: Source workflow run id used in the report link note
+    required: false
+    default: ""
+  comment-file:
+    description: Generated PR comment Markdown path, relative to the workspace
+    required: false
+    default: allure-pr-comment.md
+  comment-marker:
+    description: Hidden marker used to find and update this action's existing PR comment
+    required: false
+    default: "<!-- project-toolkit-allure-ci -->"
+  pyramid-enabled:
+    description: Generate the existing Allure epic test-pyramid snapshot and advisory gate files
+    required: false
+    default: "false"
+  pyramid-markdown-file:
+    description: Test-pyramid Markdown output path
+    required: false
+    default: docs/testing/pyramid-snapshot.md
+  pyramid-json-file:
+    description: Test-pyramid JSON output path
+    required: false
+    default: docs/testing/pyramid-snapshot.json
+  pyramid-gates-json-file:
+    description: Test-pyramid advisory gate JSON output path
+    required: false
+    default: docs/testing/pyramid-quality-gates.json
+  pyramid-source-run-id:
+    description: Source workflow run id embedded into the test-pyramid snapshot
+    required: false
+    default: ""
+  pyramid-head-sha:
+    description: Source head SHA embedded into the test-pyramid snapshot
+    required: false
+    default: ""
+  pyramid-artifact-name:
+    description: Uploaded test-pyramid artifact name
+    required: false
+    default: pyramid-snapshot
+  pyramid-retention-days:
+    description: Test-pyramid artifact retention in days
+    required: false
+    default: "30"
+  publish-pages:
+    description: Publish the generated report to a GitHub Pages subdirectory
+    required: false
+    default: "false"
+  pages-destination-directory:
+    description: GitHub Pages destination directory, required when publish-pages is true
+    required: false
+    default: ""
+  pages-branch:
+    description: Branch that hosts GitHub Pages
+    required: false
+    default: gh-pages
+  pages-retention-count:
+    description: Number of newest pr-N report directories to retain; 0 disables pruning
+    required: false
+    default: "0"
+
+outputs:
+  report-directory:
+    description: Generated Allure report directory
+    value: ${{ inputs.report-directory }}
+  comment-file:
+    description: Generated PR comment Markdown file
+    value: ${{ inputs.comment-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate Allure HTML, badges, and PR comment markdown
+      shell: bash
+      env:
+        RESULTS_DIRECTORY: ${{ inputs.results-directory }}
+        REPORT_DIRECTORY: ${{ inputs.report-directory }}
+        CONFIG_FILE: ${{ inputs.config-file }}
+        CATEGORIES_FILE: ${{ inputs.categories-file }}
+        ALLURE_VERSION: ${{ inputs.allure-version }}
+        COMMENT_FILE: ${{ inputs.comment-file }}
+        COMMENT_MARKER: ${{ inputs.comment-marker }}
+        PAGES_URL: ${{ inputs.pages-url }}
+        FORK_PR: ${{ inputs.fork-pr }}
+        SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+        PYRAMID_ENABLED: ${{ inputs.pyramid-enabled }}
+        PYRAMID_MARKDOWN_FILE: ${{ inputs.pyramid-markdown-file }}
+        PYRAMID_JSON_FILE: ${{ inputs.pyramid-json-file }}
+        PYRAMID_GATES_JSON_FILE: ${{ inputs.pyramid-gates-json-file }}
+        PYRAMID_SOURCE_RUN_ID: ${{ inputs.pyramid-source-run-id }}
+        PYRAMID_HEAD_SHA: ${{ inputs.pyramid-head-sha }}
+      run: |
+        set -euo pipefail
+        if [ -n "$CATEGORIES_FILE" ]; then
+          cp -f "$CATEGORIES_FILE" "$RESULTS_DIRECTORY/categories.json"
+        fi
+        npx --yes "allure@${ALLURE_VERSION}" generate "$RESULTS_DIRECTORY" -o "$REPORT_DIRECTORY" --config "$CONFIG_FILE"
+        node "$GITHUB_ACTION_PATH/allure-ci.mjs" badges --results "$RESULTS_DIRECTORY" --out "$REPORT_DIRECTORY"
+        node "$GITHUB_ACTION_PATH/allure-ci.mjs" pr-body \
+          --results "$RESULTS_DIRECTORY" \
+          --report "$REPORT_DIRECTORY" \
+          --output "$COMMENT_FILE" \
+          --pages-url "$PAGES_URL" \
+          --fork-pr "$FORK_PR" \
+          --source-run-id "$SOURCE_RUN_ID" \
+          --comment-marker "$COMMENT_MARKER"
+        if [ "$PYRAMID_ENABLED" = "true" ]; then
+          node "$GITHUB_ACTION_PATH/allure-ci.mjs" pyramid \
+            --results "$RESULTS_DIRECTORY" \
+            --output "$PYRAMID_MARKDOWN_FILE" \
+            --json "$PYRAMID_JSON_FILE"
+          node "$GITHUB_ACTION_PATH/allure-ci.mjs" pyramid-check \
+            --results "$RESULTS_DIRECTORY" \
+            --json "$PYRAMID_GATES_JSON_FILE"
+        fi
+
+    - name: Upload pyramid snapshot artifact
+      if: ${{ inputs.pyramid-enabled == 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: ${{ inputs.pyramid-artifact-name }}
+        path: |
+          ${{ inputs.pyramid-markdown-file }}
+          ${{ inputs.pyramid-json-file }}
+          ${{ inputs.pyramid-gates-json-file }}
+        retention-days: ${{ inputs.pyramid-retention-days }}
+
+    - name: Deploy Allure HTML to GitHub Pages
+      if: ${{ inputs.publish-pages == 'true' }}
+      uses: quokkify/gh-pages-subdir-action@816d85aa756f480457befb42168633cb6ccf09c7 # v0.1.0
+      with:
+        token: ${{ inputs.github-token }}
+        publish-dir: ${{ inputs.report-directory }}
+        destination-dir: ${{ inputs.pages-destination-directory }}
+        branch: ${{ inputs.pages-branch }}
+        retention-count: ${{ inputs.pages-retention-count }}
+
+    - name: Post or update Allure comment on PR
+      env:
+        PR_NUMBER_RESOLVED: ${{ inputs.pr-number }}
+        COMMENT_FILE: ${{ inputs.comment-file }}
+        COMMENT_MARKER: ${{ inputs.comment-marker }}
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const issue_number = parseInt(process.env.PR_NUMBER_RESOLVED || '', 10);
+          if (!issue_number) {
+            core.info('No PR number; skip Allure PR comment.');
+            return;
+          }
+          const marker = process.env.COMMENT_MARKER;
+          const body = fs.readFileSync(process.env.COMMENT_FILE, 'utf8');
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number,
+            per_page: 100
+          });
+          const existing = comments.find(
+            (c) =>
+              c.user?.login === 'github-actions[bot]' &&
+              (c.body || '').includes(marker)
+          );
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body
+            });
+          }

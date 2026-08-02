@@ -75,6 +75,10 @@ inputs:
     description: Source head SHA embedded into the test-pyramid snapshot
     required: false
     default: ""
+  pyramid-policy-path:
+    description: Optional caller-repository policy path linked from the test-pyramid snapshot
+    required: false
+    default: docs/testing/test-pyramid.md
   pyramid-artifact-name:
     description: Uploaded test-pyramid artifact name
     required: false
@@ -112,7 +116,7 @@ runs:
   using: composite
   steps:
     - name: Run standalone Allure report action
-      uses: quokkify/allure-report-action@96b16eee7edc4928527c7ac23b8d37b3c17009ab # v0.1.0
+      uses: quokkify/allure-report-action@a1a9094b9b6fed506caf76d493cfa88264974f3a # v0.1.0
       with:
         github-token: ${{ inputs.github-token }}
         results-directory: ${{ inputs.results-directory }}
@@ -132,6 +136,7 @@ runs:
         pyramid-gates-json-file: ${{ inputs.pyramid-gates-json-file }}
         pyramid-source-run-id: ${{ inputs.pyramid-source-run-id }}
         pyramid-head-sha: ${{ inputs.pyramid-head-sha }}
+        pyramid-policy-path: ${{ inputs.pyramid-policy-path }}
         pyramid-artifact-name: ${{ inputs.pyramid-artifact-name }}
         pyramid-retention-days: ${{ inputs.pyramid-retention-days }}
         publish-pages: ${{ inputs.publish-pages }}

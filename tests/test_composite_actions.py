@@ -715,6 +715,10 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
         self.assertEqual(
+            data["inputs"]["pyramid-policy-path"]["default"],
+            "docs/testing/test-pyramid.md",
+        )
+        self.assertEqual(
             data["inputs"]["comment-marker"]["default"],
             "<!-- project-toolkit-allure-ci -->",
         )

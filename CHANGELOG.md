@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.2](https://github.com/quokkify/project-toolkit/compare/v2.7.1...v2.7.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **actions:** support Allure installation tokens ([#61](https://github.com/quokkify/project-toolkit/issues/61)) ([7b7b82c](https://github.com/quokkify/project-toolkit/commit/7b7b82c1c39513b4523d61e3a186c12175cf2e20))
+
 ## [2.7.1](https://github.com/quokkify/project-toolkit/compare/v2.7.0...v2.7.1) (2026-08-02)
 
 

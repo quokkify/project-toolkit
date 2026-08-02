@@ -51,6 +51,10 @@ inputs:
     description: Hidden marker used to find and update this action's existing PR comment
     required: false
     default: "<!-- project-toolkit-allure-ci -->"
+  comment-author-login:
+    description: Expected author login for installation-token comments; user tokens are resolved automatically
+    required: false
+    default: "github-actions[bot]"
   pyramid-enabled:
     description: Generate the existing Allure epic test-pyramid snapshot and advisory gate files
     required: false
@@ -116,7 +120,7 @@ runs:
   using: composite
   steps:
     - name: Run standalone Allure report action
-      uses: quokkify/allure-report-action@8c79c827179d2ea135b9a14dd50d5c17d908636b # v0.1.1
+      uses: quokkify/allure-report-action@72fb74fff8b564040f12fd5d97b9867241e2c35d # v0.1.2
       with:
         github-token: ${{ inputs.github-token }}
         results-directory: ${{ inputs.results-directory }}
@@ -130,6 +134,7 @@ runs:
         source-run-id: ${{ inputs.source-run-id }}
         comment-file: ${{ inputs.comment-file }}
         comment-marker: ${{ inputs.comment-marker }}
+        comment-author-login: ${{ inputs.comment-author-login }}
         pyramid-enabled: ${{ inputs.pyramid-enabled }}
         pyramid-markdown-file: ${{ inputs.pyramid-markdown-file }}
         pyramid-json-file: ${{ inputs.pyramid-json-file }}

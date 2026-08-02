@@ -63,6 +63,21 @@
     },
     {
       "customType": "regex",
+      "description": "Keep documentation aligned with the pinned Pages subdirectory action.",
+      "managerFilePatterns": [
+        "/^actions/README\\.md$/",
+        "/^docs/usage\\.md$/",
+        "/^examples/setup-actions\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "gh-pages-subdir-action(?:`)?(?: release)?(?:;|\\s|`)*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "quokkify/gh-pages-subdir-action",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
       "description": "Update the pinned actionlint release.",
       "managerFilePatterns": ["/^\\.github/workflows/validate-toolkit\\.ya?ml$/"],
       "matchStrings": [

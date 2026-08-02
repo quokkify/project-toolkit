@@ -13,7 +13,7 @@ Examples use the current toolkit release, `v2.3.0`. Renovate updates the referen
 - `actions/compose-up/action.yml`
   - validates safe Compose paths, delegates one startup and container-health check to the immutable `compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99` (`v2.3.0`), and optionally waits for HTTP readiness
 - `actions/deploy-gh-pages-subdir/action.yml`
-  - publishes one workspace directory into a validated subdirectory on a Pages branch, preserving sibling deployments and using a lease-protected push; optionally prunes the newest `pr-N` report directories to a configured retention count
+  - compatibility wrapper that forwards the unchanged input contract exactly once to the immutable `gh-pages-subdir-action` `v0.1.0` release; standalone consumers may call the root action directly
 - `actions/junit-step-summary/action.yml`
   - safely aggregates bounded, workspace-contained JUnit XML globs into a GitHub job-summary table and numeric outputs
 

@@ -26,14 +26,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Validate and publish gh-pages subdirectory
-      shell: bash
-      env:
-        INPUT_TOKEN: ${{ inputs.token }}
-        INPUT_PUBLISH_DIR: ${{ inputs.publish-dir }}
-        INPUT_DESTINATION_DIR: ${{ inputs.destination-dir }}
-        INPUT_BRANCH: ${{ inputs.branch }}
-        INPUT_RETENTION_COUNT: ${{ inputs.retention-count }}
-      run: |
-        : "${INPUT_TOKEN:?}" "${INPUT_PUBLISH_DIR:?}" "${INPUT_DESTINATION_DIR:?}" "${INPUT_BRANCH:?}" "${INPUT_RETENTION_COUNT:?}"
-        bash "${GITHUB_ACTION_PATH}/deploy-gh-pages-subdir.sh"
+    - name: Publish with the standalone action
+      uses: quokkify/gh-pages-subdir-action@6011145420af652bc7ff006807d8e171552cd1d0 # v0.1.0
+      with:
+        token: ${{ inputs.token }}
+        publish-dir: ${{ inputs.publish-dir }}
+        destination-dir: ${{ inputs.destination-dir }}
+        branch: ${{ inputs.branch }}
+        retention-count: ${{ inputs.retention-count }}

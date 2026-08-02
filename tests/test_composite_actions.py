@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -708,104 +709,52 @@ class ComposeActionTests(unittest.TestCase):
 
 
 class DeployGhPagesSubdirTests(unittest.TestCase):
-    script = ROOT / "actions/deploy-gh-pages-subdir/deploy-gh-pages-subdir.sh"
-
-    def run_rejected(self, *, publish_dir: str = "report", destination_dir: str = "reports/example", branch: str = "gh-pages", retention_count: str = "0") -> subprocess.CompletedProcess[str]:
-        with tempfile.TemporaryDirectory(prefix="deploy-pages-validation-") as tmp:
-            workspace = Path(tmp)
-            (workspace / "report").mkdir()
-            env = {
-                **os.environ,
-                "GITHUB_WORKSPACE": str(workspace),
-                "GITHUB_REPOSITORY": "quokkify/project-toolkit",
-                "GITHUB_SERVER_URL": "https://github.com",
-                "INPUT_TOKEN": "dummy-token",
-                "INPUT_PUBLISH_DIR": publish_dir,
-                "INPUT_DESTINATION_DIR": destination_dir,
-                "INPUT_BRANCH": branch,
-                "INPUT_RETENTION_COUNT": retention_count,
-                "GITHUB_ACTION_PATH": str(self.script.parent),
-            }
-            return subprocess.run(
-                ["bash", str(self.script)],
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-    def test_action_contract_and_safe_path_guards(self) -> None:
+    def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
         data = action("deploy-gh-pages-subdir")
         self.assertEqual(data["runs"]["using"], "composite")
+        self.assertEqual(
+            set(data["inputs"]),
+            {"token", "publish-dir", "destination-dir", "branch", "retention-count"},
+        )
+        self.assertTrue(data["inputs"]["token"]["required"])
+        self.assertTrue(data["inputs"]["publish-dir"]["required"])
+        self.assertTrue(data["inputs"]["destination-dir"]["required"])
         self.assertEqual(data["inputs"]["branch"]["default"], "gh-pages")
-        script_text = self.script.read_text()
-        self.assertIn('export GIT_ASKPASS="$WORK/git-askpass"', script_text)
-        self.assertIn('*Password*) printf \'%s\\n\' "${INPUT_TOKEN}"', script_text)
-        self.assertNotIn('GIT_CONFIG_VALUE_0=', script_text)
-        for kwargs, expected in (
-            ({"publish_dir": "../report"}, "publish-dir"),
-            ({"destination_dir": "../other"}, "destination-dir"),
-            ({"branch": "../gh-pages"}, "branch"),
-            ({"retention_count": "twenty"}, "retention-count"),
-            ({"retention_count": "2", "destination_dir": "reports/example"}, "pr-N"),
-        ):
-            with self.subTest(kwargs=kwargs):
-                result = self.run_rejected(**kwargs)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn(expected, result.stderr)
-                self.assertNotIn("dummy-token", result.stdout + result.stderr)
+        self.assertEqual(data["inputs"]["retention-count"]["default"], "0")
 
-    def test_retention_keeps_newest_pr_reports_and_preserves_other_paths(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="deploy-pages-retention-") as tmp:
-            root = Path(tmp)
-            remote = root / "repo.git"
-            seed = root / "seed"
-            subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
-            subprocess.run(["git", "init", "-b", "gh-pages", str(seed)], check=True, capture_output=True, text=True)
-            subprocess.run(["git", "-C", str(seed), "config", "user.name", "test"], check=True)
-            subprocess.run(["git", "-C", str(seed), "config", "user.email", "test@example.com"], check=True)
-            for number in range(1, 4):
-                report = seed / f"allure/pr-{number}"
-                report.mkdir(parents=True)
-                (report / "index.html").write_text(f"report {number}\n")
-                subprocess.run(["git", "-C", str(seed), "add", "."], check=True)
-                subprocess.run(
-                    ["git", "-C", str(seed), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", f"report {number}"],
-                    env={**os.environ, "GIT_AUTHOR_DATE": f"2020-01-0{number}T00:00:00Z", "GIT_COMMITTER_DATE": f"2020-01-0{number}T00:00:00Z"},
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            (seed / "docs").mkdir()
-            (seed / "docs/keep.txt").write_text("keep\n")
-            subprocess.run(["git", "-C", str(seed), "add", "."], check=True)
-            subprocess.run(["git", "-C", str(seed), "commit", "-m", "unrelated"], check=True, capture_output=True, text=True)
-            subprocess.run(["git", "-C", str(seed), "remote", "add", "origin", str(remote)], check=True)
-            subprocess.run(["git", "-C", str(seed), "push", "origin", "gh-pages"], check=True, capture_output=True, text=True)
-            subprocess.run(["git", "-C", str(remote), "symbolic-ref", "HEAD", "refs/heads/gh-pages"], check=True)
+        steps = data["runs"]["steps"]
+        delegates = [
+            step
+            for step in steps
+            if step.get("uses", "").startswith("quokkify/gh-pages-subdir-action@")
+        ]
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(len(delegates), 1)
+        self.assertEqual(
+            delegates[0]["with"],
+            {
+                "token": "${{ inputs.token }}",
+                "publish-dir": "${{ inputs.publish-dir }}",
+                "destination-dir": "${{ inputs.destination-dir }}",
+                "branch": "${{ inputs.branch }}",
+                "retention-count": "${{ inputs.retention-count }}",
+            },
+        )
 
-            workspace = root / "workspace"
-            (workspace / "report").mkdir(parents=True)
-            (workspace / "report/index.html").write_text("report 4\n")
-            env = {
-                **os.environ,
-                "GITHUB_WORKSPACE": str(workspace),
-                "GITHUB_REPOSITORY": "repo",
-                "GITHUB_SERVER_URL": f"file://{root}",
-                "INPUT_TOKEN": "dummy-token",
-                "INPUT_PUBLISH_DIR": "report",
-                "INPUT_DESTINATION_DIR": "allure/pr-4",
-                "INPUT_BRANCH": "gh-pages",
-                "INPUT_RETENTION_COUNT": "02",
-                "GITHUB_ACTION_PATH": str(self.script.parent),
-            }
-            result = subprocess.run(["bash", str(self.script)], env=env, text=True, capture_output=True, check=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            checkout = root / "checkout"
-            subprocess.run(["git", "clone", "--quiet", str(remote), str(checkout)], check=True, capture_output=True, text=True)
-            reports = sorted(path.name for path in (checkout / "allure").iterdir() if path.is_dir())
-            self.assertEqual(reports, ["pr-3", "pr-4"])
-            self.assertEqual((checkout / "docs/keep.txt").read_text(), "keep\n")
+    def test_wrapper_uses_an_immutable_standalone_release_and_has_no_vendor_copy(self) -> None:
+        action_path = ROOT / "actions/deploy-gh-pages-subdir/action.yml"
+        text = action_path.read_text()
+        match = re.search(
+            r"uses: quokkify/gh-pages-subdir-action@([0-9a-f]{40}) # v(\d+\.\d+\.\d+)",
+            text,
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            text.count("uses: quokkify/gh-pages-subdir-action@"), 1
+        )
+        self.assertFalse(
+            (ROOT / "actions/deploy-gh-pages-subdir/deploy-gh-pages-subdir.sh").exists()
+        )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/quokkify/project-toolkit/compare/v2.6.0...v2.7.0) (2026-08-02)
+
+
+### Features
+
+* **actions:** add Allure report action ([#57](https://github.com/quokkify/project-toolkit/issues/57)) ([e09af98](https://github.com/quokkify/project-toolkit/commit/e09af98bff6783e81f92dc526f20290de674c266))
+
 ## [2.6.0](https://github.com/quokkify/project-toolkit/compare/v2.5.3...v2.6.0) (2026-08-02)
 
 

@@ -12,8 +12,21 @@ import unittest
 from pathlib import Path
 
 import yaml
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[1]
+_helper_path = ROOT / "scripts" / "deploy_docs_contract.py"
+_helper_spec = importlib.util.spec_from_file_location("deploy_docs_contract", str(_helper_path))
+if _helper_spec is None or _helper_spec.loader is None:
+    raise RuntimeError(f"Unable to load deploy_docs_contract helper from {_helper_path}")
+_helper = importlib.util.module_from_spec(_helper_spec)
+sys.modules["deploy_docs_contract"] = _helper
+_helper_spec.loader.exec_module(_helper)
+parse_standalone_claims = _helper.parse_standalone_claims
+validate_deploy_docs_contract_file = _helper.validate_deploy_docs_contract_file
+STANDALONE_VERSION = _helper.STANDALONE_VERSION
+STANDALONE_SHA = _helper.STANDALONE_SHA
+parse_action_delegate = _helper.parse_action_delegate
 
 
 def action(name: str) -> dict:
@@ -755,6 +768,93 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
         self.assertFalse(
             (ROOT / "actions/deploy-gh-pages-subdir/deploy-gh-pages-subdir.sh").exists()
         )
+
+
+class DeployGhPagesSubdirContractTests(unittest.TestCase):
+    def test_deploy_docs_contract_guard_passes_for_current_sources(self) -> None:
+        action_text = (ROOT / "actions/deploy-gh-pages-subdir/action.yml").read_text()
+        delegate = parse_action_delegate(action_text)
+        self.assertIsNotNone(delegate)
+        self.assertEqual(delegate[0], STANDALONE_SHA)
+        self.assertEqual(delegate[1], STANDALONE_VERSION)
+
+        for path in (
+            ROOT / "actions/README.md",
+            ROOT / "docs/usage.md",
+            ROOT / "examples/setup-actions.yml",
+        ):
+            self.assertFalse(
+                validate_deploy_docs_contract_file(
+                    path=path,
+                    text=path.read_text(),
+                    target_version=STANDALONE_VERSION,
+                    target_sha=STANDALONE_SHA,
+                ),
+                f"unexpected contract errors in {path}",
+            )
+
+    def test_false_released_toolkit_wording_is_rejected(self) -> None:
+        text = (
+            "The released toolkit v2.5.3 delegates unchanged inputs to standalone "
+            "gh-pages-subdir-action v0.1.0 (commit 816d85aa756f480457befb42168633cb6ccf09c7)."
+        )
+        errors = validate_deploy_docs_contract_file(
+            path=ROOT / "docs/usage.md",
+            text=text,
+            target_version=STANDALONE_VERSION,
+            target_sha=STANDALONE_SHA,
+        )
+        self.assertTrue(any("released-toolkit" in error for error in errors))
+
+    def test_stale_standalone_version_and_sha_are_rejected(self) -> None:
+        base_text = (ROOT / "actions/README.md").read_text()
+        stale_version = base_text.replace("v0.1.0", "v0.0.0")
+        stale_sha = base_text.replace("816d85aa756f480457befb42168633cb6ccf09c7", "0123456789abcdef0123456789abcdef01234567")
+        errors = validate_deploy_docs_contract_file(
+            path=ROOT / "actions/README.md",
+            text=stale_version,
+            target_version=STANDALONE_VERSION,
+            target_sha=STANDALONE_SHA,
+        )
+        self.assertTrue(
+            any(
+                "0.0.0" in error
+                and f"expected v{STANDALONE_VERSION}" in error
+                for error in errors
+            )
+        )
+
+        errors = validate_deploy_docs_contract_file(
+            path=ROOT / "actions/README.md",
+            text=stale_sha,
+            target_version=STANDALONE_VERSION,
+            target_sha=STANDALONE_SHA,
+        )
+        self.assertTrue(any(f"expected {STANDALONE_SHA}" in error for error in errors))
+
+    def test_production_action_yml_pin_is_rejected_if_mutated(self) -> None:
+        action_text = (ROOT / "actions/deploy-gh-pages-subdir/action.yml").read_text()
+        stale_text = action_text.replace(
+            "816d85aa756f480457befb42168633cb6ccf09c7",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        stale_delegate = parse_action_delegate(stale_text)
+        self.assertIsNotNone(stale_delegate)
+        self.assertNotEqual(stale_delegate[0], STANDALONE_SHA)
+
+    def test_missing_standalone_claim_is_reported(self) -> None:
+        errors = validate_deploy_docs_contract_file(
+            path=ROOT / "tests/fixtures/release-workflows/release-pyproject-0-no-version.yml",
+            text="standalone mention without action: deploy-gh-pages-subdir contract",
+            target_version=STANDALONE_VERSION,
+            target_sha=STANDALONE_SHA,
+        )
+        self.assertTrue(any("missing standalone" in error for error in errors))
+
+    def test_legacy_referenced_version_is_not_rejected_without_standalone_claim(self) -> None:
+        text = "Compatibility examples still reference v2.5.3 and should remain valid."
+        claims = parse_standalone_claims(text)
+        self.assertEqual(claims, [])
 
 
 if __name__ == "__main__":

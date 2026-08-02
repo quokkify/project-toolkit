@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/quokkify/project-toolkit/compare/v2.7.0...v2.7.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **actions:** update secure Allure reporter ([#59](https://github.com/quokkify/project-toolkit/issues/59)) ([b61eb85](https://github.com/quokkify/project-toolkit/commit/b61eb8506769dbe1e2787a0d93fcbbad8800b688))
+
 ## [2.7.0](https://github.com/quokkify/project-toolkit/compare/v2.6.0...v2.7.0) (2026-08-02)
 
 

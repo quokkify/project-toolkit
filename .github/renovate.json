@@ -70,7 +70,7 @@
         "/^examples/setup-actions\\.ya?ml$/"
       ],
       "matchStrings": [
-        "gh-pages-subdir-action(?:`)?(?: release)?(?:;|\\s|`)*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+        "(?<![A-Za-z0-9_/-])(?:quokkify/)?gh-pages-subdir-action(?:`)?(?:\\]\\([^)]*\\))?\\s*`?(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
       "depNameTemplate": "quokkify/gh-pages-subdir-action",
       "datasourceTemplate": "github-tags",

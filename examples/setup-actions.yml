@@ -13,7 +13,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Python
-        uses: quokkify/project-toolkit/actions/setup-python@v2.3.0
+        uses: quokkify/project-toolkit/actions/setup-python@v2.5.3
         with:
           python-version: "3.12"
           working-directory: .
@@ -26,7 +26,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Node.js
-        uses: quokkify/project-toolkit/actions/setup-node@v2.3.0
+        uses: quokkify/project-toolkit/actions/setup-node@v2.5.3
         with:
           node-version: "22"
           working-directory: .
@@ -39,7 +39,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Java and Gradle cache
-        uses: quokkify/project-toolkit/actions/setup-java-gradle@v2.3.0
+        uses: quokkify/project-toolkit/actions/setup-java-gradle@v2.5.3
         with:
           java-version: "21"
           distribution: temurin
@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Start and wait for compose services
-        uses: quokkify/project-toolkit/actions/compose-up@v2.3.0
+        uses: quokkify/project-toolkit/actions/compose-up@v2.5.3
         with:
           compose-files: |
             docker-compose.yml
@@ -86,7 +86,7 @@ jobs:
         run: your-test-command --junit-output test-results/junit.xml
       - name: Write JUnit job summary
         if: ${{ always() }}
-        uses: quokkify/project-toolkit/actions/junit-step-summary@v2.3.0
+        uses: quokkify/project-toolkit/actions/junit-step-summary@v2.5.3
         with:
           junit-paths: test-results/**/*.xml
           title: Test results

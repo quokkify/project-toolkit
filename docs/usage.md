@@ -7,7 +7,7 @@ Copy a small caller workflow from [`examples/`](../examples/) and replace comman
 ```yaml
 jobs:
   backend:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.5.3
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -51,7 +51,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy gh:quokkify/project-toolkit my-project --vcs-ref v2.3.0 --trust
+copier copy gh:quokkify/project-toolkit my-project --vcs-ref v2.5.3 --trust
 cd my-project
 copier update --trust
 ```

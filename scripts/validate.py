@@ -875,6 +875,64 @@ for action_path in action_paths:
                         f"{label}: run step {index} has invalid bash syntax: {syntax.stderr.strip()}",
                     )
 
+
+def validate_gh_pages_subdir_manager_regex() -> list[str]:
+    """Regression probes for the gh-pages-subdir-action regex matcher."""
+    errors: list[str] = []
+
+    try:
+        renovate = json.loads((ROOT / ".github/renovate.json").read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [f".github/renovate.json regex probe requires valid JSON: {exc}"]
+
+    manager = next(
+        (
+            m
+            for m in renovate.get("customManagers", [])
+            if m.get("depNameTemplate") == "quokkify/gh-pages-subdir-action"
+        ),
+        None,
+    )
+    if manager is None:
+        return ["renovate.json missing quokkify/gh-pages-subdir-action custom manager"]
+
+    match_strings = manager.get("matchStrings")
+    if not isinstance(match_strings, list) or not match_strings:
+        return ["renovate.json missing matchStrings for gh-pages-subdir-action manager"]
+    pattern = match_strings[0]
+
+    try:
+        # Renovate regex uses JavaScript-style named groups (?<currentValue>).
+        # Python supports (?P<name>), so normalize before compiling probe fixtures.
+        matcher = re.compile(pattern.replace("(?<currentValue>", "(?P<currentValue>"))
+    except re.error as exc:
+        return [f"renovate.json invalid gh-pages-subdir-action regex: {exc}"]
+
+    positive = {
+        "plain-text": "`gh-pages-subdir-action` `v2.5.3`",
+        "markdown-link": "[quokkify/gh-pages-subdir-action](https://github.com/quokkify/gh-pages-subdir-action) `v2.5.3`",
+        "comment-context": "delegates to gh-pages-subdir-action v2.5.3",
+    }
+    for label, text in positive.items():
+        match = matcher.search(text)
+        if not match or match.group("currentValue") != "v2.5.3":
+            errors.append(f"gh-pages-subdir regex probe failed to match {label}: {text}")
+
+    for label, text in {
+        "ownerless-prefix": "myquokkify/gh-pages-subdir-action v2.5.3",
+        "ownerful-prefix": "foo/gh-pages-subdir-action v2.5.3",
+        "suffix-no-space": "gh-pages-subdir-action-extra v2.5.3",
+        "inline-use": "random quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.5.3",
+    }.items():
+        if matcher.search(text):
+            errors.append(f"gh-pages-subdir regex probe over-matched {label}: {text}")
+
+    return errors
+
+
+# Validate gh-pages-subdir-action Renovate regex against fixtures to avoid drift.
+ERRORS.extend(validate_gh_pages_subdir_manager_regex())
+
 # Negative contract probes prove that permission/secret leakage, malformed booleans,
 # and ambiguous run steps are rejected by the validator itself.
 negative_probe = {
@@ -891,7 +949,6 @@ for expected in ("permissions", "secrets", "true/false", "explicit shell"):
         any(expected in error for error in negative_errors),
         f"action validator negative probe did not reject {expected}",
     )
-
 
 def setup_policy_errors(example: object, texts: dict[str, str]) -> list[str]:
     errors: list[str] = []

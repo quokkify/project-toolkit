@@ -1,0 +1,145 @@
+name: Build and comment Allure report
+description: >
+  Generates the existing Allure HTML report, badges, optional test-pyramid
+  artifacts, optional GitHub Pages preview, and an upserted PR summary comment.
+author: Yaraslau Lazakovich
+
+inputs:
+  github-token:
+    description: GitHub token with pull-requests:write; contents:write is also required when publish-pages is true
+    required: true
+  results-directory:
+    description: Merged Allure results directory, relative to the workspace
+    required: false
+    default: artifacts/allure-results
+  report-directory:
+    description: Generated Allure HTML directory, relative to the workspace
+    required: false
+    default: allure-report
+  config-file:
+    description: Allure 3 configuration file, relative to the workspace
+    required: true
+  categories-file:
+    description: Optional Allure categories JSON file, relative to the workspace
+    required: false
+    default: ""
+  allure-version:
+    description: Exact Allure CLI version
+    required: false
+    default: "3.14.2"
+  pr-number:
+    description: Pull request number to comment on; an empty value skips the comment
+    required: false
+    default: ""
+  pages-url:
+    description: Optional full report URL included in the PR comment
+    required: false
+    default: ""
+  fork-pr:
+    description: Whether the source pull request comes from a fork
+    required: false
+    default: "false"
+  source-run-id:
+    description: Source workflow run id used in the report link note
+    required: false
+    default: ""
+  comment-file:
+    description: Generated PR comment Markdown path, relative to the workspace
+    required: false
+    default: allure-pr-comment.md
+  comment-marker:
+    description: Hidden marker used to find and update this action's existing PR comment
+    required: false
+    default: "<!-- project-toolkit-allure-ci -->"
+  pyramid-enabled:
+    description: Generate the existing Allure epic test-pyramid snapshot and advisory gate files
+    required: false
+    default: "false"
+  pyramid-markdown-file:
+    description: Test-pyramid Markdown output path
+    required: false
+    default: docs/testing/pyramid-snapshot.md
+  pyramid-json-file:
+    description: Test-pyramid JSON output path
+    required: false
+    default: docs/testing/pyramid-snapshot.json
+  pyramid-gates-json-file:
+    description: Test-pyramid advisory gate JSON output path
+    required: false
+    default: docs/testing/pyramid-quality-gates.json
+  pyramid-source-run-id:
+    description: Source workflow run id embedded into the test-pyramid snapshot
+    required: false
+    default: ""
+  pyramid-head-sha:
+    description: Source head SHA embedded into the test-pyramid snapshot
+    required: false
+    default: ""
+  pyramid-policy-path:
+    description: Optional caller-repository policy path linked from the test-pyramid snapshot
+    required: false
+    default: docs/testing/test-pyramid.md
+  pyramid-artifact-name:
+    description: Uploaded test-pyramid artifact name
+    required: false
+    default: pyramid-snapshot
+  pyramid-retention-days:
+    description: Test-pyramid artifact retention in days
+    required: false
+    default: "30"
+  publish-pages:
+    description: Publish the generated report to a GitHub Pages subdirectory
+    required: false
+    default: "false"
+  pages-destination-directory:
+    description: GitHub Pages destination directory, required when publish-pages is true
+    required: false
+    default: ""
+  pages-branch:
+    description: Branch that hosts GitHub Pages
+    required: false
+    default: gh-pages
+  pages-retention-count:
+    description: Number of newest pr-N report directories to retain; 0 disables pruning
+    required: false
+    default: "0"
+
+outputs:
+  report-directory:
+    description: Generated Allure report directory
+    value: ${{ inputs.report-directory }}
+  comment-file:
+    description: Generated PR comment Markdown file
+    value: ${{ inputs.comment-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run standalone Allure report action
+      uses: quokkify/allure-report-action@e97473b629e65ca3cf02ed55596821ec82486811 # v0.1.0
+      with:
+        github-token: ${{ inputs.github-token }}
+        results-directory: ${{ inputs.results-directory }}
+        report-directory: ${{ inputs.report-directory }}
+        config-file: ${{ inputs.config-file }}
+        categories-file: ${{ inputs.categories-file }}
+        allure-version: ${{ inputs.allure-version }}
+        pr-number: ${{ inputs.pr-number }}
+        pages-url: ${{ inputs.pages-url }}
+        fork-pr: ${{ inputs.fork-pr }}
+        source-run-id: ${{ inputs.source-run-id }}
+        comment-file: ${{ inputs.comment-file }}
+        comment-marker: ${{ inputs.comment-marker }}
+        pyramid-enabled: ${{ inputs.pyramid-enabled }}
+        pyramid-markdown-file: ${{ inputs.pyramid-markdown-file }}
+        pyramid-json-file: ${{ inputs.pyramid-json-file }}
+        pyramid-gates-json-file: ${{ inputs.pyramid-gates-json-file }}
+        pyramid-source-run-id: ${{ inputs.pyramid-source-run-id }}
+        pyramid-head-sha: ${{ inputs.pyramid-head-sha }}
+        pyramid-policy-path: ${{ inputs.pyramid-policy-path }}
+        pyramid-artifact-name: ${{ inputs.pyramid-artifact-name }}
+        pyramid-retention-days: ${{ inputs.pyramid-retention-days }}
+        publish-pages: ${{ inputs.publish-pages }}
+        pages-destination-directory: ${{ inputs.pages-destination-directory }}
+        pages-branch: ${{ inputs.pages-branch }}
+        pages-retention-count: ${{ inputs.pages-retention-count }}

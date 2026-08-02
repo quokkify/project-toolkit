@@ -78,6 +78,20 @@
     },
     {
       "customType": "regex",
+      "description": "Keep documentation aligned with the pinned Allure report action.",
+      "managerFilePatterns": [
+        "/^actions/README\\.md$/",
+        "/^docs/usage\\.md$/"
+      ],
+      "matchStrings": [
+        "(?:quokkify/)?allure-report-action(?:`)?(?:\\]\\([^)]*\\))?(?:@|\\s+)(?:\\s*`)?(?<currentValue>v\\d+\\.\\d+\\.\\d+)(?:`)?"
+      ],
+      "depNameTemplate": "quokkify/allure-report-action",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
       "description": "Update the pinned actionlint release.",
       "managerFilePatterns": ["/^\\.github/workflows/validate-toolkit\\.ya?ml$/"],
       "matchStrings": [

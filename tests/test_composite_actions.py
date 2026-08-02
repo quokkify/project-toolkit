@@ -708,6 +708,44 @@ class ComposeActionTests(unittest.TestCase):
             self.assertNotIn("deploy/deploy", command)
 
 
+class AllureReportActionTests(unittest.TestCase):
+    def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
+        data = action("allure-report")
+        self.assertTrue(data["inputs"]["github-token"]["required"])
+        self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
+        self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
+        self.assertEqual(
+            data["inputs"]["pyramid-policy-path"]["default"],
+            "docs/testing/test-pyramid.md",
+        )
+        self.assertEqual(
+            data["inputs"]["comment-marker"]["default"],
+            "<!-- project-toolkit-allure-ci -->",
+        )
+
+        steps = data["runs"]["steps"]
+        self.assertEqual(len(steps), 1)
+        delegate = steps[0]
+        self.assertRegex(
+            delegate["uses"],
+            r"^quokkify/allure-report-action@[0-9a-f]{40}$",
+        )
+        self.assertEqual(set(delegate["with"]), set(data["inputs"]))
+        self.assertEqual(
+            delegate["with"],
+            {name: f"${{{{ inputs.{name} }}}}" for name in data["inputs"]},
+        )
+
+    def test_wrapper_uses_immutable_release_and_has_no_vendor_copy(self) -> None:
+        action_path = ROOT / "actions/allure-report/action.yml"
+        text = action_path.read_text()
+        self.assertRegex(
+            text,
+            r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
+        )
+        self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
+
+
 class DeployGhPagesSubdirTests(unittest.TestCase):
     def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
         data = action("deploy-gh-pages-subdir")

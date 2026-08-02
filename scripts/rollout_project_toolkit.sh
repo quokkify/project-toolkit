@@ -4,9 +4,9 @@ set -euo pipefail
 ORG="${ORG:-quokkify}"
 ANSWERS_DIR="${1:?usage: rollout_project_toolkit.sh ANSWERS_DIR}"
 TOOLKIT_REPO="quokkify/project-toolkit"
-TOOLKIT_REF="${TOOLKIT_REF:?export an exact reviewed tag, for example TOOLKIT_REF=v2.5.3}"
+TOOLKIT_REF="${TOOLKIT_REF:?export an exact reviewed tag, for example TOOLKIT_REF=v2.6.0}"
 if [[ ! "$TOOLKIT_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "TOOLKIT_REF must be an exact SemVer tag such as v2.5.3" >&2
+  echo "TOOLKIT_REF must be an exact SemVer tag such as v2.6.0" >&2
   exit 1
 fi
 gh release view "$TOOLKIT_REF" --repo "$TOOLKIT_REPO" >/dev/null

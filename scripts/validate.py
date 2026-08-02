@@ -932,8 +932,47 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
     return errors
 
 
+def validate_deploy_docs_contract() -> list[str]:
+    """Protect consumers from stale standalone-delegation claims."""
+    errors: list[str] = []
+
+    action_text = (ROOT / "actions/deploy-gh-pages-subdir/action.yml").read_text()
+    match = re.search(
+        r"quokkify/gh-pages-subdir-action@(?P<sha>[0-9a-f]{40})(?:\s*#\s*v(?P<version>\d+\.\d+\.\d+))?",
+        action_text,
+    )
+    if not match:
+        return ["deploy-gh-pages-subdir/action.yml missing standalone gh-pages-subdir-action delegation"]
+
+    delegate_sha = match.group("sha")
+    delegate_version = match.group("version")
+    target_sha = "816d85aa756f480457befb42168633cb6ccf09c7"
+    target_version = "0.1.0"
+
+    for label, path in {
+        "actions/README.md": ROOT / "actions/README.md",
+        "docs/usage.md": ROOT / "docs/usage.md",
+        "examples/setup-actions.yml": ROOT / "examples/setup-actions.yml",
+    }.items():
+        text = path.read_text()
+        has_delegation = re.search(r"delegates?\s+.*standalone", text, re.IGNORECASE)
+        has_wrapper = re.search(r"deploy-gh-pages-subdir", text, re.IGNORECASE)
+        if has_wrapper and has_delegation:
+            if delegate_sha != target_sha:
+                errors.append(
+                    f"{label}: standalone delegation references stale SHA {delegate_sha}; expected {target_sha} in wrapper action"
+                )
+            if delegate_version != target_version:
+                errors.append(
+                    f"{label}: standalone delegation references v{delegate_version}; expected v{target_version}"
+                )
+
+    return errors
+
+
 # Validate gh-pages-subdir-action Renovate regex against fixtures to avoid drift.
 ERRORS.extend(validate_gh_pages_subdir_manager_regex())
+ERRORS.extend(validate_deploy_docs_contract())
 
 # Negative contract probes prove that permission/secret leakage, malformed booleans,
 # and ambiguous run steps are rejected by the validator itself.

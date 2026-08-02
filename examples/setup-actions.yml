@@ -103,7 +103,8 @@ jobs:
       - name: Build static report
         run: mkdir -p report && printf '%s\n' '<h1>Report</h1>' > report/index.html
       - name: Publish report under a stable subdirectory
-        # This compatibility path delegates to gh-pages-subdir-action v0.1.0.
+        # This compatibility path points to the released toolkit `v2.5.3` contract for external users.
+        # In this repository source, this wrapper delegates unchanged inputs to standalone gh-pages-subdir-action v0.1.0.
         uses: quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.5.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

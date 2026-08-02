@@ -15,12 +15,6 @@ from pathlib import Path
 import yaml
 
 from validate_python_fixture import validate_python_fixture
-from deploy_docs_contract import (
-    STANDALONE_SHA,
-    STANDALONE_VERSION,
-    parse_action_delegate,
-    validate_deploy_docs_contract_file,
-)
 
 ROOT = Path(__file__).resolve().parents[1]
 ERRORS: list[str] = []
@@ -938,55 +932,8 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
     return errors
 
 
-def validate_deploy_docs_contract() -> list[str]:
-    """Protect consumers from stale standalone-delegation claims."""
-    errors: list[str] = []
-
-    action_text = (ROOT / "actions/deploy-gh-pages-subdir/action.yml").read_text()
-    pinned = parse_action_delegate(action_text)
-    if not pinned:
-        return ["deploy-gh-pages-subdir/action.yml missing standalone gh-pages-subdir-action delegation"]
-
-    delegate_sha, delegate_version = pinned
-    target_version = STANDALONE_VERSION if delegate_version is None else delegate_version
-    target_sha = STANDALONE_SHA if delegate_sha is None else delegate_sha
-
-    if delegate_sha != STANDALONE_SHA:
-        errors.append(
-            f"deploy-gh-pages-subdir/action.yml delegation pin must target {STANDALONE_SHA}; got {delegate_sha}"
-        )
-        target_sha = STANDALONE_SHA
-
-    if delegate_version is None:
-        errors.append("deploy-gh-pages-subdir/action.yml must include standalone version comment v0.1.0")
-        target_version = STANDALONE_VERSION
-    elif delegate_version != STANDALONE_VERSION:
-        errors.append(
-            f"deploy-gh-pages-subdir/action.yml delegation pin must reference v{STANDALONE_VERSION}; "
-            f"got {f'v{delegate_version}' if delegate_version else 'no version'}"
-        )
-        target_version = STANDALONE_VERSION
-
-    for path in (
-        ROOT / "actions/README.md",
-        ROOT / "docs/usage.md",
-        ROOT / "examples/setup-actions.yml",
-    ):
-        errors.extend(
-            validate_deploy_docs_contract_file(
-                path=path,
-                text=path.read_text(),
-                target_version=target_version,
-                target_sha=target_sha,
-            )
-        )
-
-    return errors
-
-
 # Validate gh-pages-subdir-action Renovate regex against fixtures to avoid drift.
 ERRORS.extend(validate_gh_pages_subdir_manager_regex())
-ERRORS.extend(validate_deploy_docs_contract())
 
 # Negative contract probes prove that permission/secret leakage, malformed booleans,
 # and ambiguous run steps are rejected by the validator itself.

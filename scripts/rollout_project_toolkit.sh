@@ -15,6 +15,22 @@ BRANCH="chore/project-toolkit-${TOOLKIT_REF}"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
+canonicalize_answers_source() {
+  python3 - "$1" "$TOOLKIT_SOURCE" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+answers = Path(sys.argv[1])
+source = sys.argv[2]
+content = answers.read_text(encoding="utf-8")
+updated, substitutions = re.subn(r"^_src_path:.*$", f"_src_path: {source}", content, flags=re.MULTILINE)
+if substitutions != 1:
+    raise SystemExit(f"{answers} must contain exactly one _src_path entry")
+answers.write_text(updated, encoding="utf-8")
+PY
+}
+
 shopt -s nullglob
 answer_files=("$ANSWERS_DIR"/*.yml)
 if (( ${#answer_files[@]} == 0 )); then
@@ -48,6 +64,7 @@ for answers in "${answer_files[@]}"; do
       echo "$full_repo is managed by a different Copier template; stopping before changes" >&2
       exit 1
     fi
+    canonicalize_answers_source "$worktree/.copier-answers.yml"
     copier update "$worktree" \
       --vcs-ref "$TOOLKIT_REF" \
       --data-file "$answers" \

@@ -182,11 +182,10 @@ def canonicalize_answers_source(repository_path: Path, expected_template: str) -
         r"^_src_path:.*$",
         f"_src_path: {canonical}",
         content,
-        count=1,
         flags=re.MULTILINE,
     )
     if substitutions != 1:
-        raise FleetUpdateError(f"{ANSWERS_FILE} has no replaceable _src_path entry")
+        raise FleetUpdateError(f"{ANSWERS_FILE} must contain exactly one _src_path entry")
     answers_path.write_text(updated, encoding="utf-8")
     return True
 

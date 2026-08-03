@@ -79,6 +79,18 @@ class TemplateSourceTests(TestCase):
             )
             self.assertEqual(answers.read_text(encoding="utf-8"), content)
 
+    def test_rejects_duplicate_copier_source_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            answers.write_text(
+                "_src_path: gh:quokkify/project-toolkit\n"
+                "_src_path: gh:quokkify/project-toolkit\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "exactly one"):
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+
 
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")

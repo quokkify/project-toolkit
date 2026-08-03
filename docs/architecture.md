@@ -2,7 +2,7 @@
 
 ![project-toolkit architecture](assets/project-toolkit-architecture.svg)
 
-The diagram shows the central boundary: consuming repositories own orchestration, while this toolkit owns reusable implementation. Renovate proposes dependency and documentation updates; Release Please publishes immutable toolkit tags.
+The diagram shows the central boundary: consuming repositories own orchestration, while this toolkit owns reusable implementation. Renovate proposes dependency and documentation updates, Release Please publishes immutable toolkit tags, and the read-only Copier fleet audit detects template drift in supported public consumers.
 
 ## Researched constraints
 

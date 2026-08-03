@@ -3,7 +3,7 @@ _subdirectory: templates/project/template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _exclude:
-  - "{% if not renovate %}renovate.json{% endif %}"
+  - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
 
 project_name:

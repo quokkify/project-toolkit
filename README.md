@@ -10,10 +10,24 @@ project-toolkit keeps CI implementation in one repository while letting each con
 
 ## What is included?
 
-- **Reusable workflows** for Python, Node.js, Java, Docker, and Release Please. They own complete jobs and runner behavior.
 - **Composite actions** for language setup, Gradle validation, Compose readiness, and JUnit summaries.
 - **Copier templates** that create and later update only the small project-local files.
 - **Renovate presets and rules** that keep workflow references, action pins, validation tools, and this documentation current.
+
+## Reusable workflows
+
+Call supported workflows from a job with an exact release tag: `uses: quokkify/project-toolkit/.github/workflows/<file>@vX.Y.Z`. The caller still owns triggers, path filters, permissions, and any secrets.
+
+| Workflow | File | Connect from another repository? | Purpose |
+| --- | --- | :---: | --- |
+| Python CI | [`python-ci.yml`](.github/workflows/python-ci.yml) | Yes | Install dependencies and run configurable lint, test, and optional build commands. |
+| Node.js CI | [`node-ci.yml`](.github/workflows/node-ci.yml) | Yes | Install with npm, pnpm, or Yarn and run configurable lint, test, and optional build commands. |
+| Java CI | [`java-ci.yml`](.github/workflows/java-ci.yml) | Yes | Build and test Gradle or Maven projects with a selected JDK. |
+| Docker build | [`docker-build.yml`](.github/workflows/docker-build.yml) | Yes | Build without pushing by default; optionally authenticate and push an image. |
+| Release Please | [`release-please.yml`](.github/workflows/release-please.yml) | Yes | Create release PRs and immutable releases in single-package or manifest mode. |
+| Runner detection | [`reusable-detect-runner.yml`](.github/workflows/reusable-detect-runner.yml) | Internal | Select a trusted self-hosted runner for this repository's own validation jobs; it is not a supported consumer API. |
+
+The daily [`Copier fleet audit`](.github/workflows/copier-fleet-update.yml) is repository automation, not a reusable workflow: it checks public Copier-managed consumers for template drift.
 
 ## Quick start
 
@@ -47,7 +61,7 @@ The root [`copier.yml`](copier.yml) points at `templates/project/template/`. Kee
 
 Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; Renovate updates workflow versions in examples and documentation as well as in workflows.
 
-Copier-generated `renovate.json` files extend presets from the central shared repository `quokkify/renovate-presets` by default. Set the `renovate_config_repository` answer to another GitHub `owner/repo` slug to use a different shared preset repository; this answer names the preset repository, not the generated consumer repository. The `renovate_presets` YAML list selects preset names in order: `default` -> `presets/base`, `python` -> `presets/python/default`, `javascript` -> `presets/npm/default`, `java` -> `presets/gradle/default`, `docker` -> `presets/docker/default`, and `github-actions` -> `presets/github-actions/default`. New projects infer `default`, `github-actions`, plus language and Docker presets from Copier answers. Generated extends intentionally follow the preset repository's default branch; projects with stricter stability requirements can manually pin entries later.
+Copier-generated `.github/renovate.json` files extend presets from the central shared repository `quokkify/renovate-presets` by default. Set the `renovate_config_repository` answer to another GitHub `owner/repo` slug to use a different shared preset repository; this answer names the preset repository, not the generated consumer repository. The `renovate_presets` YAML list selects preset names in order: `default` -> `presets/base`, `python` -> `presets/python/default`, `javascript` -> `presets/npm/default`, `java` -> `presets/gradle/default`, `docker` -> `presets/docker/default`, and `github-actions` -> `presets/github-actions/default`. New projects infer `default`, `github-actions`, plus language and Docker presets from Copier answers. Generated extends intentionally follow the preset repository's default branch; projects with stricter stability requirements can manually pin entries later.
 
 ## Scope
 

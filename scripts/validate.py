@@ -1166,6 +1166,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
+        generated_validate = (dest / ".github/workflows/validate.yml").read_text()
+        check(
+            not generated_validate.endswith("\n\n"),
+            f"{scenario}: validate workflow has a trailing blank line",
+        )
         check(
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",
@@ -1261,6 +1266,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     check(
         'install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"' in config_only_gitleaks,
         "generated Gitleaks workflow installs outside its extraction directory",
+    )
+    check(
+        'git show "$TRUSTED_REF:.gitleaks.toml"' in config_only_gitleaks
+        and '--config "$RUNNER_TEMP/gitleaks.toml"' in config_only_gitleaks
+        and '--gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore"' in config_only_gitleaks,
+        "generated Gitleaks workflow does not protect policy from pull request changes",
+    )
+    check(
+        'Path(".github/renovate.json")' in config_only_validate
+        and 'git diff --check "$BASE_SHA..$HEAD_SHA"' in config_only_validate
+        and '"$RUNNER_TEMP/bin/actionlint"' in config_only_validate,
+        "generated validation workflow is missing contract gates",
     )
     check(
         (config_only_dest / ".github/workflows/release.yml").exists(),

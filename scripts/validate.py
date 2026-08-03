@@ -1166,6 +1166,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
+        generated_validate = (dest / ".github/workflows/validate.yml").read_text()
+        check(
+            not generated_validate.endswith("\n\n"),
+            f"{scenario}: validate workflow has a trailing blank line",
+        )
         check(
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",
@@ -1246,6 +1251,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "config-only project lost shared template-contract validation",
     )
     config_only_validate = (config_only_dest / ".github/workflows/validate.yml").read_text()
+    check(
+        not config_only_validate.endswith("\n\n"),
+        "config-only validate workflow has a trailing blank line",
+    )
     for workflow_name in ("python-ci.yml", "node-ci.yml", "java-ci.yml", "docker-build.yml"):
         check(
             workflow_name not in config_only_validate,
@@ -1253,6 +1262,23 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
     for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
         run([actionlint, str(config_only_dest / f".github/workflows/{workflow_name}")])
+    config_only_gitleaks = (config_only_dest / ".github/workflows/gitleaks.yml").read_text()
+    check(
+        'install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"' in config_only_gitleaks,
+        "generated Gitleaks workflow installs outside its extraction directory",
+    )
+    check(
+        'git show "$TRUSTED_REF:.gitleaks.toml"' in config_only_gitleaks
+        and '--config "$RUNNER_TEMP/gitleaks.toml"' in config_only_gitleaks
+        and '--gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore"' in config_only_gitleaks,
+        "generated Gitleaks workflow does not protect policy from pull request changes",
+    )
+    check(
+        'Path(".github/renovate.json")' in config_only_validate
+        and 'git diff --check "$BASE_SHA..$HEAD_SHA"' in config_only_validate
+        and '"$RUNNER_TEMP/bin/actionlint"' in config_only_validate,
+        "generated validation workflow is missing contract gates",
+    )
     check(
         (config_only_dest / ".github/workflows/release.yml").exists(),
         "config-only project lost Release Please workflow",

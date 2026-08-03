@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.0](https://github.com/quokkify/project-toolkit/compare/v2.7.2...v2.8.0) (2026-08-03)
+
+
+### Features
+
+* automate Copier fleet updates ([#64](https://github.com/quokkify/project-toolkit/issues/64)) ([784b675](https://github.com/quokkify/project-toolkit/commit/784b67579e9fae07ffbaf3b0eec1f557fe2aa4c1))
+
 ## [2.7.2](https://github.com/quokkify/project-toolkit/compare/v2.7.1...v2.7.2) (2026-08-02)
 
 

@@ -48,7 +48,13 @@ jobs:
           TEMPLATE_REF: ${{ inputs.template-ref }}
         run: |
           set -euo pipefail
-          args=(--org quokkify --dry-run --public-only)
+          args=(
+            --org quokkify
+            --dry-run
+            --public-only
+            --exclude quokkify/.github
+            --exclude quokkify/project-toolkit
+          )
           if [[ -n "$REQUESTED_REPOSITORY" ]]; then
             args+=(--repo "$REQUESTED_REPOSITORY")
           fi

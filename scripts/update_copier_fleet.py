@@ -356,13 +356,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     env = os.environ.copy()
     fleet_token = env.get("COPIER_FLEET_TOKEN", "").strip()
-    if args.write and not fleet_token:
-        print("COPIER_FLEET_TOKEN is required in --write mode", file=sys.stderr)
-        return 2
-    if fleet_token:
+    if args.write:
+        if not fleet_token:
+            print("COPIER_FLEET_TOKEN is required in --write mode", file=sys.stderr)
+            return 2
         env["GH_TOKEN"] = fleet_token
-    elif not env.get("GH_TOKEN") and env.get("GITHUB_TOKEN"):
-        env["GH_TOKEN"] = env["GITHUB_TOKEN"]
+    elif env.get("GITHUB_TOKEN", "").strip():
+        # Dry-runs deliberately use the repository-scoped token even when the
+        # more privileged fleet secret is available to the workflow.
+        env["GH_TOKEN"] = env["GITHUB_TOKEN"].strip()
     if not env.get("GH_TOKEN"):
         print("GH_TOKEN, GITHUB_TOKEN, or COPIER_FLEET_TOKEN is required", file=sys.stderr)
         return 2

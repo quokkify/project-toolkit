@@ -117,7 +117,30 @@ class RepositoryProcessingTests(TestCase):
 
 
 class CommandLineTests(TestCase):
-    @mock.patch.dict("os.environ", {"GH_TOKEN": "", "GITHUB_TOKEN": ""}, clear=False)
+    @mock.patch.object(fleet, "discover_repositories", return_value=[])
+    @mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.dict(
+        "os.environ",
+        {
+            "COPIER_FLEET_TOKEN": "write-token",
+            "GITHUB_TOKEN": "dry-run-token",
+            "GH_TOKEN": "ambient-token",
+        },
+        clear=False,
+    )
+    def test_dry_run_prefers_repository_scoped_token(
+        self,
+        _: mock.Mock,
+        discover_mock: mock.Mock,
+    ) -> None:
+        self.assertEqual(fleet.main(["--dry-run"]), 0)
+        self.assertEqual(discover_mock.call_args.kwargs["env"]["GH_TOKEN"], "dry-run-token")
+
+    @mock.patch.dict(
+        "os.environ",
+        {"COPIER_FLEET_TOKEN": "", "GH_TOKEN": "", "GITHUB_TOKEN": ""},
+        clear=False,
+    )
     def test_write_mode_requires_dedicated_fleet_token(self) -> None:
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 

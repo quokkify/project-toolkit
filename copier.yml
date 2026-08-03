@@ -5,7 +5,6 @@ _templates_suffix: .jinja
 _exclude:
   - "{% if not renovate %}renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
-  - "{% if not components and not docker %}.github/workflows/ci.yml{% endif %}"
 
 project_name:
   type: str
@@ -55,7 +54,7 @@ renovate_presets:
   type: yaml
   help: "Renovate preset names to extend. Supported names: default, python, javascript, java, docker, github-actions."
   default: >-
-    {%- set presets = ['default'] -%}
+    {%- set presets = ['default', 'github-actions'] -%}
     {%- set component_types = components | map(attribute='type') | list -%}
     {%- if 'python' in component_types -%}{%- set _ = presets.append('python') -%}{%- endif -%}
     {%- if 'node' in component_types -%}{%- set _ = presets.append('javascript') -%}{%- endif -%}

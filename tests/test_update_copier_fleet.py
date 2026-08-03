@@ -50,6 +50,87 @@ class TemplateSourceTests(TestCase):
         with self.assertRaises(fleet.FleetUpdateError):
             fleet.parse_template_source("project_name: example\n")
 
+    def test_rewrites_copier_shorthand_to_renovate_compatible_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            answers.write_text(
+                "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\nproject_name: example\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+            )
+            self.assertEqual(
+                answers.read_text(encoding="utf-8"),
+                "_commit: v2.8.2\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+                "project_name: example\n",
+            )
+
+    def test_leaves_canonical_copier_source_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            content = "_commit: v2.8.2\n_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            answers.write_text(content, encoding="utf-8")
+            self.assertFalse(
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+            )
+            self.assertEqual(answers.read_text(encoding="utf-8"), content)
+
+    def test_rejects_duplicate_copier_source_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            answers.write_text(
+                "_src_path: gh:quokkify/project-toolkit\n"
+                "_src_path: gh:quokkify/project-toolkit\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "exactly one"):
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+
+    def test_rejects_symlinked_answers_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            target = repository / "target.yml"
+            target.write_text(
+                "_src_path: gh:quokkify/project-toolkit\n",
+                encoding="utf-8",
+            )
+            (repository / fleet.ANSWERS_FILE).symlink_to(target)
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "must not be a symlink"):
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                "_src_path: gh:quokkify/project-toolkit\n",
+            )
+
+
+class TemplateUpdateTests(TestCase):
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_canonicalizes_source_after_clean_copier_update(
+        self,
+        run_mock: mock.Mock,
+        canonicalize_mock: mock.Mock,
+        _: mock.Mock,
+    ) -> None:
+        events: list[str] = []
+        run_mock.side_effect = lambda *args, **kwargs: events.append("copier-update")
+        canonicalize_mock.side_effect = lambda *args, **kwargs: events.append("canonicalize")
+
+        fleet.update_template(
+            Path("/tmp/repository"),
+            template_source="quokkify/project-toolkit",
+            template_ref="v2.8.1",
+            env={},
+        )
+
+        self.assertEqual(events, ["copier-update", "canonicalize"])
+
 
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")
@@ -123,6 +204,9 @@ class RepositoryProcessingTests(TestCase):
         self.assertIn("renovate.json", result.detail)
         clone_mock.assert_called_once()
         self.assertEqual(update_mock.call_args.kwargs["template_ref"], "v3.0.0")
+        self.assertEqual(
+            update_mock.call_args.kwargs["template_source"], "quokkify/project-toolkit"
+        )
 
     @mock.patch.object(fleet, "ensure_pull_request", return_value="https://github.com/quokkify/example/pull/1")
     @mock.patch.object(fleet, "push_automation_branch")

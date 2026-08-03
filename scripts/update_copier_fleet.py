@@ -160,6 +160,38 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def canonical_template_source(source: str) -> str:
+    """Return a Copier and Renovate compatible HTTPS Git URL."""
+    normalized = normalize_template_source(source)
+    if normalized is None:
+        raise FleetUpdateError(f"unsupported template source: {source}")
+    return f"https://github.com/{normalized}.git"
+
+
+def canonicalize_answers_source(repository_path: Path, expected_template: str) -> bool:
+    """Replace Copier's GitHub shorthand without reserializing the answers file."""
+    answers_path = repository_path / ANSWERS_FILE
+    if answers_path.is_symlink():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
+    content = answers_path.read_text(encoding="utf-8")
+    current = parse_template_source(content)
+    if normalize_template_source(current) != normalize_template_source(expected_template):
+        raise FleetUpdateError(f"{ANSWERS_FILE} is managed by a different template")
+    canonical = canonical_template_source(expected_template)
+    if current == canonical:
+        return False
+    updated, substitutions = re.subn(
+        r"^_src_path:.*$",
+        f"_src_path: {canonical}",
+        content,
+        flags=re.MULTILINE,
+    )
+    if substitutions != 1:
+        raise FleetUpdateError(f"{ANSWERS_FILE} must contain exactly one _src_path entry")
+    answers_path.write_text(updated, encoding="utf-8")
+    return True
+
+
 def clone_repository(repository: Repository, destination: Path, *, env: dict[str, str]) -> None:
     run(
         [
@@ -205,6 +237,7 @@ def changed_paths(repository_path: Path) -> list[str]:
 def update_template(
     repository_path: Path,
     *,
+    template_source: str,
     template_ref: str | None,
     env: dict[str, str],
 ) -> list[str]:
@@ -220,6 +253,7 @@ def update_template(
         command.extend(["--vcs-ref", template_ref])
     command.append(".")
     run(command, cwd=repository_path, env=env)
+    canonicalize_answers_source(repository_path, template_source)
     rejected = sorted(repository_path.rglob("*.rej"))
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
@@ -338,7 +372,12 @@ def process_repository(
 
     destination = workspace / repository.name_with_owner.replace("/", "--")
     clone_repository(repository, destination, env=env)
-    paths = update_template(destination, template_ref=template_ref, env=env)
+    paths = update_template(
+        destination,
+        template_source=expected_template,
+        template_ref=template_ref,
+        env=env,
+    )
     if not paths:
         return Result(repository.name_with_owner, "up-to-date")
     if dry_run:

@@ -4,6 +4,7 @@ set -euo pipefail
 ORG="${ORG:-quokkify}"
 ANSWERS_DIR="${1:?usage: rollout_project_toolkit.sh ANSWERS_DIR}"
 TOOLKIT_REPO="quokkify/project-toolkit"
+TOOLKIT_SOURCE="https://github.com/$TOOLKIT_REPO.git"
 TOOLKIT_REF="${TOOLKIT_REF:?export an exact reviewed tag, for example TOOLKIT_REF=v2.6.0}"
 if [[ ! "$TOOLKIT_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "TOOLKIT_REF must be an exact SemVer tag such as v2.6.0" >&2
@@ -13,6 +14,24 @@ gh release view "$TOOLKIT_REF" --repo "$TOOLKIT_REPO" >/dev/null
 BRANCH="chore/project-toolkit-${TOOLKIT_REF}"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
+
+canonicalize_answers_source() {
+  python3 - "$1" "$TOOLKIT_SOURCE" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+answers = Path(sys.argv[1])
+source = sys.argv[2]
+if answers.is_symlink():
+    raise SystemExit(f"{answers} must not be a symlink")
+content = answers.read_text(encoding="utf-8")
+updated, substitutions = re.subn(r"^_src_path:.*$", f"_src_path: {source}", content, flags=re.MULTILINE)
+if substitutions != 1:
+    raise SystemExit(f"{answers} must contain exactly one _src_path entry")
+answers.write_text(updated, encoding="utf-8")
+PY
+}
 
 shopt -s nullglob
 answer_files=("$ANSWERS_DIR"/*.yml)
@@ -54,8 +73,9 @@ for answers in "${answer_files[@]}"; do
       --skip README.md \
       --defaults \
       --trust
+    canonicalize_answers_source "$worktree/.copier-answers.yml"
   else
-    copier copy "gh:$TOOLKIT_REPO" "$worktree" \
+    copier copy "$TOOLKIT_SOURCE" "$worktree" \
       --vcs-ref "$TOOLKIT_REF" \
       --data-file "$answers" \
       --data "toolkit_version=$TOOLKIT_REF" \

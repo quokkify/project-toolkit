@@ -23,6 +23,8 @@ import sys
 
 answers = Path(sys.argv[1])
 source = sys.argv[2]
+if answers.is_symlink():
+    raise SystemExit(f"{answers} must not be a symlink")
 content = answers.read_text(encoding="utf-8")
 updated, substitutions = re.subn(r"^_src_path:.*$", f"_src_path: {source}", content, flags=re.MULTILINE)
 if substitutions != 1:
@@ -64,7 +66,6 @@ for answers in "${answer_files[@]}"; do
       echo "$full_repo is managed by a different Copier template; stopping before changes" >&2
       exit 1
     fi
-    canonicalize_answers_source "$worktree/.copier-answers.yml"
     copier update "$worktree" \
       --vcs-ref "$TOOLKIT_REF" \
       --data-file "$answers" \
@@ -72,6 +73,7 @@ for answers in "${answer_files[@]}"; do
       --skip README.md \
       --defaults \
       --trust
+    canonicalize_answers_source "$worktree/.copier-answers.yml"
   else
     copier copy "$TOOLKIT_SOURCE" "$worktree" \
       --vcs-ref "$TOOLKIT_REF" \

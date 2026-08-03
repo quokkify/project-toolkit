@@ -171,6 +171,8 @@ def canonical_template_source(source: str) -> str:
 def canonicalize_answers_source(repository_path: Path, expected_template: str) -> bool:
     """Replace Copier's GitHub shorthand without reserializing the answers file."""
     answers_path = repository_path / ANSWERS_FILE
+    if answers_path.is_symlink():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
     content = answers_path.read_text(encoding="utf-8")
     current = parse_template_source(content)
     if normalize_template_source(current) != normalize_template_source(expected_template):
@@ -239,7 +241,6 @@ def update_template(
     template_ref: str | None,
     env: dict[str, str],
 ) -> list[str]:
-    canonicalize_answers_source(repository_path, template_source)
     command = [
         "copier",
         "update",
@@ -252,6 +253,7 @@ def update_template(
         command.extend(["--vcs-ref", template_ref])
     command.append(".")
     run(command, cwd=repository_path, env=env)
+    canonicalize_answers_source(repository_path, template_source)
     rejected = sorted(repository_path.rglob("*.rej"))
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)

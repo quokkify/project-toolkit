@@ -91,6 +91,46 @@ class TemplateSourceTests(TestCase):
             with self.assertRaisesRegex(fleet.FleetUpdateError, "exactly one"):
                 fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
 
+    def test_rejects_symlinked_answers_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            target = repository / "target.yml"
+            target.write_text(
+                "_src_path: gh:quokkify/project-toolkit\n",
+                encoding="utf-8",
+            )
+            (repository / fleet.ANSWERS_FILE).symlink_to(target)
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "must not be a symlink"):
+                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                "_src_path: gh:quokkify/project-toolkit\n",
+            )
+
+
+class TemplateUpdateTests(TestCase):
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_canonicalizes_source_after_clean_copier_update(
+        self,
+        run_mock: mock.Mock,
+        canonicalize_mock: mock.Mock,
+        _: mock.Mock,
+    ) -> None:
+        events: list[str] = []
+        run_mock.side_effect = lambda *args, **kwargs: events.append("copier-update")
+        canonicalize_mock.side_effect = lambda *args, **kwargs: events.append("canonicalize")
+
+        fleet.update_template(
+            Path("/tmp/repository"),
+            template_source="quokkify/project-toolkit",
+            template_ref="v2.8.1",
+            env={},
+        )
+
+        self.assertEqual(events, ["copier-update", "canonicalize"])
+
 
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")

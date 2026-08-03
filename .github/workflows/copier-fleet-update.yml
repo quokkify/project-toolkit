@@ -1,19 +1,10 @@
-name: Update Copier-managed repositories
+name: Audit Copier-managed repositories
 
 on:
-  schedule:
-    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
-      mode:
-        description: Dry-run only or create/update pull requests.
-        type: choice
-        options:
-          - dry-run
-          - write
-        default: dry-run
       repository:
-        description: Optional owner/repository to process instead of the whole organization.
+        description: Optional owner/repository to audit instead of the whole organization.
         type: string
         required: false
       template-ref:
@@ -25,16 +16,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: copier-fleet-update
+  group: copier-fleet-audit
   cancel-in-progress: false
 
 jobs:
-  update:
-    name: Discover and update Copier consumers
+  audit:
+    name: Discover and audit Copier consumers
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      COPIER_FLEET_TOKEN: ${{ secrets.COPIER_FLEET_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Check out project-toolkit
@@ -42,45 +32,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Set up Python and Copier
+        uses: ./actions/setup-python
         with:
           python-version: "3.14"
+          package-manager: pip
+          cache-dependencies: "false"
+          install-command: python -m pip install copier==9.17.0
 
-      - name: Install pinned Copier
-        run: python -m pip install copier==9.17.0
-
-      - name: Configure GitHub credentials
+      - name: Audit Copier fleet
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          REQUESTED_MODE: ${{ inputs.mode }}
-        run: |
-          set -euo pipefail
-          if [[ "$EVENT_NAME" == "schedule" || "$REQUESTED_MODE" == "write" ]]; then
-            if [[ -z "$COPIER_FLEET_TOKEN" ]]; then
-              echo "::error::COPIER_FLEET_TOKEN is required for cross-repository writes."
-              exit 2
-            fi
-            export GH_TOKEN="$COPIER_FLEET_TOKEN"
-          else
-            export GH_TOKEN="$GITHUB_TOKEN"
-          fi
-          gh auth setup-git
-
-      - name: Run Copier fleet update
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_REPOSITORY: ${{ inputs.repository }}
           TEMPLATE_REF: ${{ inputs.template-ref }}
         run: |
           set -euo pipefail
-          args=(--org quokkify)
-          if [[ "$EVENT_NAME" == "schedule" || "$REQUESTED_MODE" == "write" ]]; then
-            args+=(--write)
-          else
-            args+=(--dry-run)
-          fi
+          args=(--org quokkify --dry-run)
           if [[ -n "$REQUESTED_REPOSITORY" ]]; then
             args+=(--repo "$REQUESTED_REPOSITORY")
           fi

@@ -115,6 +115,73 @@ class RepositoryProcessingTests(TestCase):
         clone_mock.assert_called_once()
         self.assertEqual(update_mock.call_args.kwargs["template_ref"], "v3.0.0")
 
+    @mock.patch.object(fleet, "ensure_pull_request", return_value="https://github.com/quokkify/example/pull/1")
+    @mock.patch.object(fleet, "push_automation_branch")
+    @mock.patch.object(fleet, "update_template", return_value=[".github/workflows/validate.yml"])
+    @mock.patch.object(fleet, "clone_repository")
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_write_mode_pushes_branch_and_returns_pull_request(
+        self,
+        _: mock.Mock,
+        clone_mock: mock.Mock,
+        update_mock: mock.Mock,
+        push_mock: mock.Mock,
+        pull_request_mock: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = fleet.process_repository(
+                fleet.Repository("quokkify/example", "main"),
+                expected_template="gh:quokkify/project-toolkit.git",
+                branch=fleet.DEFAULT_BRANCH,
+                dry_run=False,
+                template_ref=None,
+                env={},
+                workspace=Path(temporary),
+            )
+        self.assertEqual(result.status, "pull-request")
+        self.assertEqual(result.detail, "https://github.com/quokkify/example/pull/1")
+        clone_mock.assert_called_once()
+        update_mock.assert_called_once()
+        push_mock.assert_called_once()
+        pull_request_mock.assert_called_once()
+
+    @mock.patch.object(fleet, "ensure_pull_request")
+    @mock.patch.object(fleet, "push_automation_branch")
+    @mock.patch.object(fleet, "update_template", return_value=[])
+    @mock.patch.object(fleet, "clone_repository")
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_up_to_date_repository_does_not_push(
+        self,
+        _: mock.Mock,
+        clone_mock: mock.Mock,
+        update_mock: mock.Mock,
+        push_mock: mock.Mock,
+        pull_request_mock: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = fleet.process_repository(
+                fleet.Repository("quokkify/example", "main"),
+                expected_template="quokkify/project-toolkit",
+                branch=fleet.DEFAULT_BRANCH,
+                dry_run=False,
+                template_ref=None,
+                env={},
+                workspace=Path(temporary),
+            )
+        self.assertEqual(result.status, "up-to-date")
+        clone_mock.assert_called_once()
+        update_mock.assert_called_once()
+        push_mock.assert_not_called()
+        pull_request_mock.assert_not_called()
+
 
 class CommandLineTests(TestCase):
     @mock.patch.object(fleet, "discover_repositories", return_value=[])
@@ -122,9 +189,8 @@ class CommandLineTests(TestCase):
     @mock.patch.dict(
         "os.environ",
         {
-            "COPIER_FLEET_TOKEN": "write-token",
-            "GITHUB_TOKEN": "dry-run-token",
-            "GH_TOKEN": "ambient-token",
+            "GITHUB_TOKEN": "repository-scoped-token",
+            "GH_TOKEN": "ambient-codeowner-token",
         },
         clear=False,
     )
@@ -134,14 +200,14 @@ class CommandLineTests(TestCase):
         discover_mock: mock.Mock,
     ) -> None:
         self.assertEqual(fleet.main(["--dry-run"]), 0)
-        self.assertEqual(discover_mock.call_args.kwargs["env"]["GH_TOKEN"], "dry-run-token")
+        self.assertEqual(discover_mock.call_args.kwargs["env"]["GH_TOKEN"], "repository-scoped-token")
 
     @mock.patch.dict(
         "os.environ",
-        {"COPIER_FLEET_TOKEN": "", "GH_TOKEN": "", "GITHUB_TOKEN": ""},
+        {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
         clear=False,
     )
-    def test_write_mode_requires_dedicated_fleet_token(self) -> None:
+    def test_write_mode_requires_codeowner_session_token(self) -> None:
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 
 

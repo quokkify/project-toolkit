@@ -89,6 +89,11 @@ def discover_repositories(org: str, *, env: dict[str, str]) -> list[Repository]:
         ],
         env=env,
     )
+    if len(items) >= 1000:
+        raise FleetUpdateError(
+            f"repository discovery reached the 1000-repository safety limit for {org}; "
+            "refuse to run with a potentially truncated fleet"
+        )
     repositories: list[Repository] = []
     for item in items:
         if item.get("isArchived") or item.get("isFork"):
@@ -322,7 +327,8 @@ def process_repository(
         return Result(repository.name_with_owner, "not-managed")
 
     source = normalize_template_source(parse_template_source(raw_answers))
-    if source != expected_template.casefold():
+    normalized_expected = normalize_template_source(expected_template)
+    if normalized_expected is None or source != normalized_expected:
         return Result(repository.name_with_owner, "foreign-template", source or "unrecognized source")
 
     destination = workspace / repository.name_with_owner.replace("/", "--")
@@ -355,42 +361,71 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     env = os.environ.copy()
-    fleet_token = env.get("COPIER_FLEET_TOKEN", "").strip()
     if args.write:
-        if not fleet_token:
-            print("COPIER_FLEET_TOKEN is required in --write mode", file=sys.stderr)
+        if not env.get("GH_TOKEN", "").strip():
+            print("GH_TOKEN is required in --write mode; use the CODEOWNER's short-lived local/API session", file=sys.stderr)
             return 2
-        env["GH_TOKEN"] = fleet_token
+        env["GH_TOKEN"] = env["GH_TOKEN"].strip()
     elif env.get("GITHUB_TOKEN", "").strip():
-        # Dry-runs deliberately use the repository-scoped token even when the
-        # more privileged fleet secret is available to the workflow.
         env["GH_TOKEN"] = env["GITHUB_TOKEN"].strip()
     if not env.get("GH_TOKEN"):
-        print("GH_TOKEN, GITHUB_TOKEN, or COPIER_FLEET_TOKEN is required", file=sys.stderr)
+        print("GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
         return 2
     for command in ("copier", "gh", "git"):
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
 
-    if args.repo:
-        repositories = []
-        for name in args.repo:
-            metadata = gh_json(
-                ["repo", "view", name, "--json", "nameWithOwner,defaultBranchRef,isArchived,isFork"],
-                env=env,
-            )
-            if metadata.get("isArchived") or metadata.get("isFork"):
-                continue
-            repositories.append(
-                Repository(metadata["nameWithOwner"], metadata["defaultBranchRef"]["name"])
-            )
-    else:
-        repositories = discover_repositories(args.org, env=env)
-
-    excluded = {name.casefold() for name in args.exclude}
+    repositories: list[Repository] = []
     results: list[Result] = []
     failures = 0
+    if args.repo:
+        for requested_name in args.repo:
+            normalized_name = normalize_template_source(requested_name)
+            if normalized_name is None or requested_name.casefold() != normalized_name:
+                result = Result(requested_name, "failed", "--repo must be exactly owner/repository")
+                failures += 1
+                results.append(result)
+                print(f"[{result.status}] {result.repository}: {result.detail}", flush=True)
+                continue
+            try:
+                metadata = gh_json(
+                    [
+                        "repo",
+                        "view",
+                        requested_name,
+                        "--json",
+                        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+                    ],
+                    env=env,
+                )
+                default_ref = metadata.get("defaultBranchRef")
+                full_name = metadata.get("nameWithOwner")
+                if metadata.get("isArchived") or metadata.get("isFork"):
+                    result = Result(requested_name, "excluded", "archived or fork")
+                    results.append(result)
+                    print(f"[{result.status}] {result.repository}: {result.detail}", flush=True)
+                    continue
+                if (
+                    not isinstance(full_name, str)
+                    or not isinstance(default_ref, dict)
+                    or not isinstance(default_ref.get("name"), str)
+                ):
+                    raise FleetUpdateError("repository metadata has no usable default branch")
+                repositories.append(Repository(full_name, default_ref["name"]))
+            except FleetUpdateError as exc:
+                failures += 1
+                result = Result(requested_name, "failed", str(exc))
+                results.append(result)
+                print(f"[{result.status}] {result.repository}: {result.detail}", flush=True)
+    else:
+        try:
+            repositories = discover_repositories(args.org, env=env)
+        except FleetUpdateError as exc:
+            print(f"fleet discovery failed: {exc}", file=sys.stderr)
+            return 1
+
+    excluded = {name.casefold() for name in args.exclude}
     with tempfile.TemporaryDirectory(prefix="copier-fleet-") as temporary:
         workspace = Path(temporary)
         for repository in repositories:

@@ -76,19 +76,24 @@ def gh_json(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
 
 
-def discover_repositories(org: str, *, env: dict[str, str]) -> list[Repository]:
-    items = gh_json(
-        [
-            "repo",
-            "list",
-            org,
-            "--limit",
-            "1000",
-            "--json",
-            "nameWithOwner,isArchived,isFork,defaultBranchRef",
-        ],
-        env=env,
-    )
+def discover_repositories(
+    org: str,
+    *,
+    env: dict[str, str],
+    public_only: bool = False,
+) -> list[Repository]:
+    arguments = [
+        "repo",
+        "list",
+        org,
+        "--limit",
+        "1000",
+        "--json",
+        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+    ]
+    if public_only:
+        arguments.extend(["--visibility", "public"])
+    items = gh_json(arguments, env=env)
     if len(items) >= 1000:
         raise FleetUpdateError(
             f"repository discovery reached the 1000-repository safety limit for {org}; "
@@ -352,6 +357,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
     parser.add_argument("--repo", action="append", default=[], help="Process one owner/repository; repeatable.")
     parser.add_argument("--exclude", action="append", default=[], help="Skip one owner/repository; repeatable.")
+    parser.add_argument(
+        "--public-only",
+        action="store_true",
+        help="Limit organization discovery to the public fleet visible to repository-scoped Actions tokens.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -420,7 +430,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"[{result.status}] {result.repository}: {result.detail}", flush=True)
     else:
         try:
-            repositories = discover_repositories(args.org, env=env)
+            repositories = discover_repositories(
+                args.org,
+                env=env,
+                public_only=args.public_only,
+            )
         except FleetUpdateError as exc:
             print(f"fleet discovery failed: {exc}", file=sys.stderr)
             return 1

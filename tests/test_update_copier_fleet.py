@@ -16,6 +16,15 @@ sys.modules[SPEC.name] = fleet
 SPEC.loader.exec_module(fleet)
 
 
+class DiscoveryTests(TestCase):
+    @mock.patch.object(fleet, "gh_json", return_value=[])
+    def test_public_only_discovery_is_explicit(self, gh_json_mock: mock.Mock) -> None:
+        self.assertEqual(fleet.discover_repositories("quokkify", env={}, public_only=True), [])
+        arguments = gh_json_mock.call_args.args[0]
+        self.assertIn("--visibility", arguments)
+        self.assertEqual(arguments[arguments.index("--visibility") + 1], "public")
+
+
 class TemplateSourceTests(TestCase):
     def test_accepts_supported_github_source_forms(self) -> None:
         expected = "quokkify/project-toolkit"

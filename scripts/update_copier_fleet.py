@@ -150,12 +150,19 @@ def normalize_template_source(source: str) -> str | None:
     return None
 
 
-def parse_template_source(raw_answers: str) -> str:
+def parse_answers(raw_answers: str) -> dict[str, Any]:
     try:
         answers = yaml.safe_load(raw_answers)
     except yaml.YAMLError as exc:
         raise FleetUpdateError(f"invalid {ANSWERS_FILE}: {exc}") from exc
-    if not isinstance(answers, dict) or not isinstance(answers.get("_src_path"), str):
+    if not isinstance(answers, dict):
+        raise FleetUpdateError(f"{ANSWERS_FILE} must contain a YAML mapping")
+    return answers
+
+
+def parse_template_source(raw_answers: str) -> str:
+    answers = parse_answers(raw_answers)
+    if not isinstance(answers.get("_src_path"), str):
         raise FleetUpdateError(f"{ANSWERS_FILE} does not contain a string _src_path")
     return answers["_src_path"]
 
@@ -234,6 +241,22 @@ def changed_paths(repository_path: Path) -> list[str]:
     return sorted(set(paths))
 
 
+def restore_answers_format_if_semantically_equal(
+    answers_path: Path,
+    original_text: str,
+) -> None:
+    if answers_path.is_symlink():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
+    if not answers_path.is_file():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
+
+    updated_text = answers_path.read_text(encoding="utf-8")
+    original_answers = parse_answers(original_text)
+    updated_answers = parse_answers(updated_text)
+    if original_answers == updated_answers and original_text != updated_text:
+        answers_path.write_text(original_text, encoding="utf-8")
+
+
 def update_template(
     repository_path: Path,
     *,
@@ -241,6 +264,13 @@ def update_template(
     template_ref: str | None,
     env: dict[str, str],
 ) -> list[str]:
+    answers_path = repository_path / ANSWERS_FILE
+    if answers_path.is_symlink():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
+    if not answers_path.is_file():
+        raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
+    original_answers_text = answers_path.read_text(encoding="utf-8")
+
     command = [
         "copier",
         "update",
@@ -253,6 +283,7 @@ def update_template(
         command.extend(["--vcs-ref", template_ref])
     command.append(".")
     run(command, cwd=repository_path, env=env)
+    restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
     canonicalize_answers_source(repository_path, template_source)
     rejected = sorted(repository_path.rglob("*.rej"))
     if rejected:

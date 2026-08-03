@@ -122,14 +122,48 @@ class TemplateUpdateTests(TestCase):
         run_mock.side_effect = lambda *args, **kwargs: events.append("copier-update")
         canonicalize_mock.side_effect = lambda *args, **kwargs: events.append("canonicalize")
 
-        fleet.update_template(
-            Path("/tmp/repository"),
-            template_source="quokkify/project-toolkit",
-            template_ref="v2.8.1",
-            env={},
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.8.1",
+                env={},
+            )
 
         self.assertEqual(events, ["copier-update", "canonicalize"])
+
+    def test_restores_prettier_formatting_when_answers_are_semantically_equal(self) -> None:
+        original = (
+            "_commit: v2.8.2\n"
+            "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            "renovate_presets:\n"
+            "  - default\n"
+            "  - github-actions\n"
+        )
+        copier_serialized = original.replace("  - ", "- ")
+        with tempfile.TemporaryDirectory() as temporary:
+            answers = Path(temporary) / fleet.ANSWERS_FILE
+            answers.write_text(copier_serialized, encoding="utf-8")
+
+            fleet.restore_answers_format_if_semantically_equal(answers, original)
+
+            self.assertEqual(answers.read_text(encoding="utf-8"), original)
+
+    def test_keeps_copier_answers_when_semantics_changed(self) -> None:
+        original = "_commit: v2.8.1\n"
+        updated = "_commit: v2.8.2\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            answers = Path(temporary) / fleet.ANSWERS_FILE
+            answers.write_text(updated, encoding="utf-8")
+
+            fleet.restore_answers_format_if_semantically_equal(answers, original)
+
+            self.assertEqual(answers.read_text(encoding="utf-8"), updated)
 
 
 class GitStatusTests(TestCase):

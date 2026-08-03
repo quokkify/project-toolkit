@@ -1171,7 +1171,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             f"{scenario}: missing .copier-answers.yml",
         )
         assert_generated_renovate_config(
-            dest / "renovate.json",
+            dest / ".github/renovate.json",
             renovate_extends("quokkify/renovate-presets", expected_presets),
             scenario,
         )
@@ -1258,7 +1258,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "config-only project lost Release Please workflow",
     )
     assert_generated_renovate_config(
-        config_only_dest / "renovate.json",
+        config_only_dest / ".github/renovate.json",
         renovate_extends("quokkify/renovate-presets", ["default", "github-actions"]),
         "config-only",
     )
@@ -1292,8 +1292,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     check(
-        not (no_renovate_dest / "renovate.json").exists(),
-        "renovate=false generated renovate.json",
+        not (no_renovate_dest / ".github/renovate.json").exists(),
+        "renovate=false generated .github/renovate.json",
     )
 
     custom_all_data = tmp_path / "custom-renovate-all.yml"
@@ -1321,7 +1321,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     assert_generated_renovate_config(
-        custom_dest / "renovate.json",
+        custom_dest / ".github/renovate.json",
         renovate_extends("acme/shared-renovate", list(RENOVATE_PRESET_PATHS)),
         "custom-renovate-all",
     )
@@ -1351,7 +1351,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     assert_generated_renovate_config(
-        dotted_repo_dest / "renovate.json",
+        dotted_repo_dest / ".github/renovate.json",
         renovate_extends("octocat/octocat.github.io", ["default"]),
         "custom-renovate-dotted-repo",
     )
@@ -1381,7 +1381,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     assert_generated_renovate_config(
-        custom_selected_dest / "renovate.json",
+        custom_selected_dest / ".github/renovate.json",
         renovate_extends("acme/shared-renovate", ["default", "javascript", "github-actions"]),
         "custom-renovate-selected",
     )

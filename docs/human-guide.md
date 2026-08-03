@@ -85,7 +85,7 @@ Review the PR before merging it. In particular, check:
 
 - `.github/workflows/ci.yml`;
 - `.github/workflows/release.yml`, if enabled;
-- `renovate.json`;
+- `.github/renovate.json`;
 - `.copier-answers.yml`;
 - any Copier conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
 

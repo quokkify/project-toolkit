@@ -4,6 +4,7 @@ set -euo pipefail
 ORG="${ORG:-quokkify}"
 ANSWERS_DIR="${1:?usage: rollout_project_toolkit.sh ANSWERS_DIR}"
 TOOLKIT_REPO="quokkify/project-toolkit"
+TOOLKIT_SOURCE="https://github.com/$TOOLKIT_REPO.git"
 TOOLKIT_REF="${TOOLKIT_REF:?export an exact reviewed tag, for example TOOLKIT_REF=v2.6.0}"
 if [[ ! "$TOOLKIT_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "TOOLKIT_REF must be an exact SemVer tag such as v2.6.0" >&2
@@ -55,7 +56,7 @@ for answers in "${answer_files[@]}"; do
       --defaults \
       --trust
   else
-    copier copy "gh:$TOOLKIT_REPO" "$worktree" \
+    copier copy "$TOOLKIT_SOURCE" "$worktree" \
       --vcs-ref "$TOOLKIT_REF" \
       --data-file "$answers" \
       --data "toolkit_version=$TOOLKIT_REF" \

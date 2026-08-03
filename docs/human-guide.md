@@ -29,7 +29,7 @@ Run:
 
 ```bash
 copier copy \
-  gh:quokkify/project-toolkit \
+  https://github.com/quokkify/project-toolkit.git \
   my-project \
   --vcs-ref "$TOOLKIT_REF" \
   --data "toolkit_version=$TOOLKIT_REF" \

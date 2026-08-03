@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.2](https://github.com/quokkify/project-toolkit/compare/v2.8.1...v2.8.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* harden generated project automation workflows ([#69](https://github.com/quokkify/project-toolkit/issues/69)) ([10000c3](https://github.com/quokkify/project-toolkit/commit/10000c3057166ca7be5b47348acb5fe34d3fb354))
+
 ## [2.8.1](https://github.com/quokkify/project-toolkit/compare/v2.8.0...v2.8.1) (2026-08-03)
 
 

@@ -1246,6 +1246,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "config-only project lost shared template-contract validation",
     )
     config_only_validate = (config_only_dest / ".github/workflows/validate.yml").read_text()
+    check(
+        not config_only_validate.endswith("\n\n"),
+        "config-only validate workflow has a trailing blank line",
+    )
     for workflow_name in ("python-ci.yml", "node-ci.yml", "java-ci.yml", "docker-build.yml"):
         check(
             workflow_name not in config_only_validate,

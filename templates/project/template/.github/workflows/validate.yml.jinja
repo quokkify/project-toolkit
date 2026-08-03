@@ -51,10 +51,10 @@ jobs:
     uses: quokkify/project-toolkit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
     with:
       working-directory: {{ component.path | tojson }}
-{% endfor %}
+{% endfor -%}
 {% if docker %}
   docker:
     uses: quokkify/project-toolkit/.github/workflows/docker-build.yml@{{ toolkit_version }}
     with:
       push: false
-{% endif %}
+{% endif -%}

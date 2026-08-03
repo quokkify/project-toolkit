@@ -3,9 +3,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 import tempfile
-import unittest
 from pathlib import Path
-from unittest import mock
+from unittest import TestCase, main, mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -17,7 +16,7 @@ sys.modules[SPEC.name] = fleet
 SPEC.loader.exec_module(fleet)
 
 
-class TemplateSourceTests(unittest.TestCase):
+class TemplateSourceTests(TestCase):
     def test_accepts_supported_github_source_forms(self) -> None:
         expected = "quokkify/project-toolkit"
         for source in (
@@ -43,7 +42,7 @@ class TemplateSourceTests(unittest.TestCase):
             fleet.parse_template_source("project_name: example\n")
 
 
-class GitStatusTests(unittest.TestCase):
+class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")
     def test_parses_modified_untracked_and_renamed_paths(self, run_mock: mock.Mock) -> None:
         run_mock.return_value.stdout = (
@@ -57,7 +56,7 @@ class GitStatusTests(unittest.TestCase):
         )
 
 
-class RepositoryProcessingTests(unittest.TestCase):
+class RepositoryProcessingTests(TestCase):
     @mock.patch.object(fleet, "fetch_answers", return_value=None)
     def test_skips_repository_without_answers(self, _: mock.Mock) -> None:
         result = fleet.process_repository(
@@ -117,11 +116,11 @@ class RepositoryProcessingTests(unittest.TestCase):
         self.assertEqual(update_mock.call_args.kwargs["template_ref"], "v3.0.0")
 
 
-class CommandLineTests(unittest.TestCase):
+class CommandLineTests(TestCase):
     @mock.patch.dict("os.environ", {"GH_TOKEN": "", "GITHUB_TOKEN": ""}, clear=False)
     def test_write_mode_requires_dedicated_fleet_token(self) -> None:
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

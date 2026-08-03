@@ -1,0 +1,72 @@
+name: Audit Copier-managed repositories
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Optional owner/repository to audit instead of the whole organization.
+        type: string
+        required: false
+      template-ref:
+        description: Optional project-toolkit ref; empty uses the latest released tag.
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copier-fleet-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Discover and audit Copier consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out project-toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and Copier
+        uses: ./actions/setup-python
+        with:
+          python-version: "3.14"
+          package-manager: pip
+          cache-dependencies: "false"
+          install-command: python -m pip install copier==9.17.0
+
+      - name: Audit Copier fleet
+        env:
+          REQUESTED_REPOSITORY: ${{ inputs.repository }}
+          TEMPLATE_REF: ${{ inputs.template-ref }}
+        run: |
+          set -euo pipefail
+          args=(--org quokkify --dry-run --public-only)
+          if [[ -n "$REQUESTED_REPOSITORY" ]]; then
+            args+=(--repo "$REQUESTED_REPOSITORY")
+          fi
+          if [[ -n "$TEMPLATE_REF" ]]; then
+            args+=(--template-ref "$TEMPLATE_REF")
+          fi
+          output="$RUNNER_TEMP/copier-fleet-audit.txt"
+          set +e
+          python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Copier fleet audit"
+            echo
+            echo '```text'
+            while IFS= read -r line; do
+              printf '%s\n' "$line"
+            done < "$output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

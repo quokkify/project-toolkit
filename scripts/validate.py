@@ -1142,11 +1142,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     run(["git", "add", "."], template_source)
     run(["git", "commit", "--no-verify", "-qm", "candidate template"], template_source)
     expected_scenario_presets = {
-        "python": ["default", "python"],
-        "node": ["default", "javascript"],
-        "java": ["default", "java"],
-        "polyglot": ["default", "python", "javascript", "java"],
-        "docker": ["default", "python", "docker"],
+        "python": ["default", "github-actions", "python"],
+        "node": ["default", "github-actions", "javascript"],
+        "java": ["default", "github-actions", "java"],
+        "polyglot": ["default", "github-actions", "python", "javascript", "java"],
+        "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
         dest = tmp_path / scenario
@@ -1164,7 +1164,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 str(dest),
             ]
         )
-        run([actionlint, str(dest / ".github/workflows/ci.yml")])
+        for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
+            run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
         check(
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",
@@ -1175,7 +1176,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             scenario,
         )
         if scenario == "polyglot":
-            generated = (dest / ".github/workflows/ci.yml").read_text()
+            generated = (dest / ".github/workflows/validate.yml").read_text()
             for name in (
                 "python-ci.yml",
                 "node-ci.yml",
@@ -1206,7 +1207,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "copier update did not persist renovate_config_repository",
             )
             check(
-                answers.get("renovate_presets") == ["default", "python"],
+                answers.get("renovate_presets") == ["default", "github-actions", "python"],
                 "copier update did not persist inferred renovate_presets",
             )
 
@@ -1241,9 +1242,17 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     check(
-        not (config_only_dest / ".github/workflows/ci.yml").exists(),
-        "config-only project unexpectedly generated toolkit CI",
+        (config_only_dest / ".github/workflows/validate.yml").exists(),
+        "config-only project lost shared template-contract validation",
     )
+    config_only_validate = (config_only_dest / ".github/workflows/validate.yml").read_text()
+    for workflow_name in ("python-ci.yml", "node-ci.yml", "java-ci.yml", "docker-build.yml"):
+        check(
+            workflow_name not in config_only_validate,
+            f"config-only project unexpectedly generated {workflow_name}",
+        )
+    for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
+        run([actionlint, str(config_only_dest / f".github/workflows/{workflow_name}")])
     check(
         (config_only_dest / ".github/workflows/release.yml").exists(),
         "config-only project lost Release Please workflow",

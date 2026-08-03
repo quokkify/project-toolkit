@@ -1,6 +1,8 @@
 name: Audit Copier-managed repositories
 
 on:
+  schedule:
+    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
       repository:
@@ -53,4 +55,18 @@ jobs:
           if [[ -n "$TEMPLATE_REF" ]]; then
             args+=(--template-ref "$TEMPLATE_REF")
           fi
-          python scripts/update_copier_fleet.py "${args[@]}"
+          output="$RUNNER_TEMP/copier-fleet-audit.txt"
+          set +e
+          python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Copier fleet audit"
+            echo
+            echo '```text'
+            while IFS= read -r line; do
+              printf '%s\n' "$line"
+            done < "$output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

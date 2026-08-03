@@ -202,6 +202,31 @@ class CommandLineTests(TestCase):
         self.assertEqual(fleet.main(["--dry-run"]), 0)
         self.assertEqual(discover_mock.call_args.kwargs["env"]["GH_TOKEN"], "repository-scoped-token")
 
+    @mock.patch.object(
+        fleet,
+        "process_repository",
+        return_value=fleet.Result("quokkify/example", "would-update", "README.md"),
+    )
+    @mock.patch.object(
+        fleet,
+        "discover_repositories",
+        return_value=[fleet.Repository("quokkify/example", "main")],
+    )
+    @mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.dict(
+        "os.environ",
+        {"GITHUB_TOKEN": "repository-scoped-token", "GH_TOKEN": ""},
+        clear=False,
+    )
+    def test_dry_run_returns_distinct_status_when_drift_exists(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        process_mock: mock.Mock,
+    ) -> None:
+        self.assertEqual(fleet.main(["--dry-run"]), 3)
+        process_mock.assert_called_once()
+
     @mock.patch.dict(
         "os.environ",
         {"GH_TOKEN": "", "GITHUB_TOKEN": ""},

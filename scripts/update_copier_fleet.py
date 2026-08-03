@@ -453,7 +453,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
     print("summary: " + ", ".join(f"{status}={count}" for status, count in sorted(counts.items())))
-    return 1 if failures else 0
+    if failures:
+        return 1
+    if args.dry_run and counts.get("would-update", 0):
+        print("template drift detected; run write mode from a CODEOWNER session", file=sys.stderr)
+        return 3
+    return 0
 
 
 if __name__ == "__main__":

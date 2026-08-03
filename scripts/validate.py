@@ -1257,6 +1257,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
     for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
         run([actionlint, str(config_only_dest / f".github/workflows/{workflow_name}")])
+    config_only_gitleaks = (config_only_dest / ".github/workflows/gitleaks.yml").read_text()
+    check(
+        'install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"' in config_only_gitleaks,
+        "generated Gitleaks workflow installs outside its extraction directory",
+    )
     check(
         (config_only_dest / ".github/workflows/release.yml").exists(),
         "config-only project lost Release Please workflow",

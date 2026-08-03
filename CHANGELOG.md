@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.1](https://github.com/quokkify/project-toolkit/compare/v2.8.0...v2.8.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* exclude non-consumer repositories from Copier audit ([#66](https://github.com/quokkify/project-toolkit/issues/66)) ([123167f](https://github.com/quokkify/project-toolkit/commit/123167fede66543fe4ca91d206e60a8bf3aa34ca))
+
 ## [2.8.0](https://github.com/quokkify/project-toolkit/compare/v2.7.2...v2.8.0) (2026-08-03)
 
 

@@ -1435,6 +1435,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_validate.endswith("\n\n"),
             f"{scenario}: validate workflow has a trailing blank line",
         )
+        generated_readme = (dest / "README.md").read_text()
+        check(
+            not generated_readme.endswith("\n\n"),
+            f"{scenario}: README has a trailing blank line that blocks Copier rollout",
+        )
         check(
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",

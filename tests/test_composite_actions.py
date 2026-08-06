@@ -711,6 +711,38 @@ class ComposeActionTests(unittest.TestCase):
 class AllureReportActionTests(unittest.TestCase):
     def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
         data = action("allure-report")
+        self.assertEqual(
+            set(data["inputs"]),
+            {
+                "github-token",
+                "results-directory",
+                "report-directory",
+                "config-file",
+                "categories-file",
+                "allure-version",
+                "module-environment-label",
+                "pr-number",
+                "pages-url",
+                "fork-pr",
+                "source-run-id",
+                "comment-file",
+                "comment-marker",
+                "comment-author-login",
+                "pyramid-enabled",
+                "pyramid-markdown-file",
+                "pyramid-json-file",
+                "pyramid-gates-json-file",
+                "pyramid-source-run-id",
+                "pyramid-head-sha",
+                "pyramid-policy-path",
+                "pyramid-artifact-name",
+                "pyramid-retention-days",
+                "publish-pages",
+                "pages-destination-directory",
+                "pages-branch",
+                "pages-retention-count",
+            },
+        )
         self.assertTrue(data["inputs"]["github-token"]["required"])
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
@@ -775,6 +807,34 @@ class AllureReportActionTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(match.group("currentDigest"), "07563998d9d52ef39b8375b360d02910006d4b3d")
         self.assertEqual(match.group("currentValue"), "v0.2.0")
+
+
+class ReusableTestArtifactContractTests(unittest.TestCase):
+    def test_language_workflows_share_opt_in_artifact_contract(self) -> None:
+        defaults = {
+            "python": "python-test-artifacts",
+            "node": "node-test-artifacts",
+            "java": "java-test-artifacts",
+        }
+        for language, default_name in defaults.items():
+            with self.subTest(language=language):
+                workflow = yaml.safe_load(
+                    (ROOT / f".github/workflows/{language}-ci.yml").read_text()
+                )
+                triggers = workflow.get("on", workflow.get(True))
+                inputs = triggers["workflow_call"]["inputs"]
+                self.assertEqual(inputs["upload-test-artifacts"]["default"], False)
+                self.assertEqual(inputs["test-artifact-path"]["default"], "test-results")
+                self.assertEqual(inputs["test-artifact-name"]["default"], default_name)
+                steps = workflow["jobs"]["ci"]["steps"]
+                upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
+                self.assertEqual(
+                    upload["if"],
+                    "${{ always() && inputs.upload-test-artifacts }}",
+                )
+                self.assertEqual(upload["with"]["name"], "${{ inputs.test-artifact-name }}")
+                self.assertIn("inputs.test-artifact-path", upload["with"]["path"])
+                self.assertEqual(upload["with"]["if-no-files-found"], "error")
 
 
 class DeployGhPagesSubdirTests(unittest.TestCase):

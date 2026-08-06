@@ -49,6 +49,18 @@ on:
       timeout-minutes:
         type: number
         default: 30
+      upload-test-artifacts:
+        description: Upload test artifacts. Disabled unless explicitly enabled.
+        type: boolean
+        default: false
+      test-artifact-path:
+        description: Path or glob to upload when upload-test-artifacts is enabled.
+        type: string
+        default: test-results
+      test-artifact-name:
+        description: Artifact name used when upload-test-artifacts is enabled.
+        type: string
+        default: java-test-artifacts
 
 permissions:
   contents: read
@@ -133,3 +145,10 @@ jobs:
         env:
           COMMAND: ${{ steps.commands.outputs.build }}
         run: bash -euo pipefail -c "$COMMAND"
+      - name: Upload test artifacts
+        if: ${{ always() && inputs.upload-test-artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.test-artifact-name }}
+          path: ${{ format('{0}/{1}', inputs.working-directory, inputs.test-artifact-path) }}
+          if-no-files-found: error

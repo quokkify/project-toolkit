@@ -10,7 +10,7 @@ project-toolkit keeps CI implementation in one repository while letting each con
 
 ## What is included?
 
-- **Composite actions** for language setup, Gradle validation, Compose readiness, and JUnit summaries.
+- **Composite actions** for language setup, Gradle validation, Compose readiness, JUnit summaries, and Allure reports.
 - **Copier templates** that create and later update only the small project-local files.
 - **Renovate presets and rules** that keep workflow references, action pins, validation tools, and this documentation current.
 
@@ -46,7 +46,7 @@ jobs:
       test-command: pytest
 ```
 
-Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/node-ci.yml), and [`Java`](examples/java-ci.yml) examples, or compose all three with path filters in the [`polyglot example`](examples/polyglot-ci.yml). Docker builds do not push by default. For action-level usage, see [`examples/setup-actions.yml`](examples/setup-actions.yml).
+Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/node-ci.yml), and [`Java`](examples/java-ci.yml) examples, or compose all three with path filters in the [`polyglot example`](examples/polyglot-ci.yml). Docker builds do not push by default. Copier can opt generated projects into artifact-backed Allure 3 pull-request reports without enabling public Pages. For action-level usage, see [`examples/setup-actions.yml`](examples/setup-actions.yml).
 
 ## Documentation
 

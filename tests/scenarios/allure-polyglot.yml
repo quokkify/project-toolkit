@@ -1,0 +1,17 @@
+project_name: fixture-allure-polyglot
+toolkit_version: v1.0.0
+components:
+  - type: python
+    path: backend
+    allure_results_path: reports/allure-results
+  - type: node
+    path: frontend
+  - type: java
+    path: worker
+    allure_results_path: build/allure-results
+docker: false
+allure_report: true
+allure_publish_pages: false
+release_please: false
+renovate: true
+renovate_config_repository: quokkify/renovate-presets

@@ -213,6 +213,7 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(inventory.baseline, "3/3")
         self.assertEqual(inventory.missing_baseline, ())
         self.assertEqual(inventory.docker, "enabled")
+        self.assertEqual(inventory.allure_report, "unknown")
         self.assertEqual(inventory.release_please, "enabled")
         self.assertEqual(inventory.renovate, "custom")
         self.assertFalse(fleet.inventory_has_mismatch(inventory))
@@ -228,9 +229,45 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(inventory.commit, "unknown")
         self.assertEqual(inventory.components, ("none",))
         self.assertEqual(inventory.docker, "unknown")
+        self.assertEqual(inventory.allure_report, "unknown")
         self.assertEqual(inventory.release_please, "missing")
         self.assertEqual(inventory.renovate, "disabled")
         self.assertTrue(fleet.inventory_has_mismatch(inventory))
+
+    def test_allure_requires_generated_workflow_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / fleet.FEATURE_PATHS["allure_report"]
+            config = repository / fleet.ALLURE_CONFIG_PATH
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: Allure report\n", encoding="utf-8")
+
+            incomplete = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n",
+                repository,
+            )
+            custom = fleet.inventory_from_answers(
+                "components: []\nallure_report: false\n",
+                repository,
+            )
+            config.parent.mkdir(parents=True)
+            config.write_text("export default {};\n", encoding="utf-8")
+            still_incomplete = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n",
+                repository,
+            )
+            extractor = repository / fleet.ALLURE_EXTRACTOR_PATH
+            extractor.write_text("# trusted extractor\n", encoding="utf-8")
+            enabled = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n",
+                repository,
+            )
+
+        self.assertEqual(incomplete.allure_report, "missing")
+        self.assertTrue(fleet.inventory_has_mismatch(incomplete))
+        self.assertEqual(custom.allure_report, "custom")
+        self.assertEqual(still_incomplete.allure_report, "missing")
+        self.assertEqual(enabled.allure_report, "enabled")
 
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -286,6 +323,7 @@ class TemplateInventoryTests(TestCase):
             baseline="3/3",
             missing_baseline=(),
             docker="disabled",
+            allure_report="enabled",
             release_please="enabled",
             renovate="missing",
         )
@@ -305,9 +343,10 @@ class TemplateInventoryTests(TestCase):
         self.assertIn("renovate=missing", console)
         self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
         self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
-        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["schema_version"], 2)
         self.assertEqual(report["configuration_mismatches"], 1)
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
+        self.assertEqual(report["repositories"][0]["template"]["allure_report"], "enabled")
         self.assertEqual(report["repositories"][0]["template"]["target_commit"], "v2.9.0")
 
     def test_report_renderers_escape_control_characters_and_backslash_pipes(self) -> None:
@@ -318,6 +357,7 @@ class TemplateInventoryTests(TestCase):
             baseline="3/3",
             missing_baseline=(),
             docker="disabled",
+            allure_report="disabled",
             release_please="disabled",
             renovate="enabled",
         )
@@ -625,6 +665,7 @@ class CommandLineTests(TestCase):
             baseline="3/3",
             missing_baseline=(),
             docker="disabled",
+            allure_report="disabled",
             release_please="disabled",
             renovate="enabled",
         )

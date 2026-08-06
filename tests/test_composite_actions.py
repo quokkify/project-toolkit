@@ -721,6 +721,7 @@ class AllureReportActionTests(unittest.TestCase):
                 "categories-file",
                 "allure-version",
                 "module-environment-label",
+                "source-artifacts-directory",
                 "pr-number",
                 "pages-url",
                 "fork-pr",
@@ -747,6 +748,7 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
         self.assertEqual(data["inputs"]["module-environment-label"]["default"], "module")
+        self.assertEqual(data["inputs"]["source-artifacts-directory"]["default"], "auto")
         self.assertEqual(
             data["inputs"]["pyramid-policy-path"]["default"],
             "docs/testing/test-pyramid.md",
@@ -777,7 +779,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@07563998d9d52ef39b8375b360d02910006d4b3d # v0.2.0",
+            "uses: quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa # v0.2.1",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -805,8 +807,8 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "07563998d9d52ef39b8375b360d02910006d4b3d")
-        self.assertEqual(match.group("currentValue"), "v0.2.0")
+        self.assertEqual(match.group("currentDigest"), "73c66b277ec7c73cdec2ee81b3b72410272b66fa")
+        self.assertEqual(match.group("currentValue"), "v0.2.1")
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

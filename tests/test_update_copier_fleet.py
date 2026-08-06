@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +15,15 @@ assert SPEC and SPEC.loader
 fleet = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = fleet
 SPEC.loader.exec_module(fleet)
+
+
+def cloned_answers(raw_answers: str):
+    def materialize(_: object, destination: Path, *, env: dict[str, str]) -> None:
+        del env
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / fleet.ANSWERS_FILE).write_text(raw_answers, encoding="utf-8")
+
+    return materialize
 
 
 class DiscoveryTests(TestCase):
@@ -166,6 +176,168 @@ class TemplateUpdateTests(TestCase):
             self.assertEqual(answers.read_text(encoding="utf-8"), updated)
 
 
+class TemplateInventoryTests(TestCase):
+    def write_baseline(self, repository: Path) -> None:
+        for relative_path in fleet.BASELINE_PATHS:
+            path = repository / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("generated\n", encoding="utf-8")
+
+    def test_reports_configured_features_and_materialized_outputs(self) -> None:
+        raw_answers = (
+            "_commit: v2.8.2\n"
+            "components:\n"
+            "  - type: python\n"
+            "    path: backend\n"
+            "  - type: node\n"
+            "    path: frontend\n"
+            "docker: true\n"
+            "release_please: true\n"
+            "renovate: false\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            self.write_baseline(repository)
+            release = repository / fleet.FEATURE_PATHS["release_please"]
+            release.parent.mkdir(parents=True, exist_ok=True)
+            release.write_text("generated\n", encoding="utf-8")
+            renovate = repository / fleet.FEATURE_PATHS["renovate"]
+            renovate.parent.mkdir(parents=True, exist_ok=True)
+            renovate.write_text("custom\n", encoding="utf-8")
+
+            inventory = fleet.inventory_from_answers(raw_answers, repository)
+
+        self.assertEqual(inventory.commit, "v2.8.2")
+        self.assertIsNone(inventory.target_commit)
+        self.assertEqual(inventory.components, ("python:backend", "node:frontend"))
+        self.assertEqual(inventory.baseline, "3/3")
+        self.assertEqual(inventory.missing_baseline, ())
+        self.assertEqual(inventory.docker, "enabled")
+        self.assertEqual(inventory.release_please, "enabled")
+        self.assertEqual(inventory.renovate, "custom")
+        self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_distinguishes_missing_disabled_and_unknown_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            inventory = fleet.inventory_from_answers(
+                "components: []\nrelease_please: true\nrenovate: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.commit, "unknown")
+        self.assertEqual(inventory.components, ("none",))
+        self.assertEqual(inventory.docker, "unknown")
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertEqual(inventory.renovate, "disabled")
+        self.assertTrue(fleet.inventory_has_mismatch(inventory))
+
+    def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            target = repository / "custom.yml"
+            target.write_text("custom\n", encoding="utf-8")
+            baseline = repository / fleet.BASELINE_PATHS[0]
+            baseline.parent.mkdir(parents=True, exist_ok=True)
+            baseline.symlink_to(target)
+            release = repository / fleet.FEATURE_PATHS["release_please"]
+            release.parent.mkdir(parents=True, exist_ok=True)
+            release.symlink_to(target)
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nrelease_please: true\nrenovate: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertIn(".github/workflows/validate.yml", inventory.missing_baseline)
+
+    def test_symlinked_parent_directory_does_not_materialize_outputs(self) -> None:
+        raw_answers = (
+            "_commit: v2.8.2\n"
+            "_src_path: gh:quokkify/project-toolkit\n"
+            "release_please: true\n"
+            "renovate: true\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            outside = Path(temporary) / "outside"
+            (outside / "workflows").mkdir(parents=True)
+            (outside / "workflows" / "validate.yml").write_text("name: Validate\n")
+            (outside / "workflows" / "gitleaks.yml").write_text("name: Gitleaks\n")
+            (outside / "workflows" / "codeql.yml").write_text("name: CodeQL\n")
+            (outside / "workflows" / "release.yml").write_text("name: Release\n")
+            (outside / "renovate.json").write_text("{}\n")
+            repository.mkdir()
+            (repository / ".github").symlink_to(outside, target_is_directory=True)
+
+            inventory = fleet.inventory_from_answers(raw_answers, repository)
+
+        self.assertEqual(inventory.baseline, "0/3")
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertEqual(inventory.renovate, "missing")
+        self.assertEqual(set(inventory.missing_baseline), set(fleet.BASELINE_PATHS))
+
+    def test_console_markdown_and_json_reports_share_the_inventory(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2",
+            target_commit="v2.9.0",
+            components=("python:.",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="enabled",
+            renovate="missing",
+        )
+        result = fleet.Result(
+            "quokkify/example",
+            "would-update",
+            ".github/renovate.json",
+            inventory,
+        )
+        counts = {"would-update": 1}
+
+        console = "\n".join(fleet.console_lines(result))
+        markdown = fleet.markdown_report([result], counts)
+        report = fleet.json.loads(fleet.json_report([result], counts))
+
+        self.assertIn("template=v2.8.2->v2.9.0 components=python:.", console)
+        self.assertIn("renovate=missing", console)
+        self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
+        self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["configuration_mismatches"], 1)
+        self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
+        self.assertEqual(report["repositories"][0]["template"]["target_commit"], "v2.9.0")
+
+    def test_report_renderers_escape_control_characters_and_backslash_pipes(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2\r",
+            target_commit=None,
+            components=("python:C:\\repo\\|row\r\x1b\u0085\u009b",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="disabled",
+            renovate="enabled",
+        )
+        result = fleet.Result("quokkify/example", "up-to-date", inventory=inventory)
+
+        console = "\n".join(fleet.console_lines(result))
+        markdown = fleet.markdown_report([result], {"up-to-date": 1})
+
+        for rendered in (console, markdown):
+            self.assertNotIn("\r", rendered)
+            self.assertNotIn("\x1b", rendered)
+            self.assertIn("\\x0d", rendered)
+            self.assertIn("\\x1b", rendered)
+            self.assertNotIn("\u0085", rendered)
+            self.assertNotIn("\u009b", rendered)
+            self.assertIn("\\x85", rendered)
+            self.assertIn("\\x9b", rendered)
+        self.assertEqual(len([line for line in markdown.splitlines() if line.startswith("|")]), 3)
+
+
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")
     def test_parses_modified_untracked_and_renamed_paths(self, run_mock: mock.Mock) -> None:
@@ -211,6 +383,71 @@ class RepositoryProcessingTests(TestCase):
         )
         self.assertEqual(result.status, "foreign-template")
 
+    @mock.patch.object(fleet, "update_template")
+    @mock.patch.object(
+        fleet,
+        "clone_repository",
+        side_effect=cloned_answers("_src_path: gh:someone/other-template\n"),
+    )
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_revalidates_template_source_from_cloned_revision(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        update_mock: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "changed to a different template"):
+                fleet.process_repository(
+                    fleet.Repository("quokkify/example", "main"),
+                    expected_template="quokkify/project-toolkit",
+                    branch=fleet.DEFAULT_BRANCH,
+                    dry_run=True,
+                    template_ref=None,
+                    env={},
+                    workspace=Path(temporary),
+                )
+        update_mock.assert_not_called()
+
+    @mock.patch.object(fleet, "update_template", side_effect=fleet.FleetUpdateError("conflict"))
+    @mock.patch.object(
+        fleet,
+        "clone_repository",
+        side_effect=cloned_answers(
+            "_commit: v2.8.2\n"
+            "_src_path: gh:quokkify/project-toolkit\n"
+            "components: []\n"
+        ),
+    )
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_preserves_inventory_when_copier_update_fails(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        ___: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(fleet.RepositoryProcessError, "conflict") as raised:
+                fleet.process_repository(
+                    fleet.Repository("quokkify/example", "main"),
+                    expected_template="quokkify/project-toolkit",
+                    branch=fleet.DEFAULT_BRANCH,
+                    dry_run=True,
+                    template_ref=None,
+                    env={},
+                    workspace=Path(temporary),
+                )
+        self.assertEqual(raised.exception.inventory.commit, "v2.8.2")
+        self.assertEqual(raised.exception.inventory.components, ("none",))
+
     @mock.patch.object(fleet, "update_template", return_value=["renovate.json", "validate.yml"])
     @mock.patch.object(fleet, "clone_repository")
     @mock.patch.object(
@@ -224,6 +461,9 @@ class RepositoryProcessingTests(TestCase):
         clone_mock: mock.Mock,
         update_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
@@ -259,6 +499,9 @@ class RepositoryProcessingTests(TestCase):
         push_mock: mock.Mock,
         pull_request_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
@@ -293,6 +536,9 @@ class RepositoryProcessingTests(TestCase):
         push_mock: mock.Mock,
         pull_request_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
@@ -353,6 +599,44 @@ class CommandLineTests(TestCase):
     ) -> None:
         self.assertEqual(fleet.main(["--dry-run"]), 3)
         process_mock.assert_called_once()
+
+    @mock.patch.object(fleet, "process_repository")
+    @mock.patch.object(
+        fleet,
+        "discover_repositories",
+        return_value=[fleet.Repository("quokkify/example", "main")],
+    )
+    @mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.dict(
+        "os.environ",
+        {"GITHUB_TOKEN": "repository-scoped-token", "GH_TOKEN": ""},
+        clear=False,
+    )
+    def test_failed_repository_keeps_inventory_in_json_report(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        process_mock: mock.Mock,
+    ) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2",
+            target_commit=None,
+            components=("none",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="disabled",
+            renovate="enabled",
+        )
+        process_mock.side_effect = fleet.RepositoryProcessError("conflict", inventory)
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "audit.json"
+            status = fleet.main(["--dry-run", "--json-report", str(report_path)])
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 1)
+        self.assertEqual(report["repositories"][0]["status"], "failed")
+        self.assertEqual(report["repositories"][0]["template"]["commit"], "v2.8.2")
 
     @mock.patch.dict(
         "os.environ",

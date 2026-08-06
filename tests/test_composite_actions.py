@@ -714,6 +714,7 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertTrue(data["inputs"]["github-token"]["required"])
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
+        self.assertEqual(data["inputs"]["module-environment-label"]["default"], "module")
         self.assertEqual(
             data["inputs"]["pyramid-policy-path"]["default"],
             "docs/testing/test-pyramid.md",
@@ -743,7 +744,37 @@ class AllureReportActionTests(unittest.TestCase):
             text,
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
+        self.assertIn(
+            "uses: quokkify/allure-report-action@07563998d9d52ef39b8375b360d02910006d4b3d # v0.2.0",
+            text,
+        )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
+
+    def test_renovate_manages_the_executable_release_pin(self) -> None:
+        config = yaml.safe_load((ROOT / ".github/renovate.json").read_text())
+        manager = next(
+            item
+            for item in config["customManagers"]
+            if item.get("depNameTemplate") == "quokkify/allure-report-action"
+        )
+        self.assertIn("/^actions/allure-report/action\\.yml$/", manager["managerFilePatterns"])
+        action_text = (ROOT / "actions/allure-report/action.yml").read_text()
+        matches = [
+            re.search(
+                pattern.replace("(?<currentDigest>", "(?P<currentDigest>").replace(
+                    "(?<currentValue>", "(?P<currentValue>"
+                ),
+                action_text,
+            )
+            for pattern in manager["matchStrings"]
+            if "currentDigest" in pattern
+        ]
+        self.assertEqual(len(matches), 1)
+        match = matches[0]
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(match.group("currentDigest"), "07563998d9d52ef39b8375b360d02910006d4b3d")
+        self.assertEqual(match.group("currentValue"), "v0.2.0")
 
 
 class DeployGhPagesSubdirTests(unittest.TestCase):

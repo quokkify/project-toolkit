@@ -738,6 +738,11 @@ RENOVATE_PRESET_PATHS = {
     "docker": "presets/docker/default",
     "github-actions": "presets/github-actions/default",
 }
+RENOVATE_COPIER_RULE = {
+    "description": "Copier updates are managed atomically by project-toolkit fleet automation",
+    "matchManagers": ["copier"],
+    "enabled": False,
+}
 
 
 def renovate_extends(repository: str, presets: list[str]) -> list[str]:
@@ -756,6 +761,10 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
     check(
         data.get("extends") == expected_extends,
         f"{label}: renovate extends mismatch: {data.get('extends')!r}",
+    )
+    check(
+        data.get("packageRules") == [RENOVATE_COPIER_RULE],
+        f"{label}: Renovate must disable partial Copier updates",
     )
 
 

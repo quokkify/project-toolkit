@@ -12,5 +12,12 @@
 {%- endfor -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": {{ renovate_extends | to_json }}
+  "extends": {{ renovate_extends | to_json }},
+  "packageRules": [
+    {
+      "description": "Copier updates are managed atomically by project-toolkit fleet automation",
+      "matchManagers": ["copier"],
+      "enabled": false
+    }
+  ]
 }

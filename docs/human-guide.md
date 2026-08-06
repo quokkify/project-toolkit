@@ -89,7 +89,7 @@ Review the PR before merging it. In particular, check:
 - `.copier-answers.yml`;
 - any Copier conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
 
-Copier updates generated files. Renovate has a different job: it updates released workflow/action references. Keep both enabled; they are complementary.
+Copier updates generated files. Renovate has a different job: it updates released workflow/action references. Keep Renovate enabled, but leave its built-in `copier` manager disabled; the fleet updater must change `.copier-answers.yml` and generated files atomically.
 
 ## 3. Add a new template capability
 

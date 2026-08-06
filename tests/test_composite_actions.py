@@ -711,6 +711,37 @@ class ComposeActionTests(unittest.TestCase):
 class AllureReportActionTests(unittest.TestCase):
     def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
         data = action("allure-report")
+        self.assertEqual(
+            set(data["inputs"]),
+            {
+                "github-token",
+                "results-directory",
+                "report-directory",
+                "config-file",
+                "categories-file",
+                "allure-version",
+                "pr-number",
+                "pages-url",
+                "fork-pr",
+                "source-run-id",
+                "comment-file",
+                "comment-marker",
+                "comment-author-login",
+                "pyramid-enabled",
+                "pyramid-markdown-file",
+                "pyramid-json-file",
+                "pyramid-gates-json-file",
+                "pyramid-source-run-id",
+                "pyramid-head-sha",
+                "pyramid-policy-path",
+                "pyramid-artifact-name",
+                "pyramid-retention-days",
+                "publish-pages",
+                "pages-destination-directory",
+                "pages-branch",
+                "pages-retention-count",
+            },
+        )
         self.assertTrue(data["inputs"]["github-token"]["required"])
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")

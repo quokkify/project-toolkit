@@ -8,7 +8,7 @@
 } -%}
 {%- set renovate_extends = [] -%}
 {%- for renovate_preset in renovate_presets -%}
-{%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset]) -%}
+{%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset] ~ '#' ~ renovate_config_ref) -%}
 {%- endfor -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",

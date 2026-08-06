@@ -146,6 +146,7 @@ docker: false
 release_please: true
 renovate: true
 renovate_config_repository: quokkify/renovate-presets
+renovate_config_ref: v1.0.1
 renovate_presets:
   - default
   - python

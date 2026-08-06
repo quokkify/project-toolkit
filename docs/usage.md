@@ -97,11 +97,11 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 
 ## Renovate
 
-New Copier-generated projects extend selected presets from `quokkify/renovate-presets` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
+New Copier-generated projects extend selected presets from `quokkify/renovate-presets` at the exact released `renovate_config_ref` tag (`v1.0.1` by default). The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
 
 Generated Renovate configuration disables the built-in `copier` manager so fleet automation remains the single Copier rollout owner. The fleet updater applies the template, restores canonical answer-file formatting, verifies duplicated version answers and generated references, and opens a dedicated reviewable PR. Renovate remains responsible for released workflow, action, and ordinary package references.
 
-The bundled `github>quokkify/project-toolkit//renovate/default.json` preset remains available for toolkit-specific workflow reference updates. New generated projects intentionally follow the shared preset repository's default branch unless the generated `.github/renovate.json` is manually pinned to a tag or commit later.
+The bundled `github>quokkify/project-toolkit//renovate/default.json` preset remains available for toolkit-specific workflow reference updates. Generated projects pin shared presets using Renovate's `github>owner/repository//path#tag` syntax so a preset change reaches consumers only after a reviewed release and toolkit rollout.
 
 The repository also manages versions that are easy to miss with Renovate's built-in managers:
 

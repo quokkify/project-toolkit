@@ -78,13 +78,15 @@
     },
     {
       "customType": "regex",
-      "description": "Keep documentation aligned with the pinned Allure report action.",
+      "description": "Keep the executable Allure pin and documentation aligned with the standalone release.",
       "managerFilePatterns": [
+        "/^actions/allure-report/action\\.yml$/",
         "/^actions/README\\.md$/",
         "/^docs/usage\\.md$/"
       ],
       "matchStrings": [
-        "(?:quokkify/)?allure-report-action(?:`)?(?:\\]\\([^)]*\\))?(?:@|\\s+)(?:\\s*`)?(?<currentValue>v\\d+\\.\\d+\\.\\d+)(?:`)?"
+        "(?:quokkify/)?allure-report-action(?:`)?(?:\\]\\([^)]*\\))?(?:@|\\s+)(?:\\s*`)?(?<currentValue>v\\d+\\.\\d+\\.\\d+)(?:`)?",
+        "uses:\\s*quokkify/allure-report-action@(?<currentDigest>[0-9a-f]{40})\\s+#\\s+(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
       "depNameTemplate": "quokkify/allure-report-action",
       "datasourceTemplate": "github-tags",

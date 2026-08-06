@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.1](https://github.com/quokkify/project-toolkit/compare/v2.10.0...v2.10.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **allure:** update report action to v0.2.1 ([#91](https://github.com/quokkify/project-toolkit/issues/91)) ([9e0c1a6](https://github.com/quokkify/project-toolkit/commit/9e0c1a62551b22b8a8b161a17d9174f7d801b3d2))
+
 ## [2.10.0](https://github.com/quokkify/project-toolkit/compare/v2.9.1...v2.10.0) (2026-08-06)
 
 

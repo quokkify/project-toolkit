@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.0](https://github.com/quokkify/project-toolkit/compare/v2.9.1...v2.10.0) (2026-08-06)
+
+
+### Features
+
+* add Copier Allure reporting to project template ([#84](https://github.com/quokkify/project-toolkit/issues/84)) ([e3e384d](https://github.com/quokkify/project-toolkit/commit/e3e384db947cbead8b79c4219d95f25bbac81a5c))
+
 ## [2.9.1](https://github.com/quokkify/project-toolkit/compare/v2.9.0...v2.9.1) (2026-08-06)
 
 

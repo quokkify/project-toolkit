@@ -1,0 +1,14 @@
+export default {
+  name: {{ project_name | tojson }},
+  output: "./allure-report",
+  plugins: {
+    awesome: {
+      options: {
+        reportName: {{ (project_name ~ " test report") | tojson }},
+        singleFile: false,
+        reportLanguage: "en",
+        groupBy: ["epic", "feature", "story"],
+      },
+    },
+  },
+};

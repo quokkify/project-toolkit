@@ -1,3 +1,9 @@
 # {{ project_name }}
 
 Generated with `quokkify/project-toolkit` at `{{ toolkit_version }}`. Run `copier update` to apply future template changes; Renovate updates workflow version references independently.
+{% if allure_report %}
+
+## Allure reports
+
+The generated `Validate` workflow uploads `allure-results` from every configured component. Configure each test runner's Allure adapter to write to an `allure-results` directory below that component's `path`; the template does not modify language dependency manifests. After a pull-request validation run completes, `.github/workflows/allure-report.yml` merges those artifacts, generates an Allure 3 HTML report, uploads it as a workflow artifact, and updates one pull-request comment.{% if allure_publish_pages %} It also publishes the report below `allure/pr-N` on the `gh-pages` branch.{% endif %}
+{% endif %}

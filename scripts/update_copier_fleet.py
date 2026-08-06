@@ -64,6 +64,7 @@ class TemplateInventory:
     baseline: str
     missing_baseline: tuple[str, ...]
     docker: str
+    allure_report: str
     release_please: str
     renovate: str
 
@@ -74,9 +75,11 @@ BASELINE_PATHS = (
     ".github/workflows/gitleaks.yml",
 )
 FEATURE_PATHS = {
+    "allure_report": ".github/workflows/allure-report.yml",
     "release_please": ".github/workflows/release.yml",
     "renovate": ".github/renovate.json",
 }
+ALLURE_CONFIG_PATH = ".github/allure/allurerc.mjs"
 FEATURE_LABELS = {
     "enabled": "on",
     "disabled": "off",
@@ -248,14 +251,18 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
     configured = answers.get(key)
     if not isinstance(configured, bool):
         return "unknown"
-    expected_path = FEATURE_PATHS[key]
-    present = is_regular_file(
-        repository_path / expected_path,
-        repository_root=repository_path,
+    expected_paths = (
+        (FEATURE_PATHS[key], ALLURE_CONFIG_PATH)
+        if key == "allure_report"
+        else (FEATURE_PATHS[key],)
+    )
+    materialized = tuple(
+        is_regular_file(repository_path / path, repository_root=repository_path)
+        for path in expected_paths
     )
     if configured:
-        return "enabled" if present else "missing"
-    return "custom" if present else "disabled"
+        return "enabled" if all(materialized) else "missing"
+    return "custom" if any(materialized) else "disabled"
 
 
 def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateInventory:
@@ -300,6 +307,7 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
         baseline=f"{present_baseline}/{len(BASELINE_PATHS)}",
         missing_baseline=missing_baseline,
         docker=docker_state,
+        allure_report=feature_state(answers, "allure_report", repository_path),
         release_please=feature_state(answers, "release_please", repository_path),
         renovate=feature_state(answers, "renovate", repository_path),
     )
@@ -310,6 +318,7 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
         return False
     return (
         inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}"
+        or inventory.allure_report == "missing"
         or inventory.release_please == "missing"
         or inventory.renovate == "missing"
     )
@@ -329,6 +338,7 @@ def console_lines(result: Result) -> list[str]:
             f"components={sanitize_text(','.join(inventory.components))} "
             f"baseline={inventory.baseline} "
             f"docker={FEATURE_LABELS[inventory.docker]} "
+            f"allure={FEATURE_LABELS[inventory.allure_report]} "
             f"release-please={FEATURE_LABELS[inventory.release_please]} "
             f"renovate={FEATURE_LABELS[inventory.renovate]}"
         )
@@ -340,6 +350,7 @@ def feature_summary(results: Sequence[Result]) -> tuple[str, str]:
     denominator = len(inventories)
     enabled = {
         "docker": sum(inventory.docker == "enabled" for inventory in inventories),
+        "allure": sum(inventory.allure_report == "enabled" for inventory in inventories),
         "release-please": sum(inventory.release_please == "enabled" for inventory in inventories),
         "renovate": sum(inventory.renovate == "enabled" for inventory in inventories),
     }
@@ -379,8 +390,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "",
         f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⏭️ {excluded} excluded",
         "",
-        "| Repository | Sync | Template | Components | Baseline | Docker | Release Please | Renovate |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Repository | Sync | Template | Components | Baseline | Docker | Allure | Release Please | Renovate |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     status_labels = {
         "up-to-date": "✅ Current",
@@ -402,11 +413,12 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 ", ".join(inventory.components),
                 inventory.baseline,
                 MARKDOWN_FEATURE_LABELS[inventory.docker],
+                MARKDOWN_FEATURE_LABELS[inventory.allure_report],
                 MARKDOWN_FEATURE_LABELS[inventory.release_please],
                 MARKDOWN_FEATURE_LABELS[inventory.renovate],
             )
         else:
-            cells = ("—", "—", "—", "—", "—", "—")
+            cells = ("—", "—", "—", "—", "—", "—", "—")
         lines.append(
             "| "
             + " | ".join(
@@ -437,6 +449,11 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 lines.extend(f"  - Missing: `{path}`" for path in inventory.missing_baseline)
             if inventory and inventory.release_please == "missing":
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['release_please']}`")
+            if inventory and inventory.allure_report == "missing":
+                lines.append(
+                    "- Allure is enabled but its generated workflow/config pair is incomplete: "
+                    f"`{FEATURE_PATHS['allure_report']}`, `{ALLURE_CONFIG_PATH}`"
+                )
             if inventory and inventory.renovate == "missing":
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['renovate']}`")
             lines.append("")
@@ -462,12 +479,13 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                     "missing": list(result.inventory.missing_baseline),
                 },
                 "docker": result.inventory.docker,
+                "allure_report": result.inventory.allure_report,
                 "release_please": result.inventory.release_please,
                 "renovate": result.inventory.renovate,
             }
         repositories.append(item)
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "summary": counts,
         "configuration_mismatches": sum(inventory_has_mismatch(result.inventory) for result in results),
         "repositories": repositories,

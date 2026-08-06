@@ -777,6 +777,33 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(match.group("currentValue"), "v0.2.0")
 
 
+class ReusableTestArtifactContractTests(unittest.TestCase):
+    def test_language_workflows_share_opt_in_artifact_contract(self) -> None:
+        defaults = {
+            "python": "python-test-artifacts",
+            "node": "node-test-artifacts",
+            "java": "java-test-artifacts",
+        }
+        for language, default_name in defaults.items():
+            with self.subTest(language=language):
+                workflow = yaml.safe_load(
+                    (ROOT / f".github/workflows/{language}-ci.yml").read_text()
+                )
+                triggers = workflow.get("on", workflow.get(True))
+                inputs = triggers["workflow_call"]["inputs"]
+                self.assertEqual(inputs["upload-test-artifacts"]["default"], False)
+                self.assertEqual(inputs["test-artifact-path"]["default"], "test-results")
+                self.assertEqual(inputs["test-artifact-name"]["default"], default_name)
+                steps = workflow["jobs"]["ci"]["steps"]
+                upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
+                self.assertEqual(
+                    upload["if"],
+                    "${{ always() && inputs.upload-test-artifacts }}",
+                )
+                self.assertEqual(upload["with"]["name"], "${{ inputs.test-artifact-name }}")
+                self.assertIn("inputs.test-artifact-path", upload["with"]["path"])
+
+
 class DeployGhPagesSubdirTests(unittest.TestCase):
     def test_action_contract_is_preserved_by_thin_wrapper(self) -> None:
         data = action("deploy-gh-pages-subdir")

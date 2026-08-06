@@ -5,6 +5,8 @@ _templates_suffix: .jinja
 _exclude:
   - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
+  - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
+  - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
 
 project_name:
   type: str
@@ -34,6 +36,16 @@ components:
 docker:
   type: bool
   default: false
+allure_report:
+  type: bool
+  help: Generate and comment an Allure 3 report from component-level allure-results artifacts.
+  default: false
+  validator: "{% if allure_report and not components %}Allure reporting requires at least one generated CI component.{% endif %}"
+allure_publish_pages:
+  type: bool
+  help: Publish each pull request report below allure/pr-N on the gh-pages branch.
+  default: false
+  when: "{{ allure_report }}"
 release_please:
   type: bool
   default: false

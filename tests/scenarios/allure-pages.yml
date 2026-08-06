@@ -1,0 +1,11 @@
+project_name: fixture-allure-pages
+toolkit_version: v1.0.0
+components:
+  - type: python
+    path: .
+docker: false
+allure_report: true
+allure_publish_pages: true
+release_please: false
+renovate: true
+renovate_config_repository: quokkify/renovate-presets

@@ -1146,6 +1146,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "node": ["default", "github-actions", "javascript"],
         "java": ["default", "github-actions", "java"],
         "polyglot": ["default", "github-actions", "python", "javascript", "java"],
+        "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
+        "allure-pages": ["default", "github-actions", "python"],
         "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
@@ -1166,6 +1168,62 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
+        allure_workflow_path = dest / ".github/workflows/allure-report.yml"
+        allure_config_path = dest / ".github/allure/allurerc.mjs"
+        if scenario.startswith("allure-"):
+            run([actionlint, str(allure_workflow_path)])
+            check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
+            if allure_config_path.is_file():
+                run(["node", "--check", str(allure_config_path)])
+            allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
+            allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
+            check(
+                allure_triggers
+                == {"workflow_run": {"workflows": ["Validate"], "types": ["completed"]}},
+                f"{scenario}: report workflow must run only after Validate completes",
+            )
+            expected_contents_permission = "write" if scenario == "allure-pages" else "read"
+            check(
+                allure_workflow.get("permissions")
+                == {
+                    "actions": "read",
+                    "contents": expected_contents_permission,
+                    "pull-requests": "write",
+                },
+                f"{scenario}: report workflow has unexpected permissions",
+            )
+            report_text = allure_workflow_path.read_text()
+            check(
+                "github.event.repository.default_branch" in report_text
+                and "github.event.workflow_run.head_sha" not in report_text,
+                f"{scenario}: privileged workflow must check out only trusted default-branch configuration",
+            )
+            check(
+                "run-id: ${{ github.event.workflow_run.id }}" in report_text
+                and "pattern: allure-results-*" in report_text,
+                f"{scenario}: report workflow must download only source-run Allure artifacts",
+            )
+            validate_text = (dest / ".github/workflows/validate.yml").read_text()
+            check(
+                'answers.get("allure_report")' in validate_text
+                and 'Path(".github/allure/allurerc.mjs")' in validate_text,
+                f"{scenario}: generated contract does not verify Allure outputs",
+            )
+            artifact_names = ["allure-results-python-1"]
+            if scenario == "allure-polyglot":
+                artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
+            for artifact_name in artifact_names:
+                check(
+                    artifact_name in validate_text,
+                    f"{scenario}: missing unique artifact {artifact_name}",
+                )
+            check(
+                ("publish-pages: true" in report_text) == (scenario == "allure-pages"),
+                f"{scenario}: Pages publishing does not match the Copier answer",
+            )
+        else:
+            check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
+            check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")
         generated_validate = (dest / ".github/workflows/validate.yml").read_text()
         check(
             not generated_validate.endswith("\n\n"),

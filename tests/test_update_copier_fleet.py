@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -283,6 +284,29 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
         self.assertEqual(report["repositories"][0]["template"]["target_commit"], "v2.9.0")
 
+    def test_report_renderers_escape_control_characters_and_backslash_pipes(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2\r",
+            target_commit=None,
+            components=("python:C:\\repo\\|row\r\x1b",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="disabled",
+            renovate="enabled",
+        )
+        result = fleet.Result("quokkify/example", "up-to-date", inventory=inventory)
+
+        console = "\n".join(fleet.console_lines(result))
+        markdown = fleet.markdown_report([result], {"up-to-date": 1})
+
+        for rendered in (console, markdown):
+            self.assertNotIn("\r", rendered)
+            self.assertNotIn("\x1b", rendered)
+            self.assertIn("\\x0d", rendered)
+            self.assertIn("\\x1b", rendered)
+        self.assertEqual(len([line for line in markdown.splitlines() if line.startswith("|")]), 3)
+
 
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")
@@ -358,6 +382,41 @@ class RepositoryProcessingTests(TestCase):
                     workspace=Path(temporary),
                 )
         update_mock.assert_not_called()
+
+    @mock.patch.object(fleet, "update_template", side_effect=fleet.FleetUpdateError("conflict"))
+    @mock.patch.object(
+        fleet,
+        "clone_repository",
+        side_effect=cloned_answers(
+            "_commit: v2.8.2\n"
+            "_src_path: gh:quokkify/project-toolkit\n"
+            "components: []\n"
+        ),
+    )
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_preserves_inventory_when_copier_update_fails(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        ___: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(fleet.RepositoryProcessError, "conflict") as raised:
+                fleet.process_repository(
+                    fleet.Repository("quokkify/example", "main"),
+                    expected_template="quokkify/project-toolkit",
+                    branch=fleet.DEFAULT_BRANCH,
+                    dry_run=True,
+                    template_ref=None,
+                    env={},
+                    workspace=Path(temporary),
+                )
+        self.assertEqual(raised.exception.inventory.commit, "v2.8.2")
+        self.assertEqual(raised.exception.inventory.components, ("none",))
 
     @mock.patch.object(fleet, "update_template", return_value=["renovate.json", "validate.yml"])
     @mock.patch.object(fleet, "clone_repository")
@@ -510,6 +569,44 @@ class CommandLineTests(TestCase):
     ) -> None:
         self.assertEqual(fleet.main(["--dry-run"]), 3)
         process_mock.assert_called_once()
+
+    @mock.patch.object(fleet, "process_repository")
+    @mock.patch.object(
+        fleet,
+        "discover_repositories",
+        return_value=[fleet.Repository("quokkify/example", "main")],
+    )
+    @mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.dict(
+        "os.environ",
+        {"GITHUB_TOKEN": "repository-scoped-token", "GH_TOKEN": ""},
+        clear=False,
+    )
+    def test_failed_repository_keeps_inventory_in_json_report(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        process_mock: mock.Mock,
+    ) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2",
+            target_commit=None,
+            components=("none",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="disabled",
+            renovate="enabled",
+        )
+        process_mock.side_effect = fleet.RepositoryProcessError("conflict", inventory)
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "audit.json"
+            status = fleet.main(["--dry-run", "--json-report", str(report_path)])
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 1)
+        self.assertEqual(report["repositories"][0]["status"], "failed")
+        self.assertEqual(report["repositories"][0]["template"]["commit"], "v2.8.2")
 
     @mock.patch.dict(
         "os.environ",

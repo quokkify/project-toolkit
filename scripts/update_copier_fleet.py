@@ -33,6 +33,14 @@ class FleetUpdateError(RuntimeError):
     """A repository or fleet operation could not be completed safely."""
 
 
+class RepositoryProcessError(FleetUpdateError):
+    """A managed repository failed after its inventory was collected."""
+
+    def __init__(self, message: str, inventory: "TemplateInventory") -> None:
+        super().__init__(message)
+        self.inventory = inventory
+
+
 @dataclass(frozen=True)
 class Repository:
     name_with_owner: str
@@ -86,6 +94,13 @@ MARKDOWN_FEATURE_LABELS = {
 
 def is_regular_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
+
+
+def sanitize_text(value: str) -> str:
+    return "".join(
+        character if " " <= character != "\x7f" else f"\\x{ord(character):02x}"
+        for character in value
+    )
 
 
 def run(
@@ -276,8 +291,8 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
 
 
 def console_lines(result: Result) -> list[str]:
-    suffix = f": {result.detail}" if result.detail else ""
-    lines = [f"[{result.status}] {result.repository}{suffix}"]
+    suffix = f": {sanitize_text(result.detail)}" if result.detail else ""
+    lines = [f"[{result.status}] {sanitize_text(result.repository)}{suffix}"]
     if result.inventory:
         inventory = result.inventory
         template_version = inventory.commit
@@ -285,8 +300,8 @@ def console_lines(result: Result) -> list[str]:
             template_version += f"->{inventory.target_commit}"
         lines.append(
             "  "
-            f"template={template_version} "
-            f"components={','.join(inventory.components)} "
+            f"template={sanitize_text(template_version)} "
+            f"components={sanitize_text(','.join(inventory.components))} "
             f"baseline={inventory.baseline} "
             f"docker={FEATURE_LABELS[inventory.docker]} "
             f"release-please={FEATURE_LABELS[inventory.release_please]} "
@@ -306,7 +321,7 @@ def feature_summary(results: Sequence[Result]) -> tuple[str, str]:
     component_counts: dict[str, int] = {}
     for inventory in inventories:
         seen = {
-            component.split(":", 1)[0]
+            sanitize_text(component.split(":", 1)[0])
             for component in inventory.components
             if component not in {"none", "unknown"}
         }
@@ -324,7 +339,7 @@ def feature_summary(results: Sequence[Result]) -> tuple[str, str]:
 
 
 def markdown_escape(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
+    return sanitize_text(value).replace("\\", "\\\\").replace("|", "\\|")
 
 
 def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
@@ -679,26 +694,29 @@ def process_repository(
     if cloned_source != normalized_expected:
         raise FleetUpdateError("cloned repository changed to a different template during audit")
     inventory = inventory_from_answers(cloned_answers, destination)
-    paths = update_template(
-        destination,
-        template_source=expected_template,
-        template_ref=template_ref,
-        env=env,
-    )
-    updated_answers_path = destination / ANSWERS_FILE
-    if updated_answers_path.is_file() and not updated_answers_path.is_symlink():
-        updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
-        updated_commit = updated_answers.get("_commit")
-        if isinstance(updated_commit, str) and updated_commit.strip():
-            inventory = replace(inventory, target_commit=updated_commit.strip())
-    if not paths:
-        return Result(repository.name_with_owner, "up-to-date", inventory=inventory)
-    if dry_run:
-        return Result(repository.name_with_owner, "would-update", ", ".join(paths), inventory)
+    try:
+        paths = update_template(
+            destination,
+            template_source=expected_template,
+            template_ref=template_ref,
+            env=env,
+        )
+        updated_answers_path = destination / ANSWERS_FILE
+        if is_regular_file(updated_answers_path):
+            updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
+            updated_commit = updated_answers.get("_commit")
+            if isinstance(updated_commit, str) and updated_commit.strip():
+                inventory = replace(inventory, target_commit=updated_commit.strip())
+        if not paths:
+            return Result(repository.name_with_owner, "up-to-date", inventory=inventory)
+        if dry_run:
+            return Result(repository.name_with_owner, "would-update", ", ".join(paths), inventory)
 
-    push_automation_branch(repository, destination, branch=branch, env=env)
-    url = ensure_pull_request(repository, branch=branch, changed=paths, env=env)
-    return Result(repository.name_with_owner, "pull-request", url, inventory)
+        push_automation_branch(repository, destination, branch=branch, env=env)
+        url = ensure_pull_request(repository, branch=branch, changed=paths, env=env)
+        return Result(repository.name_with_owner, "pull-request", url, inventory)
+    except Exception as exc:
+        raise RepositoryProcessError(str(exc), inventory) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -806,6 +824,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     template_ref=args.template_ref,
                     env=env,
                     workspace=workspace,
+                )
+            except RepositoryProcessError as exc:
+                failures += 1
+                result = Result(
+                    repository.name_with_owner,
+                    "failed",
+                    str(exc),
+                    exc.inventory,
                 )
             except Exception as exc:  # continue the fleet, then fail the run loudly
                 failures += 1

@@ -80,6 +80,12 @@ FEATURE_PATHS = {
     "renovate": ".github/renovate.json",
 }
 ALLURE_CONFIG_PATH = ".github/allure/allurerc.mjs"
+ALLURE_EXTRACTOR_PATH = ".github/allure/safe_extract.py"
+ALLURE_EXPECTED_PATHS = (
+    FEATURE_PATHS["allure_report"],
+    ALLURE_CONFIG_PATH,
+    ALLURE_EXTRACTOR_PATH,
+)
 FEATURE_LABELS = {
     "enabled": "on",
     "disabled": "off",
@@ -251,11 +257,7 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
     configured = answers.get(key)
     if not isinstance(configured, bool):
         return "unknown"
-    expected_paths = (
-        (FEATURE_PATHS[key], ALLURE_CONFIG_PATH)
-        if key == "allure_report"
-        else (FEATURE_PATHS[key],)
-    )
+    expected_paths = ALLURE_EXPECTED_PATHS if key == "allure_report" else (FEATURE_PATHS[key],)
     materialized = tuple(
         is_regular_file(repository_path / path, repository_root=repository_path)
         for path in expected_paths
@@ -451,8 +453,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['release_please']}`")
             if inventory and inventory.allure_report == "missing":
                 lines.append(
-                    "- Allure is enabled but its generated workflow/config pair is incomplete: "
-                    f"`{FEATURE_PATHS['allure_report']}`, `{ALLURE_CONFIG_PATH}`"
+                    "- Allure is enabled but its generated workflow/config/extractor set is incomplete: "
+                    + ", ".join(f"`{path}`" for path in ALLURE_EXPECTED_PATHS)
                 )
             if inventory and inventory.renovate == "missing":
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['renovate']}`")

@@ -252,6 +252,12 @@ class TemplateInventoryTests(TestCase):
             )
             config.parent.mkdir(parents=True)
             config.write_text("export default {};\n", encoding="utf-8")
+            still_incomplete = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n",
+                repository,
+            )
+            extractor = repository / fleet.ALLURE_EXTRACTOR_PATH
+            extractor.write_text("# trusted extractor\n", encoding="utf-8")
             enabled = fleet.inventory_from_answers(
                 "components: []\nallure_report: true\n",
                 repository,
@@ -260,6 +266,7 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(incomplete.allure_report, "missing")
         self.assertTrue(fleet.inventory_has_mismatch(incomplete))
         self.assertEqual(custom.allure_report, "custom")
+        self.assertEqual(still_incomplete.allure_report, "missing")
         self.assertEqual(enabled.allure_report, "enabled")
 
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:

@@ -25,6 +25,7 @@ jobs:
       ready: {% raw %}${{ steps.resolve.outputs.ready }}{% endraw %}
       pr-number: {% raw %}${{ steps.resolve.outputs.pr-number }}{% endraw %}
       fork-pr: {% raw %}${{ steps.resolve.outputs.fork-pr }}{% endraw %}
+      artifact_manifest: {% raw %}${{ steps.resolve.outputs.artifact_manifest }}{% endraw %}
     steps:
       - name: Resolve PR and validate source artifacts
         id: resolve
@@ -103,6 +104,12 @@ jobs:
               core.setFailed(`Allure artifacts exceed the 250 MiB compressed limit: ${compressedBytes} bytes.`);
               return;
             }
+            core.setOutput("artifact_manifest", JSON.stringify(
+              expectedArtifacts.map((name) => {
+                const artifact = allureArtifacts.find((candidate) => candidate.name === name);
+                return { name, id: Number(artifact.id) };
+              })
+            ));
             const pull = matches[0];
             core.setOutput("ready", "true");
             core.setOutput("pr-number", String(pull.number));
@@ -125,59 +132,17 @@ jobs:
         with:
           ref: {% raw %}${{ github.sha }}{% endraw %}
           persist-credentials: false
-{% for component in components %}
-      - name: Download {{ component.type }} {{ loop.index }} Allure results
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v7.0.0
-        with:
-          name: allure-results-{{ component.type }}-{{ loop.index }}
-          path: {% raw %}${{ runner.temp }}{% endraw %}/allure-inputs/{{ component.type }}-{{ loop.index }}
-          run-id: {% raw %}${{ github.event.workflow_run.id }}{% endraw %}
-          github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
-{% endfor %}
-      - name: Validate and merge Allure results
+      - name: Download, preflight, and merge Allure results
         shell: bash
         env:
-          INPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-inputs
-          OUTPUT_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
-        run: |
-          python - <<'PY'
-          import os
-          import shutil
-          import stat
-          from pathlib import Path
-
-          source_root = Path(os.environ["INPUT_ROOT"])
-          output_root = Path(os.environ["OUTPUT_ROOT"])
-          shutil.rmtree(output_root.parent, ignore_errors=True)
-          output_root.mkdir(parents=True)
-          seen: set[Path] = set()
-          total_files = 0
-          total_bytes = 0
-          for source in sorted(source_root.iterdir()):
-              if source.is_symlink() or not source.is_dir():
-                  raise SystemExit(f"unsafe Allure artifact root: {source.name}")
-              for path in sorted(source.rglob("*")):
-                  metadata = path.lstat()
-                  relative = path.relative_to(source)
-                  if stat.S_ISLNK(metadata.st_mode):
-                      raise SystemExit(f"symlink rejected in Allure artifact: {source.name}/{relative}")
-                  if stat.S_ISDIR(metadata.st_mode):
-                      continue
-                  if not stat.S_ISREG(metadata.st_mode):
-                      raise SystemExit(f"non-regular Allure artifact entry rejected: {source.name}/{relative}")
-                  if relative in seen:
-                      raise SystemExit(f"duplicate Allure artifact path: {relative}")
-                  seen.add(relative)
-                  total_files += 1
-                  total_bytes += metadata.st_size
-                  if total_files > 20000 or total_bytes > 1073741824:
-                      raise SystemExit("Allure artifacts exceed extracted file-count or 1 GiB size limits")
-                  destination = output_root / relative
-                  destination.parent.mkdir(parents=True, exist_ok=True)
-                  shutil.copyfile(path, destination)
-          if not seen:
-              raise SystemExit("required Allure artifacts contained no regular files")
-          PY
+          ARTIFACT_MANIFEST: {% raw %}${{ needs.resolve.outputs.artifact_manifest }}{% endraw %}
+          API_URL: {% raw %}${{ github.api_url }}{% endraw %}
+          REPOSITORY: {% raw %}${{ github.repository }}{% endraw %}
+          GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-archives
+          OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-expanded
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
+        run: python .github/allure/safe_extract.py
       - name: Build Allure report without write privileges
         uses: quokkify/project-toolkit/actions/allure-report@{{ toolkit_version }}
         with:
@@ -306,51 +271,49 @@ jobs:
             const latest = Number(run.id) === Math.max(
               ...sourceRuns.map((candidate) => Number(candidate.id))
             );
-            core.setOutput("fresh", String(sameHead && latest));
-      - name: Download generated report
+            if (!sameHead || !latest) {
+              core.warning("PR head or source run is stale; Pages publication suppressed.");
+              core.setOutput("fresh", "false");
+              return;
+            }
+            const expectedName = `allure-report-${context.runId}`;
+            const reportArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              }
+            );
+            const matches = reportArtifacts.filter((artifact) => artifact.name === expectedName);
+            if (matches.length !== 1 || matches[0].expired ||
+                Number(matches[0].size_in_bytes || 0) > 262144000) {
+              core.setFailed("Generated report artifact failed identity, expiry, or compressed-size checks.");
+              return;
+            }
+            core.setOutput("artifact_manifest", JSON.stringify([
+              { name: expectedName, id: Number(matches[0].id) },
+            ]));
+            core.setOutput("fresh", "true");
+      - name: Check out trusted extractor
         if: {% raw %}${{ steps.freshness.outputs.fresh == 'true' }}{% endraw %}
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: allure-report-{% raw %}${{ github.run_id }}{% endraw %}
-          path: {% raw %}${{ runner.temp }}{% endraw %}/allure-report
-      - name: Validate Pages payload
+          ref: {% raw %}${{ github.sha }}{% endraw %}
+          persist-credentials: false
+      - name: Safely download generated report
         if: {% raw %}${{ steps.freshness.outputs.fresh == 'true' }}{% endraw %}
         shell: bash
         env:
-          SOURCE: {% raw %}${{ runner.temp }}{% endraw %}/allure-report
-          DESTINATION: {% raw %}${{ github.workspace }}{% endraw %}/allure-report
-        run: |
-          python - <<'PY'
-          import os
-          import shutil
-          import stat
-          from pathlib import Path
-
-          source = Path(os.environ["SOURCE"])
-          destination_root = Path(os.environ["DESTINATION"])
-          shutil.rmtree(destination_root, ignore_errors=True)
-          destination_root.mkdir(parents=True)
-          total_files = 0
-          total_bytes = 0
-          for path in sorted(source.rglob("*")):
-              metadata = path.lstat()
-              relative = path.relative_to(source)
-              if stat.S_ISLNK(metadata.st_mode):
-                  raise SystemExit(f"symlink rejected in Pages payload: {relative}")
-              if stat.S_ISDIR(metadata.st_mode):
-                  continue
-              if not stat.S_ISREG(metadata.st_mode):
-                  raise SystemExit(f"non-regular Pages payload entry rejected: {relative}")
-              total_files += 1
-              total_bytes += metadata.st_size
-              if total_files > 30000 or total_bytes > 1073741824:
-                  raise SystemExit("Pages payload exceeds file-count or 1 GiB size limits")
-              destination = destination_root / relative
-              destination.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copyfile(path, destination)
-          if total_files == 0:
-              raise SystemExit("generated Pages payload is empty")
-          PY
+          ARTIFACT_MANIFEST: {% raw %}${{ steps.freshness.outputs.artifact_manifest }}{% endraw %}
+          API_URL: {% raw %}${{ github.api_url }}{% endraw %}
+          REPOSITORY: {% raw %}${{ github.repository }}{% endraw %}
+          GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-pages-archives
+          OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-pages-expanded
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/allure-report
+        run: python .github/allure/safe_extract.py
       - name: Publish Allure HTML to GitHub Pages
         if: {% raw %}${{ steps.freshness.outputs.fresh == 'true' }}{% endraw %}
         uses: quokkify/project-toolkit/actions/deploy-gh-pages-subdir@{{ toolkit_version }}

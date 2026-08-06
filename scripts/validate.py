@@ -8,9 +8,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -1171,11 +1173,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
         allure_workflow_path = dest / ".github/workflows/allure-report.yml"
         allure_config_path = dest / ".github/allure/allurerc.mjs"
+        allure_extractor_path = dest / ".github/allure/safe_extract.py"
         if scenario.startswith("allure-"):
             run([actionlint, str(allure_workflow_path)])
             check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
             if allure_config_path.is_file():
                 run(["node", "--check", str(allure_config_path)])
+            check(allure_extractor_path.is_file(), f"{scenario}: missing bounded ZIP extractor")
+            if allure_extractor_path.is_file():
+                run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
             allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
             allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
             check(
@@ -1219,12 +1225,20 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "github.event.repository.default_branch" not in report_text,
                 f"{scenario}: report config is not pinned to the downstream default-branch SHA",
             )
+            extractor_text = allure_extractor_path.read_text()
+            preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
             check(
-                "run-id: ${{ github.event.workflow_run.id }}" in report_text
-                and "pattern: allure-results-*" not in report_text
-                and "merge-multiple: true" not in report_text
-                and "${{ runner.temp }}/allure-inputs" in report_text,
-                f"{scenario}: source-run artifacts are not isolated and downloaded by exact name",
+                all(
+                    "actions/download-artifact@" not in str(step.get("uses", ""))
+                    for job in preflight_jobs
+                    for step in job.get("steps", [])
+                )
+                and "artifact_manifest" in report_text
+                and "${{ runner.temp }}/allure-archives" in report_text
+                and "${{ runner.temp }}/allure-expanded" in report_text
+                and "MATERIALIZE_ROOT: ${{ github.workspace }}/.allure-input/results" in report_text
+                and "python .github/allure/safe_extract.py" in report_text,
+                f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
             )
             check(
                 "workflow_run.pull_requests[0]" not in report_text
@@ -1233,16 +1247,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 f"{scenario}: PR resolution or stale-run suppression is incomplete",
             )
             check(
-                "duplicate Allure artifact path" in report_text
-                and "250 MiB compressed limit" in report_text
-                and "1 GiB size limits" in report_text
+                "preflight_eocd" in extractor_text
+                and "MAX_CENTRAL_DIRECTORY" in extractor_text
+                and "MAX_UNCOMPRESSED" in extractor_text
+                and "duplicate artifact path" in extractor_text
                 and 'pull.user?.login === "dependabot[bot]"' in report_text,
-                f"{scenario}: artifact collision and resource bounds are missing",
+                f"{scenario}: pre-extraction collision and resource bounds are missing",
             )
             validate_text = (dest / ".github/workflows/validate.yml").read_text()
             check(
                 'answers.get("allure_report")' in validate_text
-                and 'Path(".github/allure/allurerc.mjs")' in validate_text,
+                and 'Path(".github/allure/allurerc.mjs")' in validate_text
+                and 'Path(".github/allure/safe_extract.py")' in validate_text,
                 f"{scenario}: generated contract does not verify Allure outputs",
             )
             artifact_names = ["allure-results-python-1"]
@@ -1259,45 +1275,153 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     and 'test-artifact-path: "build/allure-results"' in validate_text,
                     "allure-polyglot: custom per-component result paths were not rendered",
                 )
-                merge_step = next(
-                    step
-                    for step in jobs["generate"]["steps"]
-                    if step.get("name") == "Validate and merge Allure results"
+                probe_root = tmp_path / "allure-zip-probe"
+                fixture_archives = probe_root / "fixtures"
+                archive_root = probe_root / "downloaded"
+                output_root = probe_root / "output"
+                materialized_root = dest / ".allure-input" / "results"
+                fixture_archives.mkdir(parents=True)
+                manifest = [
+                    {"name": artifact_name, "id": index}
+                    for index, artifact_name in enumerate(artifact_names, 1)
+                ]
+
+                def write_archives(files_by_artifact: dict[str, dict[str, str]]) -> None:
+                    shutil.rmtree(fixture_archives, ignore_errors=True)
+                    fixture_archives.mkdir(parents=True)
+                    for artifact_name, files in files_by_artifact.items():
+                        with zipfile.ZipFile(
+                            fixture_archives / f"{artifact_name}.zip",
+                            "w",
+                            compression=zipfile.ZIP_DEFLATED,
+                        ) as bundle:
+                            for relative, content in files.items():
+                                bundle.writestr(relative, content)
+
+                extract_env = dict(
+                    os.environ,
+                    ARTIFACT_MANIFEST=json.dumps(manifest),
+                    ARTIFACT_ARCHIVE_DIR=str(fixture_archives),
+                    ARCHIVE_ROOT=str(archive_root),
+                    OUTPUT_ROOT=str(output_root),
+                    MATERIALIZE_ROOT=str(materialized_root),
+                    GITHUB_WORKSPACE=str(dest),
                 )
-                merge_root = tmp_path / "allure-merge-probe"
-                input_root = merge_root / "inputs"
-                output_root = merge_root / "output" / "results"
-                for source_name, result_name in (
-                    ("python-1", "python-result.json"),
-                    ("node-2", "node-result.json"),
-                    ("java-3", "java-result.json"),
-                ):
-                    source = input_root / source_name
-                    source.mkdir(parents=True)
-                    (source / result_name).write_text("{}")
-                merge_env = dict(os.environ, INPUT_ROOT=str(input_root), OUTPUT_ROOT=str(output_root))
-                run(["bash", "-c", merge_step["run"]], dest, merge_env)
+                valid_files = {
+                    artifact_name: {f"{artifact_name}.json": "{}"}
+                    for artifact_name in artifact_names
+                }
+                write_archives(valid_files)
+                run([sys.executable, str(allure_extractor_path)], dest, extract_env)
                 check(
-                    {path.name for path in output_root.iterdir()}
-                    == {"python-result.json", "node-result.json", "java-result.json"},
-                    "allure-polyglot: collision-safe merge omitted expected files",
+                    {path.name for path in materialized_root.iterdir()}
+                    == {f"{artifact_name}.json" for artifact_name in artifact_names},
+                    "allure-polyglot: bounded ZIP merge omitted expected files",
                 )
-                (input_root / "python-1" / "collision.json").write_text("{}")
-                (input_root / "node-2" / "collision.json").write_text("{}")
-                collision_probe = subprocess.run(
-                    ["bash", "-c", merge_step["run"]],
+
+                shutil.rmtree(materialized_root.parent)
+                external_target = probe_root / "must-stay-empty"
+                external_target.mkdir()
+                materialized_root.parent.symlink_to(external_target, target_is_directory=True)
+                materialization_probe = subprocess.run(
+                    [sys.executable, str(allure_extractor_path)],
                     cwd=dest,
-                    env=merge_env,
+                    env=extract_env,
+                    text=True,
+                    capture_output=True,
+                )
+                check(
+                    materialization_probe.returncode != 0
+                    and "unsafe workspace ancestor" in materialization_probe.stderr
+                    and not any(external_target.iterdir()),
+                    "allure-polyglot: validated materialization followed a workspace symlink",
+                )
+                materialized_root.parent.unlink()
+
+                collision_files = dict(valid_files)
+                collision_files[artifact_names[0]] = {"collision.json": "{}"}
+                collision_files[artifact_names[1]] = {"collision.json": "{}"}
+                write_archives(collision_files)
+                collision_probe = subprocess.run(
+                    [sys.executable, str(allure_extractor_path)],
+                    cwd=dest,
+                    env=extract_env,
                     text=True,
                     capture_output=True,
                 )
                 check(
                     collision_probe.returncode != 0
-                    and "duplicate Allure artifact path: collision.json" in collision_probe.stderr,
-                    "allure-polyglot: duplicate artifact paths were not rejected",
+                    and "duplicate artifact path: collision.json" in collision_probe.stderr,
+                    "allure-polyglot: duplicate ZIP paths were not rejected before extraction",
+                )
+
+                traversal_files = dict(valid_files)
+                traversal_files[artifact_names[0]] = {"../escape.json": "{}"}
+                write_archives(traversal_files)
+                traversal_probe = subprocess.run(
+                    [sys.executable, str(allure_extractor_path)],
+                    cwd=dest,
+                    env=extract_env,
+                    text=True,
+                    capture_output=True,
+                )
+                check(
+                    traversal_probe.returncode != 0
+                    and "unsafe path in artifact ZIP" in traversal_probe.stderr,
+                    "allure-polyglot: ZIP path traversal was not rejected",
+                )
+
+                write_archives(valid_files)
+                symlink_archive = fixture_archives / f"{artifact_names[0]}.zip"
+                with zipfile.ZipFile(symlink_archive, "w") as bundle:
+                    symlink = zipfile.ZipInfo("link.json")
+                    symlink.create_system = 3
+                    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+                    bundle.writestr(symlink, "target.json")
+                symlink_probe = subprocess.run(
+                    [sys.executable, str(allure_extractor_path)],
+                    cwd=dest,
+                    env=extract_env,
+                    text=True,
+                    capture_output=True,
+                )
+                check(
+                    symlink_probe.returncode != 0
+                    and "non-regular ZIP entry rejected" in symlink_probe.stderr,
+                    "allure-polyglot: ZIP symlink was not rejected before extraction",
+                )
+
+                write_archives(valid_files)
+                oversized_archive = fixture_archives / f"{artifact_names[0]}.zip"
+                archive_bytes = bytearray(oversized_archive.read_bytes())
+                central_header = archive_bytes.index(b"PK\x01\x02")
+                archive_bytes[central_header + 24 : central_header + 28] = (1073741825).to_bytes(
+                    4, "little"
+                )
+                oversized_archive.write_bytes(archive_bytes)
+                shutil.rmtree(output_root, ignore_errors=True)
+                shutil.rmtree(materialized_root, ignore_errors=True)
+                oversized_probe = subprocess.run(
+                    [sys.executable, str(allure_extractor_path)],
+                    cwd=dest,
+                    env=extract_env,
+                    text=True,
+                    capture_output=True,
+                )
+                check(
+                    oversized_probe.returncode != 0
+                    and (
+                        "artifact entry exceeds 256 MiB" in oversized_probe.stderr
+                        or "pre-extraction file-count or 1 GiB limits" in oversized_probe.stderr
+                    )
+                    and not output_root.exists()
+                    and not materialized_root.exists(),
+                    "allure-polyglot: declared ZIP bomb was not rejected before extraction",
                 )
             check(
                 ("Publish trusted Pages report" in report_text) == (scenario == "allure-pages")
+                and ("${{ runner.temp }}/allure-pages-expanded" in report_text)
+                == (scenario == "allure-pages")
                 and ("https://quokkify.github.io/fixture-allure-pages" in report_text)
                 == (scenario == "allure-pages"),
                 f"{scenario}: Pages publishing does not match the Copier answers",
@@ -1305,6 +1429,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         else:
             check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
             check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")
+            check(not allure_extractor_path.exists(), f"{scenario}: Allure extractor generated while disabled")
         generated_validate = (dest / ".github/workflows/validate.yml").read_text()
         check(
             not generated_validate.endswith("\n\n"),

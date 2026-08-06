@@ -48,9 +48,10 @@ jobs:
           allure_paths = (
               Path(".github/workflows/allure-report.yml"),
               Path(".github/allure/allurerc.mjs"),
+              Path(".github/allure/safe_extract.py"),
           )
           if answers.get("allure_report") and any(not path.is_file() for path in allure_paths):
-              raise SystemExit("allure_report=true requires its generated workflow and Allure 3 config")
+              raise SystemExit("allure_report=true requires its generated workflow, config, and bounded extractor")
           if answers.get("allure_publish_pages") and not answers.get("allure_report"):
               raise SystemExit("allure_publish_pages=true requires allure_report=true")
           for path in (renovate_path, Path(".github/release-please/config.json"), Path(".github/release-please/manifest.json")):

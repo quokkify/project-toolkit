@@ -720,6 +720,7 @@ class AllureReportActionTests(unittest.TestCase):
                 "config-file",
                 "categories-file",
                 "allure-version",
+                "module-environment-label",
                 "pr-number",
                 "pages-url",
                 "fork-pr",

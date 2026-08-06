@@ -62,17 +62,22 @@ jobs:
             args+=(--template-ref "$TEMPLATE_REF")
           fi
           output="$RUNNER_TEMP/copier-fleet-audit.txt"
+          markdown_report="$RUNNER_TEMP/copier-fleet-audit.md"
+          json_report="$RUNNER_TEMP/copier-fleet-audit.json"
+          args+=(--markdown-report "$markdown_report" --json-report "$json_report")
           set +e
           python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
           status=${PIPESTATUS[0]}
           set -e
-          {
-            echo "## Copier fleet audit"
-            echo
-            echo '```text'
-            while IFS= read -r line; do
-              printf '%s\n' "$line"
-            done < "$output"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$markdown_report" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
+        id: audit
+
+      - name: Upload Copier fleet audit report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: copier-fleet-audit
+          path: ${{ runner.temp }}/copier-fleet-audit.json
+          if-no-files-found: warn

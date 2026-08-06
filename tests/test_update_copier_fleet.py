@@ -166,6 +166,95 @@ class TemplateUpdateTests(TestCase):
             self.assertEqual(answers.read_text(encoding="utf-8"), updated)
 
 
+class TemplateInventoryTests(TestCase):
+    def write_baseline(self, repository: Path) -> None:
+        for relative_path in fleet.BASELINE_PATHS:
+            path = repository / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("generated\n", encoding="utf-8")
+
+    def test_reports_configured_features_and_materialized_outputs(self) -> None:
+        raw_answers = (
+            "_commit: v2.8.2\n"
+            "components:\n"
+            "  - type: python\n"
+            "    path: backend\n"
+            "  - type: node\n"
+            "    path: frontend\n"
+            "docker: true\n"
+            "release_please: true\n"
+            "renovate: false\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            self.write_baseline(repository)
+            release = repository / fleet.FEATURE_PATHS["release_please"]
+            release.parent.mkdir(parents=True, exist_ok=True)
+            release.write_text("generated\n", encoding="utf-8")
+            renovate = repository / fleet.FEATURE_PATHS["renovate"]
+            renovate.parent.mkdir(parents=True, exist_ok=True)
+            renovate.write_text("custom\n", encoding="utf-8")
+
+            inventory = fleet.inventory_from_answers(raw_answers, repository)
+
+        self.assertEqual(inventory.commit, "v2.8.2")
+        self.assertIsNone(inventory.target_commit)
+        self.assertEqual(inventory.components, ("python:backend", "node:frontend"))
+        self.assertEqual(inventory.baseline, "3/3")
+        self.assertEqual(inventory.missing_baseline, ())
+        self.assertEqual(inventory.docker, "enabled")
+        self.assertEqual(inventory.release_please, "enabled")
+        self.assertEqual(inventory.renovate, "custom")
+        self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_distinguishes_missing_disabled_and_unknown_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            inventory = fleet.inventory_from_answers(
+                "components: []\nrelease_please: true\nrenovate: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.commit, "unknown")
+        self.assertEqual(inventory.components, ("none",))
+        self.assertEqual(inventory.docker, "unknown")
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertEqual(inventory.renovate, "disabled")
+        self.assertTrue(fleet.inventory_has_mismatch(inventory))
+
+    def test_console_markdown_and_json_reports_share_the_inventory(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v2.8.2",
+            target_commit="v2.9.0",
+            components=("python:.",),
+            baseline="3/3",
+            missing_baseline=(),
+            docker="disabled",
+            release_please="enabled",
+            renovate="missing",
+        )
+        result = fleet.Result(
+            "quokkify/example",
+            "would-update",
+            ".github/renovate.json",
+            inventory,
+        )
+        counts = {"would-update": 1}
+
+        console = "\n".join(fleet.console_lines(result))
+        markdown = fleet.markdown_report([result], counts)
+        report = fleet.json.loads(fleet.json_report([result], counts))
+
+        self.assertIn("template=v2.8.2->v2.9.0 components=python:.", console)
+        self.assertIn("renovate=missing", console)
+        self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
+        self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["configuration_mismatches"], 1)
+        self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
+        self.assertEqual(report["repositories"][0]["template"]["target_commit"], "v2.9.0")
+
+
 class GitStatusTests(TestCase):
     @mock.patch.object(fleet, "run")
     def test_parses_modified_untracked_and_renamed_paths(self, run_mock: mock.Mock) -> None:

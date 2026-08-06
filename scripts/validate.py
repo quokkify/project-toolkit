@@ -1511,6 +1511,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "copier update did not persist renovate_config_repository",
             )
             check(
+                answers.get("renovate_config_ref") == RENOVATE_PRESET_REF,
+                "copier update did not persist the released renovate_config_ref",
+            )
+            check(
                 answers.get("renovate_presets") == ["default", "github-actions", "python"],
                 "copier update did not persist inferred renovate_presets",
             )

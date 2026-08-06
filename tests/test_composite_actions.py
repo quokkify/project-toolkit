@@ -714,6 +714,7 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertTrue(data["inputs"]["github-token"]["required"])
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
+        self.assertEqual(data["inputs"]["module-environment-label"]["default"], "module")
         self.assertEqual(
             data["inputs"]["pyramid-policy-path"]["default"],
             "docs/testing/test-pyramid.md",
@@ -742,6 +743,10 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertRegex(
             text,
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
+        )
+        self.assertIn(
+            "uses: quokkify/allure-report-action@07563998d9d52ef39b8375b360d02910006d4b3d # v0.2.0",
+            text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
 

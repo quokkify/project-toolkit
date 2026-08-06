@@ -16,6 +16,15 @@ sys.modules[SPEC.name] = fleet
 SPEC.loader.exec_module(fleet)
 
 
+def cloned_answers(raw_answers: str):
+    def materialize(_: object, destination: Path, *, env: dict[str, str]) -> None:
+        del env
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / fleet.ANSWERS_FILE).write_text(raw_answers, encoding="utf-8")
+
+    return materialize
+
+
 class DiscoveryTests(TestCase):
     @mock.patch.object(fleet, "gh_json", return_value=[])
     def test_public_only_discovery_is_explicit(self, gh_json_mock: mock.Mock) -> None:
@@ -222,6 +231,26 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(inventory.renovate, "disabled")
         self.assertTrue(fleet.inventory_has_mismatch(inventory))
 
+    def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            target = repository / "custom.yml"
+            target.write_text("custom\n", encoding="utf-8")
+            baseline = repository / fleet.BASELINE_PATHS[0]
+            baseline.parent.mkdir(parents=True, exist_ok=True)
+            baseline.symlink_to(target)
+            release = repository / fleet.FEATURE_PATHS["release_please"]
+            release.parent.mkdir(parents=True, exist_ok=True)
+            release.symlink_to(target)
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nrelease_please: true\nrenovate: false\n",
+                repository,
+            )
+
+        self.assertIn(fleet.BASELINE_PATHS[0], inventory.missing_baseline)
+        self.assertEqual(inventory.release_please, "missing")
+
     def test_console_markdown_and_json_reports_share_the_inventory(self) -> None:
         inventory = fleet.TemplateInventory(
             commit="v2.8.2",
@@ -300,6 +329,36 @@ class RepositoryProcessingTests(TestCase):
         )
         self.assertEqual(result.status, "foreign-template")
 
+    @mock.patch.object(fleet, "update_template")
+    @mock.patch.object(
+        fleet,
+        "clone_repository",
+        side_effect=cloned_answers("_src_path: gh:someone/other-template\n"),
+    )
+    @mock.patch.object(
+        fleet,
+        "fetch_answers",
+        return_value="_src_path: gh:quokkify/project-toolkit\n",
+    )
+    def test_revalidates_template_source_from_cloned_revision(
+        self,
+        _: mock.Mock,
+        __: mock.Mock,
+        update_mock: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "changed to a different template"):
+                fleet.process_repository(
+                    fleet.Repository("quokkify/example", "main"),
+                    expected_template="quokkify/project-toolkit",
+                    branch=fleet.DEFAULT_BRANCH,
+                    dry_run=True,
+                    template_ref=None,
+                    env={},
+                    workspace=Path(temporary),
+                )
+        update_mock.assert_not_called()
+
     @mock.patch.object(fleet, "update_template", return_value=["renovate.json", "validate.yml"])
     @mock.patch.object(fleet, "clone_repository")
     @mock.patch.object(
@@ -313,6 +372,9 @@ class RepositoryProcessingTests(TestCase):
         clone_mock: mock.Mock,
         update_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
@@ -348,6 +410,9 @@ class RepositoryProcessingTests(TestCase):
         push_mock: mock.Mock,
         pull_request_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
@@ -382,6 +447,9 @@ class RepositoryProcessingTests(TestCase):
         push_mock: mock.Mock,
         pull_request_mock: mock.Mock,
     ) -> None:
+        clone_mock.side_effect = cloned_answers(
+            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),

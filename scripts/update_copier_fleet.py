@@ -84,6 +84,10 @@ MARKDOWN_FEATURE_LABELS = {
 }
 
 
+def is_regular_file(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink()
+
+
 def run(
     command: Sequence[str],
     *,
@@ -210,7 +214,7 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
     if not isinstance(configured, bool):
         return "unknown"
     expected_path = FEATURE_PATHS[key]
-    present = (repository_path / expected_path).is_file()
+    present = is_regular_file(repository_path / expected_path)
     if configured:
         return "enabled" if present else "missing"
     return "custom" if present else "disabled"
@@ -244,7 +248,7 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
         components = ["none"]
 
     missing_baseline = tuple(
-        path for path in BASELINE_PATHS if not (repository_path / path).is_file()
+        path for path in BASELINE_PATHS if not is_regular_file(repository_path / path)
     )
     present_baseline = len(BASELINE_PATHS) - len(missing_baseline)
     docker = answers.get("docker")
@@ -667,7 +671,14 @@ def process_repository(
 
     destination = workspace / repository.name_with_owner.replace("/", "--")
     clone_repository(repository, destination, env=env)
-    inventory = inventory_from_answers(raw_answers, destination)
+    cloned_answers_path = destination / ANSWERS_FILE
+    if not is_regular_file(cloned_answers_path):
+        raise FleetUpdateError(f"cloned {ANSWERS_FILE} must be a regular file")
+    cloned_answers = cloned_answers_path.read_text(encoding="utf-8")
+    cloned_source = normalize_template_source(parse_template_source(cloned_answers))
+    if cloned_source != normalized_expected:
+        raise FleetUpdateError("cloned repository changed to a different template during audit")
+    inventory = inventory_from_answers(cloned_answers, destination)
     paths = update_template(
         destination,
         template_source=expected_template,

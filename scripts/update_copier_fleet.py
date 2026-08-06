@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -92,15 +93,34 @@ MARKDOWN_FEATURE_LABELS = {
 }
 
 
-def is_regular_file(path: Path) -> bool:
-    return path.is_file() and not path.is_symlink()
+def is_regular_file(path: Path, *, repository_root: Path) -> bool:
+    try:
+        relative_path = path.relative_to(repository_root)
+    except ValueError:
+        return False
+    current = repository_root
+    if current.is_symlink():
+        return False
+    for part in relative_path.parts:
+        current /= part
+        if current.is_symlink():
+            return False
+    return path.is_file()
 
 
 def sanitize_text(value: str) -> str:
-    return "".join(
-        character if " " <= character != "\x7f" else f"\\x{ord(character):02x}"
-        for character in value
-    )
+    sanitized: list[str] = []
+    for character in value:
+        codepoint = ord(character)
+        if not unicodedata.category(character).startswith("C"):
+            sanitized.append(character)
+        elif codepoint <= 0xFF:
+            sanitized.append(f"\\x{codepoint:02x}")
+        elif codepoint <= 0xFFFF:
+            sanitized.append(f"\\u{codepoint:04x}")
+        else:
+            sanitized.append(f"\\U{codepoint:08x}")
+    return "".join(sanitized)
 
 
 def run(
@@ -229,7 +249,10 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
     if not isinstance(configured, bool):
         return "unknown"
     expected_path = FEATURE_PATHS[key]
-    present = is_regular_file(repository_path / expected_path)
+    present = is_regular_file(
+        repository_path / expected_path,
+        repository_root=repository_path,
+    )
     if configured:
         return "enabled" if present else "missing"
     return "custom" if present else "disabled"
@@ -263,7 +286,9 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
         components = ["none"]
 
     missing_baseline = tuple(
-        path for path in BASELINE_PATHS if not is_regular_file(repository_path / path)
+        path
+        for path in BASELINE_PATHS
+        if not is_regular_file(repository_path / path, repository_root=repository_path)
     )
     present_baseline = len(BASELINE_PATHS) - len(missing_baseline)
     docker = answers.get("docker")
@@ -687,7 +712,7 @@ def process_repository(
     destination = workspace / repository.name_with_owner.replace("/", "--")
     clone_repository(repository, destination, env=env)
     cloned_answers_path = destination / ANSWERS_FILE
-    if not is_regular_file(cloned_answers_path):
+    if not is_regular_file(cloned_answers_path, repository_root=destination):
         raise FleetUpdateError(f"cloned {ANSWERS_FILE} must be a regular file")
     cloned_answers = cloned_answers_path.read_text(encoding="utf-8")
     cloned_source = normalize_template_source(parse_template_source(cloned_answers))
@@ -702,7 +727,7 @@ def process_repository(
             env=env,
         )
         updated_answers_path = destination / ANSWERS_FILE
-        if is_regular_file(updated_answers_path):
+        if is_regular_file(updated_answers_path, repository_root=destination):
             updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
             updated_commit = updated_answers.get("_commit")
             if isinstance(updated_commit, str) and updated_commit.strip():

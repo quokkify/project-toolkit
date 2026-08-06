@@ -249,8 +249,34 @@ class TemplateInventoryTests(TestCase):
                 repository,
             )
 
-        self.assertIn(fleet.BASELINE_PATHS[0], inventory.missing_baseline)
         self.assertEqual(inventory.release_please, "missing")
+        self.assertIn(".github/workflows/validate.yml", inventory.missing_baseline)
+
+    def test_symlinked_parent_directory_does_not_materialize_outputs(self) -> None:
+        raw_answers = (
+            "_commit: v2.8.2\n"
+            "_src_path: gh:quokkify/project-toolkit\n"
+            "release_please: true\n"
+            "renovate: true\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            outside = Path(temporary) / "outside"
+            (outside / "workflows").mkdir(parents=True)
+            (outside / "workflows" / "validate.yml").write_text("name: Validate\n")
+            (outside / "workflows" / "gitleaks.yml").write_text("name: Gitleaks\n")
+            (outside / "workflows" / "codeql.yml").write_text("name: CodeQL\n")
+            (outside / "workflows" / "release.yml").write_text("name: Release\n")
+            (outside / "renovate.json").write_text("{}\n")
+            repository.mkdir()
+            (repository / ".github").symlink_to(outside, target_is_directory=True)
+
+            inventory = fleet.inventory_from_answers(raw_answers, repository)
+
+        self.assertEqual(inventory.baseline, "0/3")
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertEqual(inventory.renovate, "missing")
+        self.assertEqual(set(inventory.missing_baseline), set(fleet.BASELINE_PATHS))
 
     def test_console_markdown_and_json_reports_share_the_inventory(self) -> None:
         inventory = fleet.TemplateInventory(
@@ -288,7 +314,7 @@ class TemplateInventoryTests(TestCase):
         inventory = fleet.TemplateInventory(
             commit="v2.8.2\r",
             target_commit=None,
-            components=("python:C:\\repo\\|row\r\x1b",),
+            components=("python:C:\\repo\\|row\r\x1b\u0085\u009b",),
             baseline="3/3",
             missing_baseline=(),
             docker="disabled",
@@ -305,6 +331,10 @@ class TemplateInventoryTests(TestCase):
             self.assertNotIn("\x1b", rendered)
             self.assertIn("\\x0d", rendered)
             self.assertIn("\\x1b", rendered)
+            self.assertNotIn("\u0085", rendered)
+            self.assertNotIn("\u009b", rendered)
+            self.assertIn("\\x85", rendered)
+            self.assertIn("\\x9b", rendered)
         self.assertEqual(len([line for line in markdown.splitlines() if line.startswith("|")]), 3)
 
 

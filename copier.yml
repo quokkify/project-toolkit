@@ -74,10 +74,11 @@ renovate_config_repository:
 renovate_config_ref:
   type: str
   help: Exact released tag of the shared Renovate preset repository.
-  default: v1.0.1
+  default: >-
+    {% if renovate_config_repository == 'quokkify/renovate-presets' %}v1.0.1{% endif %}
   validator: >-
-    {% if not (renovate_config_ref | regex_search('^v[0-9]+\.[0-9]+\.[0-9]+$')) %}
-    Use one exact SemVer tag such as v1.0.1.
+    {% if not (renovate_config_ref | regex_search('^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$')) %}
+    Use one exact SemVer tag such as v1.0.1. Custom preset repositories must provide their own released tag explicitly.
     {% endif %}
 
 renovate_presets:

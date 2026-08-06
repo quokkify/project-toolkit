@@ -21,7 +21,7 @@ toolkit_version:
 
 components:
   type: yaml
-  help: "Optional list of mappings such as [{type: python, path: backend}]. Leave empty when the project owns a custom CI workflow. Supported types: python, node, java."
+  help: "Optional mappings such as [{type: python, path: backend, allure_results_path: allure-results}]. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
   default:
     - type: python
       path: .
@@ -30,6 +30,8 @@ components:
     {% if component is not mapping %}Every component must be a mapping with type and path.{% else %}
     {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}
     {% if component.path is not string or not component.path | trim %}Every component requires a non-empty string path.{% endif %}
+    {% set allure_path = component.get('allure_results_path', 'allure-results') %}
+    {% if allure_path is not string or not (allure_path | trim) %}allure_results_path must be a non-empty string.{% elif not (allure_path | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$')) or '.' in allure_path.split('/') or '..' in allure_path.split('/') %}allure_results_path must be a safe component-relative path without traversal or globs.{% endif %}
     {% endif %}
     {% endfor %}
 
@@ -46,6 +48,12 @@ allure_publish_pages:
   help: Publish each pull request report below allure/pr-N on the gh-pages branch.
   default: false
   when: "{{ allure_report }}"
+allure_pages_url:
+  type: str
+  help: Full HTTPS base URL served by GitHub Pages, without a trailing slash (for example https://owner.github.io/repository).
+  default: https://owner.github.io/repository
+  when: "{{ allure_report and allure_publish_pages }}"
+  validator: "{% if not (allure_pages_url | regex_search('^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*$')) %}Use a full HTTPS Pages base URL without query, fragment, or trailing slash.{% endif %}"
 release_please:
   type: bool
   default: false

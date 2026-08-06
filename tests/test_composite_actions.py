@@ -833,6 +833,7 @@ class ReusableTestArtifactContractTests(unittest.TestCase):
                 )
                 self.assertEqual(upload["with"]["name"], "${{ inputs.test-artifact-name }}")
                 self.assertIn("inputs.test-artifact-path", upload["with"]["path"])
+                self.assertEqual(upload["with"]["if-no-files-found"], "error")
 
 
 class DeployGhPagesSubdirTests(unittest.TestCase):

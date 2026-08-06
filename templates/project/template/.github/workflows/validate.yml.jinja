@@ -99,7 +99,7 @@ jobs:
     with:
       working-directory: {{ component.path | tojson }}
 {% if allure_report %}      upload-test-artifacts: true
-      test-artifact-path: allure-results
+      test-artifact-path: {{ component.get('allure_results_path', 'allure-results') | tojson }}
       test-artifact-name: allure-results-{{ component.type }}-{{ loop.index }}
 {% endif -%}
 {% endfor -%}

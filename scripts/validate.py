@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1182,26 +1183,61 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 == {"workflow_run": {"workflows": ["Validate"], "types": ["completed"]}},
                 f"{scenario}: report workflow must run only after Validate completes",
             )
-            expected_contents_permission = "write" if scenario == "allure-pages" else "read"
             check(
-                allure_workflow.get("permissions")
-                == {
-                    "actions": "read",
-                    "contents": expected_contents_permission,
-                    "pull-requests": "write",
-                },
-                f"{scenario}: report workflow has unexpected permissions",
+                allure_workflow.get("permissions") == {},
+                f"{scenario}: workflow-level permissions must remain empty",
+            )
+            jobs = allure_workflow.get("jobs", {})
+            check(
+                jobs.get("resolve", {}).get("permissions")
+                == {"actions": "read", "contents": "read", "pull-requests": "read"},
+                f"{scenario}: resolver permissions are not read-only",
+            )
+            check(
+                jobs.get("generate", {}).get("permissions")
+                == {"actions": "read", "contents": "read"},
+                f"{scenario}: untrusted report generation has write permissions",
+            )
+            check(
+                jobs.get("comment", {}).get("permissions")
+                == {"actions": "read", "pull-requests": "write"},
+                f"{scenario}: comment job permissions are not narrowly scoped",
+            )
+            write_content_jobs = [
+                name
+                for name, job in jobs.items()
+                if isinstance(job, dict)
+                and job.get("permissions", {}).get("contents") == "write"
+            ]
+            check(
+                write_content_jobs == (["pages"] if scenario == "allure-pages" else []),
+                f"{scenario}: only the opt-in Pages job may receive contents:write",
             )
             report_text = allure_workflow_path.read_text()
             check(
-                "github.event.repository.default_branch" in report_text
-                and "github.event.workflow_run.head_sha" not in report_text,
-                f"{scenario}: privileged workflow must check out only trusted default-branch configuration",
+                "ref: ${{ github.sha }}" in report_text
+                and "github.event.repository.default_branch" not in report_text,
+                f"{scenario}: report config is not pinned to the downstream default-branch SHA",
             )
             check(
                 "run-id: ${{ github.event.workflow_run.id }}" in report_text
-                and "pattern: allure-results-*" in report_text,
-                f"{scenario}: report workflow must download only source-run Allure artifacts",
+                and "pattern: allure-results-*" not in report_text
+                and "merge-multiple: true" not in report_text
+                and "${{ runner.temp }}/allure-inputs" in report_text,
+                f"{scenario}: source-run artifacts are not isolated and downloaded by exact name",
+            )
+            check(
+                "workflow_run.pull_requests[0]" not in report_text
+                and "Expected exactly one current open PR" in report_text
+                and "A newer Validate run exists" in report_text,
+                f"{scenario}: PR resolution or stale-run suppression is incomplete",
+            )
+            check(
+                "duplicate Allure artifact path" in report_text
+                and "250 MiB compressed limit" in report_text
+                and "1 GiB size limits" in report_text
+                and 'pull.user?.login === "dependabot[bot]"' in report_text,
+                f"{scenario}: artifact collision and resource bounds are missing",
             )
             validate_text = (dest / ".github/workflows/validate.yml").read_text()
             check(
@@ -1214,12 +1250,57 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
             for artifact_name in artifact_names:
                 check(
-                    artifact_name in validate_text,
-                    f"{scenario}: missing unique artifact {artifact_name}",
+                    artifact_name in validate_text and artifact_name in report_text,
+                    f"{scenario}: missing exact artifact contract for {artifact_name}",
+                )
+            if scenario == "allure-polyglot":
+                check(
+                    'test-artifact-path: "reports/allure-results"' in validate_text
+                    and 'test-artifact-path: "build/allure-results"' in validate_text,
+                    "allure-polyglot: custom per-component result paths were not rendered",
+                )
+                merge_step = next(
+                    step
+                    for step in jobs["generate"]["steps"]
+                    if step.get("name") == "Validate and merge Allure results"
+                )
+                merge_root = tmp_path / "allure-merge-probe"
+                input_root = merge_root / "inputs"
+                output_root = merge_root / "output" / "results"
+                for source_name, result_name in (
+                    ("python-1", "python-result.json"),
+                    ("node-2", "node-result.json"),
+                    ("java-3", "java-result.json"),
+                ):
+                    source = input_root / source_name
+                    source.mkdir(parents=True)
+                    (source / result_name).write_text("{}")
+                merge_env = dict(os.environ, INPUT_ROOT=str(input_root), OUTPUT_ROOT=str(output_root))
+                run(["bash", "-c", merge_step["run"]], dest, merge_env)
+                check(
+                    {path.name for path in output_root.iterdir()}
+                    == {"python-result.json", "node-result.json", "java-result.json"},
+                    "allure-polyglot: collision-safe merge omitted expected files",
+                )
+                (input_root / "python-1" / "collision.json").write_text("{}")
+                (input_root / "node-2" / "collision.json").write_text("{}")
+                collision_probe = subprocess.run(
+                    ["bash", "-c", merge_step["run"]],
+                    cwd=dest,
+                    env=merge_env,
+                    text=True,
+                    capture_output=True,
+                )
+                check(
+                    collision_probe.returncode != 0
+                    and "duplicate Allure artifact path: collision.json" in collision_probe.stderr,
+                    "allure-polyglot: duplicate artifact paths were not rejected",
                 )
             check(
-                ("publish-pages: true" in report_text) == (scenario == "allure-pages"),
-                f"{scenario}: Pages publishing does not match the Copier answer",
+                ("Publish trusted Pages report" in report_text) == (scenario == "allure-pages")
+                and ("https://quokkify.github.io/fixture-allure-pages" in report_text)
+                == (scenario == "allure-pages"),
+                f"{scenario}: Pages publishing does not match the Copier answers",
             )
         else:
             check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
@@ -1537,6 +1618,76 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             result.returncode != 0,
             f"invalid renovate_presets accepted: {invalid_label}={invalid_value!r}",
         )
+
+    for invalid_label, invalid_path in (
+        ("traversal", "../allure-results"),
+        ("absolute", "/tmp/allure-results"),
+        ("glob", "reports/*"),
+        ("backslash", "reports\\allure-results"),
+        ("empty-segment", "reports//allure-results"),
+    ):
+        invalid_data = tmp_path / f"invalid-allure-path-{invalid_label}.yml"
+        invalid_data.write_text(
+            yaml.safe_dump(
+                {
+                    "allure_report": True,
+                    "components": [
+                        {
+                            "type": "python",
+                            "path": ".",
+                            "allure_results_path": invalid_path,
+                        }
+                    ],
+                }
+            )
+        )
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(tmp_path / f"invalid-allure-path-{invalid_label}"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(result.returncode != 0, f"unsafe allure_results_path accepted: {invalid_path}")
+
+    for invalid_label, invalid_url in (
+        ("http", "http://owner.github.io/repository"),
+        ("trailing-slash", "https://owner.github.io/repository/"),
+        ("query", "https://owner.github.io/repository?ref=main"),
+        ("template", "https://{{ owner }}.github.io/repository"),
+    ):
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data",
+                "allure_report=true",
+                "--data",
+                "allure_publish_pages=true",
+                "--data",
+                f"allure_pages_url={invalid_url}",
+                str(template_source),
+                str(tmp_path / f"invalid-allure-url-{invalid_label}"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(result.returncode != 0, f"unsafe allure_pages_url accepted: {invalid_url}")
 
 run([sys.executable, "tests/test_composite_actions.py"])
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])

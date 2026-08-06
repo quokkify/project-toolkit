@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.9.0](https://github.com/quokkify/project-toolkit/compare/v2.8.2...v2.9.0) (2026-08-06)
+
+
+### Features
+
+* report Copier template inventory ([#79](https://github.com/quokkify/project-toolkit/issues/79)) ([7f874b2](https://github.com/quokkify/project-toolkit/commit/7f874b24f59aad334613223cc4b6f979770328ef))
+
+
+### Bug Fixes
+
+* canonicalize Copier template source URLs ([#71](https://github.com/quokkify/project-toolkit/issues/71)) ([388e35f](https://github.com/quokkify/project-toolkit/commit/388e35f7b7fefbe408beb8ed97dc5a4f1df9ce5d))
+* preserve Copier answers formatting during audit ([#73](https://github.com/quokkify/project-toolkit/issues/73)) ([be4e244](https://github.com/quokkify/project-toolkit/commit/be4e2445139d5798b6fc677e21664aa55d728a40))
+
 ## [2.8.2](https://github.com/quokkify/project-toolkit/compare/v2.8.1...v2.8.2) (2026-08-03)
 
 

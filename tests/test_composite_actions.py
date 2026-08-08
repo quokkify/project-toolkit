@@ -771,7 +771,7 @@ class AllureReportActionTests(unittest.TestCase):
             {name: f"${{{{ inputs.{name} }}}}" for name in data["inputs"]},
         )
 
-    def test_wrapper_uses_immutable_release_and_has_no_vendor_copy(self) -> None:
+    def test_wrapper_uses_sidecar_metadata_release_and_has_no_vendor_copy(self) -> None:
         action_path = ROOT / "actions/allure-report/action.yml"
         text = action_path.read_text()
         self.assertRegex(
@@ -779,7 +779,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa # v0.2.1",
+            "uses: quokkify/allure-report-action@da08bcb0d4e5463e5778ab22ed5ce466924c4b9d # v0.2.2",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -807,8 +807,8 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "73c66b277ec7c73cdec2ee81b3b72410272b66fa")
-        self.assertEqual(match.group("currentValue"), "v0.2.1")
+        self.assertEqual(match.group("currentDigest"), "da08bcb0d4e5463e5778ab22ed5ce466924c4b9d")
+        self.assertEqual(match.group("currentValue"), "v0.2.2")
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

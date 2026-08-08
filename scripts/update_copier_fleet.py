@@ -27,7 +27,8 @@ import yaml
 ANSWERS_FILE = ".copier-answers.yml"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
-PR_TITLE = "chore: update shared project template"
+PR_TITLE = "chore(template): update shared project template"
+RELEASE_TAG_PATTERN = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 class FleetUpdateError(RuntimeError):
@@ -160,6 +161,25 @@ def gh_json(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
+
+
+def resolve_template_ref(
+    template_repository: str,
+    requested_ref: str | None,
+    *,
+    env: dict[str, str],
+) -> str:
+    """Resolve the implicit Copier target to the latest stable release tag."""
+    if requested_ref:
+        return requested_ref
+    release = gh_json(
+        ["release", "view", "--repo", template_repository, "--json", "tagName"],
+        env=env,
+    )
+    tag_name = release.get("tagName") if isinstance(release, dict) else None
+    if not isinstance(tag_name, str) or not RELEASE_TAG_PATTERN.fullmatch(tag_name):
+        raise FleetUpdateError("latest template release must use an exact vMAJOR.MINOR.PATCH tag")
+    return tag_name
 
 
 def discover_repositories(
@@ -583,6 +603,21 @@ def restore_answers_format_if_semantically_equal(
     updated_answers = parse_answers(updated_text)
     if original_answers == updated_answers and original_text != updated_text:
         answers_path.write_text(original_text, encoding="utf-8")
+    elif original_answers != updated_answers:
+        class IndentedSafeDumper(yaml.SafeDumper):
+            def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+                return super().increase_indent(flow, False)
+
+        answers_path.write_text(
+            yaml.dump(
+                updated_answers,
+                Dumper=IndentedSafeDumper,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
 
 
 def update_template(
@@ -609,6 +644,8 @@ def update_template(
     ]
     if template_ref:
         command.extend(["--vcs-ref", template_ref])
+        if RELEASE_TAG_PATTERN.fullmatch(template_ref):
+            command.extend(["--data", f"toolkit_version={template_ref}"])
     command.append(".")
     run(command, cwd=repository_path, env=env)
     restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
@@ -854,6 +891,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
 
     excluded = {name.casefold() for name in args.exclude}
+    template_ref = args.template_ref
+    if any(repository.name_with_owner.casefold() not in excluded for repository in repositories):
+        try:
+            template_ref = resolve_template_ref(
+                args.template_repository,
+                args.template_ref,
+                env=env,
+            )
+        except FleetUpdateError as exc:
+            print(f"template release resolution failed: {exc}", file=sys.stderr)
+            return 1
     with tempfile.TemporaryDirectory(prefix="copier-fleet-") as temporary:
         workspace = Path(temporary)
         for repository in repositories:
@@ -866,7 +914,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     expected_template=args.template_repository,
                     branch=args.branch,
                     dry_run=args.dry_run,
-                    template_ref=args.template_ref,
+                    template_ref=template_ref,
                     env=env,
                     workspace=workspace,
                 )

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.11.0](https://github.com/quokkify/project-toolkit/compare/v2.10.1...v2.11.0) (2026-08-08)
+
+
+### Features
+
+* **allure:** support external workflow artifacts ([#98](https://github.com/quokkify/project-toolkit/issues/98)) ([cb1357e](https://github.com/quokkify/project-toolkit/commit/cb1357e29a77075d2168e2a1cbd375f0a45a1aff))
+
+
+### Bug Fixes
+
+* **fleet:** align Copier release answers ([#94](https://github.com/quokkify/project-toolkit/issues/94)) ([6b171ce](https://github.com/quokkify/project-toolkit/commit/6b171cea17b7e2d4e4798380b4a75fe36aaabb52))
+
 ## [2.10.1](https://github.com/quokkify/project-toolkit/compare/v2.10.0...v2.10.1) (2026-08-06)
 
 

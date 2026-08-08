@@ -17,9 +17,10 @@ jobs:
     if: >-
       {% raw %}${{
         github.event.workflow_run.event == 'pull_request' &&
-        github.event.workflow_run.conclusion != 'cancelled' &&
-        github.event.workflow_run.conclusion != 'skipped' &&
-        github.event.workflow_run.conclusion != 'action_required'
+        contains(
+          fromJSON('["success","failure","neutral","timed_out"]'),
+          github.event.workflow_run.conclusion
+        )
       }}{% endraw %}
     runs-on: ubuntu-latest
     timeout-minutes: 5

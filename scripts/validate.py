@@ -1221,11 +1221,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             resolve_condition = jobs.get("resolve", {}).get("if", "")
             check(
                 "github.event.workflow_run.event == 'pull_request'" in resolve_condition
-                and all(
-                    f"github.event.workflow_run.conclusion != '{conclusion}'" in resolve_condition
-                    for conclusion in ("cancelled", "skipped", "action_required")
-                ),
-                f"{scenario}: resolver does not exclude non-reportable source conclusions",
+                and 'fromJSON(\'["success","failure","neutral","timed_out"]\')'
+                in resolve_condition
+                and "github.event.workflow_run.conclusion" in resolve_condition,
+                f"{scenario}: resolver does not allowlist reportable source conclusions",
             )
             check(
                 jobs.get("generate", {}).get("permissions")

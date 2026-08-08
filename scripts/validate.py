@@ -1151,6 +1151,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
+        "allure-external": ["default", "github-actions"],
         "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
@@ -1169,6 +1170,23 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 str(dest),
             ]
         )
+        if scenario == "allure-external":
+            external_workflow = dest / ".github/workflows/test.yml"
+            external_workflow.write_text(
+                "name: Run tests\n"
+                "on: [pull_request]\n"
+                "permissions:\n"
+                "  contents: read\n"
+                "jobs:\n"
+                "  test:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: echo fixture\n",
+                encoding="utf-8",
+            )
+            categories = dest / ".github/allure/categories.json"
+            categories.parent.mkdir(parents=True, exist_ok=True)
+            categories.write_text("[]\n", encoding="utf-8")
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
         allure_workflow_path = dest / ".github/workflows/allure-report.yml"
@@ -1184,10 +1202,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
             allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
             allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
+            expected_source_workflow = "Run tests" if scenario == "allure-external" else "Validate"
             check(
                 allure_triggers
-                == {"workflow_run": {"workflows": ["Validate"], "types": ["completed"]}},
-                f"{scenario}: report workflow must run only after Validate completes",
+                == {"workflow_run": {"workflows": [expected_source_workflow], "types": ["completed"]}},
+                f"{scenario}: report workflow has the wrong source workflow trigger",
             )
             check(
                 allure_workflow.get("permissions") == {},
@@ -1243,7 +1262,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(
                 "workflow_run.pull_requests[0]" not in report_text
                 and "Expected exactly one current open PR" in report_text
-                and "A newer Validate run exists" in report_text,
+                and "A newer source workflow run exists" in report_text,
                 f"{scenario}: PR resolution or stale-run suppression is incomplete",
             )
             check(
@@ -1264,11 +1283,26 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             artifact_names = ["allure-results-python-1"]
             if scenario == "allure-polyglot":
                 artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
-            for artifact_name in artifact_names:
+            if scenario == "allure-external":
+                artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
-                    artifact_name in validate_text and artifact_name in report_text,
-                    f"{scenario}: missing exact artifact contract for {artifact_name}",
+                    'workflows: ["Run tests"]' in report_text
+                    and 'run.path !== ".github/workflows/test.yml"' in report_text
+                    and 'const artifactPrefix = "external-allure-"' in report_text
+                    and "const minimumArtifacts = 2" in report_text
+                    and "const maximumArtifacts = 7" in report_text
+                    and 'categories-file: ".github/allure/categories.json"' in report_text
+                    and "new Set(actualNames).size" in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text
+                    and "expectedArtifacts.map((name)" not in report_text,
+                    "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
+            else:
+                for artifact_name in artifact_names:
+                    check(
+                        artifact_name in validate_text and artifact_name in report_text,
+                        f"{scenario}: missing exact artifact contract for {artifact_name}",
+                    )
             if scenario == "allure-polyglot":
                 check(
                     'test-artifact-path: "reports/allure-results"' in validate_text
@@ -1818,6 +1852,46 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check=False,
         )
         check(result.returncode != 0, f"unsafe allure_pages_url accepted: {invalid_url}")
+
+    invalid_external_values: tuple[tuple[str, str, object], ...] = (
+        ("workflow-path-traversal", "allure_external_workflow_path", "../test.yml"),
+        ("artifact-prefix-glob", "allure_external_artifact_prefix", "allure-*"),
+        ("minimum-zero", "allure_external_artifact_min_count", 0),
+        ("maximum-over-limit", "allure_external_artifact_max_count", 51),
+        ("maximum-below-minimum", "allure_external_artifact_max_count", 1),
+        ("categories-traversal", "allure_categories_file", "../categories.json"),
+    )
+    for invalid_label, field, invalid_value in invalid_external_values:
+        external_data: dict[str, object] = {
+            "components": [],
+            "allure_report": True,
+            "allure_external_workflow_name": "Run tests",
+            "allure_external_workflow_path": ".github/workflows/test.yml",
+            "allure_external_artifact_prefix": "allure-results-",
+            "allure_external_artifact_min_count": 2,
+            "allure_external_artifact_max_count": 7,
+        }
+        external_data[field] = invalid_value
+        invalid_data = tmp_path / f"invalid-allure-external-{invalid_label}.yml"
+        invalid_data.write_text(yaml.safe_dump(external_data), encoding="utf-8")
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(tmp_path / f"invalid-allure-external-{invalid_label}"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
 
 run([sys.executable, "tests/test_composite_actions.py"])
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])

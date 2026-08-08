@@ -1857,6 +1857,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ("workflow-path-traversal", "allure_external_workflow_path", "../test.yml"),
         ("artifact-prefix-glob", "allure_external_artifact_prefix", "allure-*"),
         ("minimum-zero", "allure_external_artifact_min_count", 0),
+        ("minimum-over-limit", "allure_external_artifact_min_count", 51),
         ("maximum-over-limit", "allure_external_artifact_max_count", 51),
         ("maximum-below-minimum", "allure_external_artifact_max_count", 1),
         ("categories-traversal", "allure_categories_file", "../categories.json"),

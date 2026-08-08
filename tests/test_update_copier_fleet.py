@@ -332,6 +332,48 @@ class TemplateInventoryTests(TestCase):
 
         self.assertEqual(inventory.allure_report, "custom")
 
+    def test_ignores_toolkit_allure_action_text_inside_run_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/validate.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n"
+                "  validate:\n"
+                "    steps:\n"
+                "      - run: |\n"
+                "          uses: quokkify/project-toolkit/actions/allure-report@v2.10.1\n"
+                "      - uses: quokkify/project-toolkit/actions/allure-report@\n",
+                encoding="utf-8",
+            )
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nallure_report: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.allure_report, "disabled")
+
+    def test_detects_inline_quoted_toolkit_allure_uses_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yaml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n"
+                "  report:\n"
+                "    steps:\n"
+                "      - {'uses': quokkify/project-toolkit/actions/allure-report@v2.10.1}\n",
+                encoding="utf-8",
+            )
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nallure_report: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.allure_report, "custom")
+
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

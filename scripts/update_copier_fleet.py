@@ -90,7 +90,7 @@ ALLURE_EXPECTED_PATHS = (
     ALLURE_EXTRACTOR_PATH,
 )
 ALLURE_ACTION_REFERENCE_PATTERN = re.compile(
-    r"^\s*(?:-\s*)?uses\s*:\s*[\"']?quokkify/project-toolkit/actions/allure-report@"
+    r"^quokkify/project-toolkit/actions/allure-report@\S+$"
 )
 FEATURE_LABELS = {
     "enabled": "on",
@@ -292,9 +292,21 @@ def repository_uses_toolkit_allure_action(repository_path: Path) -> bool:
     for workflow_path in workflow_paths:
         if not is_regular_file(workflow_path, repository_root=repository_path):
             continue
-        workflow = workflow_path.read_text(encoding="utf-8", errors="replace")
-        if any(ALLURE_ACTION_REFERENCE_PATTERN.match(line) for line in workflow.splitlines()):
-            return True
+        try:
+            workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            steps = job.get("steps") if isinstance(job, dict) else None
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                uses = step.get("uses") if isinstance(step, dict) else None
+                if isinstance(uses, str) and ALLURE_ACTION_REFERENCE_PATTERN.fullmatch(uses):
+                    return True
     return False
 
 

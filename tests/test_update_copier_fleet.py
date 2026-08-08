@@ -146,6 +146,11 @@ class TemplateUpdateTests(TestCase):
             )
 
         self.assertEqual(events, ["copier-update", "canonicalize"])
+        copier_command = run_mock.call_args.args[0]
+        self.assertIn("--vcs-ref", copier_command)
+        self.assertIn("v2.8.1", copier_command)
+        self.assertIn("--data", copier_command)
+        self.assertIn("toolkit_version=v2.8.1", copier_command)
 
     def test_restores_prettier_formatting_when_answers_are_semantically_equal(self) -> None:
         original = (
@@ -165,15 +170,52 @@ class TemplateUpdateTests(TestCase):
             self.assertEqual(answers.read_text(encoding="utf-8"), original)
 
     def test_keeps_copier_answers_when_semantics_changed(self) -> None:
-        original = "_commit: v2.8.1\n"
-        updated = "_commit: v2.8.2\n"
+        original = "_commit: v2.8.1\nrenovate_presets:\n  - default\n"
+        updated = "_commit: v2.8.2\nrenovate_presets:\n- default\n- github-actions\n"
         with tempfile.TemporaryDirectory() as temporary:
             answers = Path(temporary) / fleet.ANSWERS_FILE
             answers.write_text(updated, encoding="utf-8")
 
             fleet.restore_answers_format_if_semantically_equal(answers, original)
 
-            self.assertEqual(answers.read_text(encoding="utf-8"), updated)
+            self.assertEqual(
+                answers.read_text(encoding="utf-8"),
+                "_commit: v2.8.2\nrenovate_presets:\n  - default\n  - github-actions\n",
+            )
+
+    @mock.patch.object(fleet, "gh_json", return_value={"tagName": "v2.10.1"})
+    def test_resolves_latest_release_when_template_ref_is_omitted(
+        self,
+        gh_json_mock: mock.Mock,
+    ) -> None:
+        resolved = fleet.resolve_template_ref("quokkify/project-toolkit", None, env={})
+
+        self.assertEqual(resolved, "v2.10.1")
+        gh_json_mock.assert_called_once_with(
+            [
+                "release",
+                "view",
+                "--repo",
+                "quokkify/project-toolkit",
+                "--json",
+                "tagName",
+            ],
+            env={},
+        )
+
+    @mock.patch.object(fleet, "gh_json", return_value={"tagName": "v02.10.1"})
+    def test_rejects_latest_release_with_leading_zero(
+        self,
+        _: mock.Mock,
+    ) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "exact vMAJOR.MINOR.PATCH"):
+            fleet.resolve_template_ref("quokkify/project-toolkit", None, env={})
+
+    def test_keeps_explicit_non_release_template_ref_for_preview(self) -> None:
+        self.assertEqual(
+            fleet.resolve_template_ref("quokkify/project-toolkit", "feature/allure", env={}),
+            "feature/allure",
+        )
 
 
 class TemplateInventoryTests(TestCase):
@@ -637,7 +679,7 @@ class CommandLineTests(TestCase):
         __: mock.Mock,
         process_mock: mock.Mock,
     ) -> None:
-        self.assertEqual(fleet.main(["--dry-run"]), 3)
+        self.assertEqual(fleet.main(["--dry-run", "--template-ref", "v2.10.1"]), 3)
         process_mock.assert_called_once()
 
     @mock.patch.object(fleet, "process_repository")
@@ -672,7 +714,15 @@ class CommandLineTests(TestCase):
         process_mock.side_effect = fleet.RepositoryProcessError("conflict", inventory)
         with tempfile.TemporaryDirectory() as temporary:
             report_path = Path(temporary) / "audit.json"
-            status = fleet.main(["--dry-run", "--json-report", str(report_path)])
+            status = fleet.main(
+                [
+                    "--dry-run",
+                    "--template-ref",
+                    "v2.10.1",
+                    "--json-report",
+                    str(report_path),
+                ]
+            )
             report = json.loads(report_path.read_text(encoding="utf-8"))
 
         self.assertEqual(status, 1)

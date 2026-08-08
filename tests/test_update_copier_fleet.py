@@ -311,6 +311,27 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(still_incomplete.allure_report, "missing")
         self.assertEqual(enabled.allure_report, "enabled")
 
+    def test_reports_direct_toolkit_allure_action_usage_as_custom(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/summary.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n"
+                "  report:\n"
+                "    steps:\n"
+                "      - uses: quokkify/project-toolkit/actions/allure-report@"
+                "734fd9281ffa353e37c768f7bb56bbcd28347916 # v2.10.1\n",
+                encoding="utf-8",
+            )
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nallure_report: false\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.allure_report, "custom")
+
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

@@ -89,6 +89,9 @@ ALLURE_EXPECTED_PATHS = (
     ALLURE_CONFIG_PATH,
     ALLURE_EXTRACTOR_PATH,
 )
+ALLURE_ACTION_REFERENCE_PATTERN = re.compile(
+    r"^\s*(?:-\s*)?uses\s*:\s*[\"']?quokkify/project-toolkit/actions/allure-report@"
+)
 FEATURE_LABELS = {
     "enabled": "on",
     "disabled": "off",
@@ -275,6 +278,26 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def repository_uses_toolkit_allure_action(repository_path: Path) -> bool:
+    workflows_path = repository_path / ".github/workflows"
+    if (
+        not workflows_path.is_dir()
+        or workflows_path.is_symlink()
+        or workflows_path.parent.is_symlink()
+    ):
+        return False
+    workflow_paths = sorted(
+        (*workflows_path.glob("*.yml"), *workflows_path.glob("*.yaml"))
+    )
+    for workflow_path in workflow_paths:
+        if not is_regular_file(workflow_path, repository_root=repository_path):
+            continue
+        workflow = workflow_path.read_text(encoding="utf-8", errors="replace")
+        if any(ALLURE_ACTION_REFERENCE_PATTERN.match(line) for line in workflow.splitlines()):
+            return True
+    return False
+
+
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
     configured = answers.get(key)
     if not isinstance(configured, bool):
@@ -286,7 +309,10 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
     )
     if configured:
         return "enabled" if all(materialized) else "missing"
-    return "custom" if any(materialized) else "disabled"
+    custom_allure = key == "allure_report" and repository_uses_toolkit_allure_action(
+        repository_path
+    )
+    return "custom" if any(materialized) or custom_allure else "disabled"
 
 
 def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateInventory:

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.1](https://github.com/quokkify/project-toolkit/compare/v2.11.0...v2.11.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **allure:** harden generated workflow inputs ([#99](https://github.com/quokkify/project-toolkit/issues/99)) ([0e8adfb](https://github.com/quokkify/project-toolkit/commit/0e8adfbb5cced488e281cbfe180e2a1a04f755b1))
+
 ## [2.11.0](https://github.com/quokkify/project-toolkit/compare/v2.10.1...v2.11.0) (2026-08-08)
 
 

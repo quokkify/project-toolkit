@@ -28,7 +28,9 @@ ANSWERS_FILE = ".copier-answers.yml"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
 PR_TITLE = "chore(template): update shared project template"
-RELEASE_TAG_PATTERN = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+RELEASE_TAG_PATTERN = re.compile(
+    r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+)
 
 
 class FleetUpdateError(RuntimeError):

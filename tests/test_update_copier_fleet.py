@@ -203,6 +203,14 @@ class TemplateUpdateTests(TestCase):
             env={},
         )
 
+    @mock.patch.object(fleet, "gh_json", return_value={"tagName": "v02.10.1"})
+    def test_rejects_latest_release_with_leading_zero(
+        self,
+        _: mock.Mock,
+    ) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "exact vMAJOR.MINOR.PATCH"):
+            fleet.resolve_template_ref("quokkify/project-toolkit", None, env={})
+
     def test_keeps_explicit_non_release_template_ref_for_preview(self) -> None:
         self.assertEqual(
             fleet.resolve_template_ref("quokkify/project-toolkit", "feature/allure", env={}),

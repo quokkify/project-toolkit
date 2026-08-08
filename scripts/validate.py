@@ -730,6 +730,8 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
+RENOVATE_PRESET_REF = "v1.0.1"
+CUSTOM_RENOVATE_PRESET_REF = "v9.8.7"
 RENOVATE_PRESET_PATHS = {
     "default": "presets/base",
     "python": "presets/python/default",
@@ -738,11 +740,16 @@ RENOVATE_PRESET_PATHS = {
     "docker": "presets/docker/default",
     "github-actions": "presets/github-actions/default",
 }
+RENOVATE_COPIER_RULE = {
+    "description": "Copier updates are managed atomically by project-toolkit fleet automation",
+    "matchManagers": ["copier"],
+    "enabled": False,
+}
 
 
-def renovate_extends(repository: str, presets: list[str]) -> list[str]:
+def renovate_extends(repository: str, presets: list[str], ref: str = RENOVATE_PRESET_REF) -> list[str]:
     """Return exact Renovate extends entries for selected preset names."""
-    return [f"github>{repository}//{RENOVATE_PRESET_PATHS[preset]}" for preset in presets]
+    return [f"github>{repository}//{RENOVATE_PRESET_PATHS[preset]}#{ref}" for preset in presets]
 
 
 def assert_generated_renovate_config(path: Path, expected_extends: list[str], label: str) -> None:
@@ -756,6 +763,10 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
     check(
         data.get("extends") == expected_extends,
         f"{label}: renovate extends mismatch: {data.get('extends')!r}",
+    )
+    check(
+        data.get("packageRules") == [RENOVATE_COPIER_RULE],
+        f"{label}: Renovate must disable partial Copier updates",
     )
 
 
@@ -883,6 +894,25 @@ for action_path in action_paths:
                     )
 
 
+def validate_renovate_root_policy() -> list[str]:
+    """Validate this repository's pinned preset and Copier ownership policy."""
+    try:
+        renovate = json.loads((ROOT / ".github/renovate.json").read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [f".github/renovate.json policy probe requires valid JSON: {exc}"]
+
+    errors: list[str] = []
+    expected_preset = (
+        "github>quokkify/renovate-presets//presets/github-actions/default"
+        f"#{RENOVATE_PRESET_REF}"
+    )
+    if expected_preset not in renovate.get("extends", []):
+        errors.append(f"renovate.json must pin released preset {expected_preset}")
+    if renovate.get("packageRules") != [RENOVATE_COPIER_RULE]:
+        errors.append("renovate.json packageRules must disable only Copier fleet-owned updates")
+    return errors
+
+
 def validate_gh_pages_subdir_manager_regex() -> list[str]:
     """Regression probes for the gh-pages-subdir-action regex matcher."""
     errors: list[str] = []
@@ -939,7 +969,8 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
     return errors
 
 
-# Validate gh-pages-subdir-action Renovate regex against fixtures to avoid drift.
+# Validate root Renovate policy and regex fixtures to avoid drift.
+ERRORS.extend(validate_renovate_root_policy())
 ERRORS.extend(validate_gh_pages_subdir_manager_regex())
 
 # Negative contract probes prove that permission/secret leakage, malformed booleans,
@@ -1481,6 +1512,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "copier update did not persist renovate_config_repository",
             )
             check(
+                answers.get("renovate_config_ref") == RENOVATE_PRESET_REF,
+                "copier update did not persist the released renovate_config_ref",
+            )
+            check(
                 answers.get("renovate_presets") == ["default", "github-actions", "python"],
                 "copier update did not persist inferred renovate_presets",
             )
@@ -1596,6 +1631,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         yaml.safe_dump(
             {
                 "renovate_config_repository": "acme/shared-renovate",
+                "renovate_config_ref": CUSTOM_RENOVATE_PRESET_REF,
                 "renovate_presets": list(RENOVATE_PRESET_PATHS),
             }
         )
@@ -1617,7 +1653,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     )
     assert_generated_renovate_config(
         custom_dest / ".github/renovate.json",
-        renovate_extends("acme/shared-renovate", list(RENOVATE_PRESET_PATHS)),
+        renovate_extends(
+            "acme/shared-renovate",
+            list(RENOVATE_PRESET_PATHS),
+            CUSTOM_RENOVATE_PRESET_REF,
+        ),
         "custom-renovate-all",
     )
 
@@ -1626,6 +1666,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         yaml.safe_dump(
             {
                 "renovate_config_repository": "octocat/octocat.github.io",
+                "renovate_config_ref": CUSTOM_RENOVATE_PRESET_REF,
                 "renovate_presets": ["default"],
             }
         )
@@ -1647,7 +1688,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     )
     assert_generated_renovate_config(
         dotted_repo_dest / ".github/renovate.json",
-        renovate_extends("octocat/octocat.github.io", ["default"]),
+        renovate_extends(
+            "octocat/octocat.github.io", ["default"], CUSTOM_RENOVATE_PRESET_REF
+        ),
         "custom-renovate-dotted-repo",
     )
 
@@ -1656,6 +1699,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         yaml.safe_dump(
             {
                 "renovate_config_repository": "acme/shared-renovate",
+                "renovate_config_ref": CUSTOM_RENOVATE_PRESET_REF,
                 "renovate_presets": ["default", "javascript", "github-actions"],
             }
         )
@@ -1677,7 +1721,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     )
     assert_generated_renovate_config(
         custom_selected_dest / ".github/renovate.json",
-        renovate_extends("acme/shared-renovate", ["default", "javascript", "github-actions"]),
+        renovate_extends(
+            "acme/shared-renovate",
+            ["default", "javascript", "github-actions"],
+            CUSTOM_RENOVATE_PRESET_REF,
+        ),
         "custom-renovate-selected",
     )
 
@@ -1714,6 +1762,57 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             result.returncode != 0,
             f"invalid renovate_config_repository accepted: {invalid_value}",
         )
+
+    missing_custom_ref = subprocess.run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data",
+            "renovate_config_repository=acme/shared-renovate",
+            str(template_source),
+            str(tmp_path / "missing-custom-renovate-ref"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        missing_custom_ref.returncode != 0,
+        "custom renovate_config_repository accepted without its own released ref",
+    )
+
+    for invalid_ref in (
+        "v01.2.3",
+        "v1.02.3",
+        "v1.2.03",
+        "1.2.3",
+        "v1.2",
+        "v1.2.3-beta.1",
+        "main",
+    ):
+        invalid_label = re.sub(r"[^A-Za-z0-9]+", "-", invalid_ref).strip("-")
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data",
+                f"renovate_config_ref={invalid_ref}",
+                str(template_source),
+                str(tmp_path / f"invalid-renovate-ref-{invalid_label}"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(result.returncode != 0, f"invalid renovate_config_ref accepted: {invalid_ref}")
 
     invalid_preset_values: tuple[tuple[str, object], ...] = (
         ("unknown", ["default", "ruby"]),

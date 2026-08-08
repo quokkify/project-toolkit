@@ -2,7 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/project-toolkit//renovate/default.json",
-    "github>quokkify/renovate-presets//presets/github-actions/default"
+    "github>quokkify/renovate-presets//presets/github-actions/default#v1.0.1"
+  ],
+  "packageRules": [
+    {
+      "description": "Copier updates are managed atomically by project-toolkit fleet automation",
+      "matchManagers": ["copier"],
+      "enabled": false
+    }
   ],
   "customManagers": [
     {

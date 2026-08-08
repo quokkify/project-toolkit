@@ -1218,6 +1218,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 == {"actions": "read", "contents": "read", "pull-requests": "read"},
                 f"{scenario}: resolver permissions are not read-only",
             )
+            resolve_condition = jobs.get("resolve", {}).get("if", "")
+            check(
+                "github.event.workflow_run.event == 'pull_request'" in resolve_condition
+                and all(
+                    f"github.event.workflow_run.conclusion != '{conclusion}'" in resolve_condition
+                    for conclusion in ("cancelled", "skipped", "action_required")
+                ),
+                f"{scenario}: resolver does not exclude non-reportable source conclusions",
+            )
             check(
                 jobs.get("generate", {}).get("permissions")
                 == {"actions": "read", "contents": "read"},
@@ -1239,6 +1248,25 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 f"{scenario}: only the opt-in Pages job may receive contents:write",
             )
             report_text = allure_workflow_path.read_text()
+            pr_number_script_steps = []
+            for job_name in ("comment", "pages"):
+                for step in jobs.get(job_name, {}).get("steps", []):
+                    script = step.get("with", {}).get("script", "")
+                    if "const prNumber" in script:
+                        pr_number_script_steps.append(step)
+            check(
+                len(pr_number_script_steps) == (2 if scenario == "allure-pages" else 1)
+                and all(
+                    step.get("env", {}).get("PR_NUMBER")
+                    == "${{ needs.resolve.outputs.pr-number }}"
+                    and "const prNumber = Number(process.env.PR_NUMBER);"
+                    in step.get("with", {}).get("script", "")
+                    and "${{ needs.resolve.outputs.pr-number }}"
+                    not in step.get("with", {}).get("script", "")
+                    for step in pr_number_script_steps
+                ),
+                f"{scenario}: PR number is interpolated directly into a github-script body",
+            )
             check(
                 "ref: ${{ github.sha }}" in report_text
                 and "github.event.repository.default_branch" not in report_text,

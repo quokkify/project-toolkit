@@ -14,7 +14,13 @@ concurrency:
 jobs:
   resolve:
     name: Resolve trusted source run
-    if: {% raw %}${{ github.event.workflow_run.event == 'pull_request' }}{% endraw %}
+    if: >-
+      {% raw %}${{
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion != 'cancelled' &&
+        github.event.workflow_run.conclusion != 'skipped' &&
+        github.event.workflow_run.conclusion != 'action_required'
+      }}{% endraw %}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -191,10 +197,12 @@ jobs:
     steps:
       - name: Revalidate source freshness and update comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v8.0.0
+        env:
+          PR_NUMBER: {% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %}
         with:
           script: |
             const run = context.payload.workflow_run;
-            const prNumber = Number({% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %});
+            const prNumber = Number(process.env.PR_NUMBER);
             const { data: pull } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -269,10 +277,12 @@ jobs:
       - name: Revalidate source freshness
         id: freshness
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v8.0.0
+        env:
+          PR_NUMBER: {% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %}
         with:
           script: |
             const run = context.payload.workflow_run;
-            const prNumber = Number({% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %});
+            const prNumber = Number(process.env.PR_NUMBER);
             const { data: pull } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,

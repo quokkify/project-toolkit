@@ -298,7 +298,7 @@ runs:
 
     - id: compose-health
       name: Start Compose with standalone health engine
-      uses: quokkify/compose-health-check-action@311d0f33cbb1f141baaaf16a39e5bfb9bc126df9 # pending v2.4.0; update to the release commit before merge
+      uses: quokkify/compose-health-check-action@cd3d5685f79d93c748e84766dc6f6fc5fae8c59b # pending v2.4.0; update to the release commit before merge
       with:
         compose-files: ${{ env.COMPOSE_FILES_NORMALIZED }}
         compose-services: ${{ env.COMPOSE_SERVICES_NORMALIZED }}

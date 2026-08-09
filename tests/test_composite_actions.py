@@ -481,7 +481,7 @@ class ComposeActionTests(unittest.TestCase):
     def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
         text = (ROOT / "actions/compose-up/action.yml").read_text()
         self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
-        self.assertIn("@311d0f33cbb1f141baaaf16a39e5bfb9bc126df9 # pending v2.4.0", text)
+        self.assertIn("@cd3d5685f79d93c748e84766dc6f6fc5fae8c59b # pending v2.4.0", text)
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)

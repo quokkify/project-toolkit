@@ -167,17 +167,23 @@ jobs:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-archives
           OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-expanded
-          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/source-artifacts
         run: python .github/allure/safe_extract.py
       - name: Build Allure report without write privileges
         uses: quokkify/project-toolkit/actions/allure-report@{{ toolkit_version }}
         with:
           github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           results-directory: .allure-input/results
+          source-artifacts-directory: .allure-input/source-artifacts
           report-directory: allure-report
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}
 {% endif %}          source-run-id: {% raw %}${{ github.event.workflow_run.id }}{% endraw %}
+          comment-file: allure-report/allure-pr-comment.md
+          comment-marker: "<!-- project-toolkit-allure-report -->"
+{% if allure_publish_pages %}          pages-url: {% raw %}${{ format('{0}/allure/pr-{1}/?run={2}', '{% endraw %}{{ allure_pages_url | replace("'", "''") }}{% raw %}', needs.resolve.outputs.pr-number, github.event.workflow_run.id) }}{% endraw %}
+          fork-pr: {% raw %}${{ needs.resolve.outputs.fork-pr }}{% endraw %}
+{% endif %}
       - name: Upload generated Allure HTML
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -196,12 +202,19 @@ jobs:
       actions: read
       pull-requests: write
     steps:
+      - name: Download generated report summary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: allure-report-{% raw %}${{ github.run_id }}{% endraw %}
+          path: .allure-comment
       - name: Revalidate source freshness and update comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v8.0.0
         env:
           PR_NUMBER: {% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %}
+          COMMENT_FILE: .allure-comment/allure-pr-comment.md
         with:
           script: |
+            const fs = require("fs");
             const run = context.payload.workflow_run;
             const prNumber = Number(process.env.PR_NUMBER);
             const { data: pull } = await github.rest.pulls.get({
@@ -227,15 +240,12 @@ jobs:
               return;
             }
             const marker = "<!-- project-toolkit-allure-report -->";
-            const reportRun = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const sourceRun = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}`;
-            let body = `${marker}\n## Allure test report\n\nThe report was generated in a read-only job from validated artifacts for \`${run.head_sha.slice(0, 12)}\`.\n\n- [Download the Allure HTML artifact](${reportRun})\n- [Open the source validation run](${sourceRun})`;
-{% if allure_publish_pages %}            const pagesBaseUrl = {{ allure_pages_url | tojson }};
-            if (pull.head.repo.full_name === pull.base.repo.full_name &&
-                pull.user?.login !== "dependabot[bot]") {
-              body += `\n- [Open the published report](${pagesBaseUrl}/allure/pr-${prNumber}/)`;
+            const body = fs.readFileSync(process.env.COMMENT_FILE, "utf8");
+            if (!body.includes(marker)) {
+              core.setFailed("Generated Allure comment is missing its ownership marker.");
+              return;
             }
-{% endif %}            const comments = await github.paginate(github.rest.issues.listComments, {
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,

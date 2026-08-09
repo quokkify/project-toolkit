@@ -1282,7 +1282,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "artifact_manifest" in report_text
                 and "${{ runner.temp }}/allure-archives" in report_text
                 and "${{ runner.temp }}/allure-expanded" in report_text
-                and "MATERIALIZE_ROOT: ${{ github.workspace }}/.allure-input/results" in report_text
+                and "MATERIALIZE_ROOT: ${{ github.workspace }}/.allure-input/source-artifacts"
+                in report_text
                 and "python .github/allure/safe_extract.py" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
             )
@@ -1291,6 +1292,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "Expected exactly one current open PR" in report_text
                 and "A newer source workflow run exists" in report_text,
                 f"{scenario}: PR resolution or stale-run suppression is incomplete",
+            )
+            check(
+                "source-artifacts-directory: .allure-input/source-artifacts" in report_text
+                and "results-directory: .allure-input/results" in report_text
+                and "comment-file: allure-report/allure-pr-comment.md" in report_text
+                and "Download generated report summary" in report_text
+                and 'const body = fs.readFileSync(process.env.COMMENT_FILE, "utf8");'
+                in report_text,
+                f"{scenario}: generated report data or rich PR summary is not wired through",
             )
             check(
                 "preflight_eocd" in extractor_text
@@ -1340,7 +1350,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 fixture_archives = probe_root / "fixtures"
                 archive_root = probe_root / "downloaded"
                 output_root = probe_root / "output"
-                materialized_root = dest / ".allure-input" / "results"
+                materialized_root = dest / ".allure-input" / "source-artifacts"
                 fixture_archives.mkdir(parents=True)
                 manifest = [
                     {"name": artifact_name, "id": index}

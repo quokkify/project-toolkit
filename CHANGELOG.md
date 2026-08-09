@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.0](https://github.com/quokkify/project-toolkit/compare/v2.11.1...v2.12.0) (2026-08-09)
+
+
+### Features
+
+* **actions:** forward compose lifecycle hooks ([#106](https://github.com/quokkify/project-toolkit/issues/106)) ([cb0391a](https://github.com/quokkify/project-toolkit/commit/cb0391aa5546172dca8ba10c0a7a66ef9ee510e9))
+
 ## [2.11.1](https://github.com/quokkify/project-toolkit/compare/v2.11.0...v2.11.1) (2026-08-08)
 
 

@@ -198,10 +198,10 @@ runs:
         validate_boolean "wait-for-health" "$WAIT_FOR_HEALTH"
 
         if [[ "$WAIT_FOR_HEALTH" == "false" ]]; then
-          fail "wait-for-health=false is unsupported in compose-health-check-action v2.3.0 because it would require a second readiness engine. Set wait-for-health=true and use the standalone engine's built-in health checks."
+          fail "wait-for-health=false is unsupported in compose-health-check-action v2.4.0 because it would require a second readiness engine. Set wait-for-health=true and use the standalone engine's built-in health checks."
         fi
         if [[ "$SHOW_LOGS_ON_FAILURE" == "false" ]]; then
-          fail "show-logs-on-failure=false is unsupported in compose-health-check-action v2.3.0 because diagnostics ownership is now in the standalone health action. Set show-logs-on-failure=true or disable caller-side cleanup by default."
+          fail "show-logs-on-failure=false is unsupported in compose-health-check-action v2.4.0 because diagnostics ownership is now in the standalone health action. Set show-logs-on-failure=true or disable caller-side cleanup by default."
         fi
 
         timeout_seconds="$(normalize_positive_int "timeout-seconds" "$TIMEOUT_SECONDS" 86400)"
@@ -241,11 +241,15 @@ runs:
           [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "service names must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: $1"
         }
 
+        validate_profile_name() {
+          [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]+$ ]] || fail "profile names must match ^[A-Za-z0-9][A-Za-z0-9._-]+$: $1"
+        }
+
         profile_names=()
         IFS=$' \t\r\n' read -r -d '' -a profile_tokens < <(printf '%s\0' "${PROFILES//,/ }")
         for token in "${profile_tokens[@]}"; do
           [[ -z "$token" ]] && continue
-          validate_service_name "$token"
+          validate_profile_name "$token"
           profile_names+=("$token")
         done
         compose_profiles="${profile_names[*]}"
@@ -293,7 +297,6 @@ runs:
           printf 'COMPOSE_WORKING_DIRECTORY=%s\n' "$WORKING_DIRECTORY"
           printf 'COMPOSE_TIMEOUT_SECONDS=%s\n' "$timeout_seconds"
           printf 'COMPOSE_URL_TIMEOUT_SECONDS=%s\n' "$url_timeout_seconds"
-          printf 'COMPOSE_STARTED=true\n'
         } >>"${GITHUB_ENV:?GITHUB_ENV is required}"
 
     - id: compose-health
@@ -307,6 +310,11 @@ runs:
         after-health-hook: ${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}
         timeout: ${{ env.COMPOSE_TIMEOUT_SECONDS }}
         additional-compose-args: ${{ inputs.build == 'true' && '--build' || '' }}
+
+    - name: Mark Compose startup complete
+      if: ${{ steps.compose-health.outcome == 'success' }}
+      shell: bash
+      run: echo 'COMPOSE_STARTED=true' >>"${GITHUB_ENV:?GITHUB_ENV is required}"
 
     - name: Wait for HTTP readiness
       if: ${{ inputs.wait-urls != '' }}
@@ -345,11 +353,16 @@ runs:
       shell: bash
       env:
         COMPOSE_FILES: ${{ env.COMPOSE_FILES_NORMALIZED }}
+        COMPOSE_PROFILES: ${{ env.COMPOSE_PROFILES_NORMALIZED }}
       run: |
         set -euo pipefail
         mapfile -t compose_files < <(printf '%s\n' "$COMPOSE_FILES" | sed '/^[[:space:]]*$/d')
         compose_args=()
         for file in "${compose_files[@]}"; do
           compose_args+=(--file "$file")
+        done
+        read -r -a compose_profiles <<<"$COMPOSE_PROFILES"
+        for profile in "${compose_profiles[@]}"; do
+          compose_args+=(--profile "$profile")
         done
         docker compose "${compose_args[@]}" down || true

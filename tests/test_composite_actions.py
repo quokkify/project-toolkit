@@ -482,6 +482,7 @@ class ComposeActionTests(unittest.TestCase):
         text = (ROOT / "actions/compose-up/action.yml").read_text()
         self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
         self.assertIn("@1bd4a5793d977cdd8a14cca7bbfe3544b49bb3e0 # v2.4.0", text)
+        self.assertNotIn("compose-health-check-action v2.3.0", text)
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
@@ -599,12 +600,15 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("COMPOSE_BEFORE_HOOK_NORMALIZED=\n", env_file)
         self.assertIn("COMPOSE_AFTER_HOOK_NORMALIZED=\n", env_file)
 
-    def test_profile_validation_rejects_options_and_shell_syntax(self) -> None:
-        for unsafe in ("--profile", "../foreign", "$(id)", "web;id"):
+    def test_profile_validation_enforces_compose_grammar(self) -> None:
+        for unsafe in ("a", "--profile", "../foreign", "$(id)", "web;id"):
             result, env_file = self.run_validation(PROFILES=unsafe)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("service names must match", result.stderr)
+            self.assertIn("profile names must match", result.stderr)
             self.assertEqual(env_file, "")
+        result, env_file = self.run_validation(PROFILES="a1,b_2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=a1 b_2", env_file)
 
     def test_service_union_is_unique_and_completed_only_preserves_standalone_defaults(self) -> None:
         result, env_file = self.run_validation(SERVICES="web,\nworker web", COMPLETED_SERVICES="worker\nmigrate")
@@ -628,7 +632,7 @@ class ComposeActionTests(unittest.TestCase):
             self.assertEqual(env_file, "")
 
     def test_pinned_standalone_command_contract_keeps_global_flags_before_up(self) -> None:
-        # v2.3.0 appends additional-compose-args after `up -d`, so this fake
+        # v2.4.0 appends additional-compose-args after `up -d`, so this fake
         # mirrors its exact command order and guards against passing global
         # Compose flags such as --project-directory through that input.
         _, env_file = self.run_validation(WORKING_DIRECTORY="deploy", BUILD="true")
@@ -712,6 +716,15 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("env.COMPOSE_STARTED == 'true'", step["if"])
         self.assertIn("inputs.down-on-timeout == 'true'", step["if"])
         self.assertEqual(self.data["inputs"]["down-on-timeout"]["default"], "false")
+        marker = self.steps["Mark Compose startup complete"]
+        self.assertEqual(marker["if"], "${{ steps.compose-health.outcome == 'success' }}")
+        self.assertIn("COMPOSE_STARTED=true", marker["run"])
+        self.assertNotIn("COMPOSE_STARTED=true", self.steps["Validate Compose inputs"]["run"])
+
+    def test_invalid_hook_cannot_enable_cleanup(self) -> None:
+        result, env_file = self.run_validation(AFTER_HEALTH_HOOK="../outside.sh", DOWN_ON_TIMEOUT="true")
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("COMPOSE_STARTED=true", env_file)
 
     def test_cleanup_uses_prefixed_files_from_repository_root(self) -> None:
         step = self.steps["Optional Compose cleanup after failure"]
@@ -723,11 +736,12 @@ class ComposeActionTests(unittest.TestCase):
             env = {
                 **os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "DOCKER_LOG": str(log),
                 "COMPOSE_FILES": "deploy/docker-compose.yml\ndeploy/compose.prod.yml",
+                "COMPOSE_PROFILES": "storage redis",
             }
             result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             command = log.read_text()
-            self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml down", command)
+            self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml --profile storage --profile redis down", command)
             self.assertNotIn("deploy/deploy", command)
 
 

@@ -466,8 +466,10 @@ class ComposeActionTests(unittest.TestCase):
             root = Path(tmp)
             env_file = root / "github-env"
             values = {
+                "AFTER_HEALTH_HOOK": "hooks/check.sh", "BEFORE_COMPOSE_HOOK": "hooks/prepare.sh",
                 "BUILD": "false", "COMPLETED_SERVICES": "migrate", "COMPOSE_FILES": "docker-compose.yml\ncompose.prod.yml",
                 "DOWN_ON_TIMEOUT": "false", "SERVICES": "web,worker", "SHOW_LOGS_ON_FAILURE": "true",
+                "PROFILES": "storage, redis",
                 "TIMEOUT_SECONDS": "120", "URL_TIMEOUT_SECONDS": "5", "WAIT_FOR_HEALTH": "true",
                 "WAIT_URLS": "http://127.0.0.1:8080/health", "WORKING_DIRECTORY": "deploy",
                 "RUNNER_OS": "Linux", "GITHUB_ENV": str(env_file),
@@ -479,13 +481,16 @@ class ComposeActionTests(unittest.TestCase):
     def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
         text = (ROOT / "actions/compose-up/action.yml").read_text()
         self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
-        self.assertIn("@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0", text)
+        self.assertIn("@a4dc3d435607cf623008334f2ad0d643465537f4 # pending v2.4.0", text)
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
         standalone = self.steps["Start Compose with standalone health engine"]
         self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
         self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")
+        self.assertEqual(standalone["with"]["compose-profiles"], "${{ env.COMPOSE_PROFILES_NORMALIZED }}")
+        self.assertEqual(standalone["with"]["before-compose-hook"], "${{ env.COMPOSE_BEFORE_HOOK_NORMALIZED }}")
+        self.assertEqual(standalone["with"]["after-health-hook"], "${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}")
         self.assertNotIn("--project-directory", text)
 
     def test_validation_rejects_unsupported_legacy_flags_before_startup(self) -> None:
@@ -516,6 +521,10 @@ class ComposeActionTests(unittest.TestCase):
             {"WAIT_URLS": "http://127.0.0.1:8080/a\x1bb"}, "control characters"
         ), (
             {"COMPOSE_FILES": "../secret.yml"}, "traversal"
+        ), (
+            {"BEFORE_COMPOSE_HOOK": "../prepare.sh"}, "traversal"
+        ), (
+            {"AFTER_HEALTH_HOOK": "/tmp/check.sh"}, "absolute forms"
         ), (
             {"WORKING_DIRECTORY": "/tmp"}, "absolute forms"
         ), (
@@ -550,6 +559,9 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("deploy/docker-compose.yml", env_file)
         self.assertIn("deploy/compose.prod.yml", env_file)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=storage redis", env_file)
+        self.assertIn("COMPOSE_BEFORE_HOOK_NORMALIZED=deploy/hooks/prepare.sh", env_file)
+        self.assertIn("COMPOSE_AFTER_HOOK_NORMALIZED=deploy/hooks/check.sh", env_file)
         self.assertIn("COMPOSE_TIMEOUT_SECONDS=120", env_file)
         result, _ = self.run_validation(TIMEOUT_SECONDS="0")
         self.assertEqual(result.returncode, 2)
@@ -576,12 +588,23 @@ class ComposeActionTests(unittest.TestCase):
     def test_default_inputs_pass_validation(self) -> None:
         result, env_file = self.run_validation(
             COMPOSE_FILES="docker-compose.yml", SERVICES="", COMPLETED_SERVICES="",
+            PROFILES="", BEFORE_COMPOSE_HOOK="", AFTER_HEALTH_HOOK="",
             WAIT_URLS="", WORKING_DIRECTORY=".",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_FILES_NORMALIZED<<", env_file)
         self.assertIn("docker-compose.yml", env_file)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_BEFORE_HOOK_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_AFTER_HOOK_NORMALIZED=\n", env_file)
+
+    def test_profile_validation_rejects_options_and_shell_syntax(self) -> None:
+        for unsafe in ("--profile", "../foreign", "$(id)", "web;id"):
+            result, env_file = self.run_validation(PROFILES=unsafe)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("service names must match", result.stderr)
+            self.assertEqual(env_file, "")
 
     def test_service_union_is_unique_and_completed_only_preserves_standalone_defaults(self) -> None:
         result, env_file = self.run_validation(SERVICES="web,\nworker web", COMPLETED_SERVICES="worker\nmigrate")

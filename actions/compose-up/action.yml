@@ -16,6 +16,18 @@ inputs:
     description: Space- or comma-separated services to check.
     required: false
     default: ""
+  profiles:
+    description: Space-, comma-, or newline-separated Compose profiles.
+    required: false
+    default: ""
+  before-compose-hook:
+    description: Optional Bash file relative to working-directory, sourced before Compose startup.
+    required: false
+    default: ""
+  after-health-hook:
+    description: Optional Bash file relative to working-directory, sourced after container health checks.
+    required: false
+    default: ""
   completed-services:
     description: Space- or comma-separated one-shot services to check for successful exit.
     required: false
@@ -64,10 +76,13 @@ runs:
       shell: bash
       env:
         BUILD: ${{ inputs.build }}
+        BEFORE_COMPOSE_HOOK: ${{ inputs.before-compose-hook }}
+        AFTER_HEALTH_HOOK: ${{ inputs.after-health-hook }}
         COMPLETED_SERVICES: ${{ inputs.completed-services }}
         COMPOSE_FILES: ${{ inputs.compose-files }}
         DOWN_ON_TIMEOUT: ${{ inputs.down-on-timeout }}
         SERVICES: ${{ inputs.services }}
+        PROFILES: ${{ inputs.profiles }}
         SHOW_LOGS_ON_FAILURE: ${{ inputs.show-logs-on-failure }}
         TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
         URL_TIMEOUT_SECONDS: ${{ inputs.url-timeout-seconds }}
@@ -132,6 +147,15 @@ runs:
           validate_relative_path "$1" "compose-files entry"
         }
 
+        normalize_workspace_path() {
+          local value="$1"
+          if [[ "$WORKING_DIRECTORY" == "." ]]; then
+            printf '%s' "$value"
+          else
+            printf '%s/%s' "${WORKING_DIRECTORY%/}" "$value"
+          fi
+        }
+
         validate_http_url() {
           local url="$1"
           local authority
@@ -194,12 +218,19 @@ runs:
         for file in "${compose_files[@]}"; do
           validate_compose_file "$file"
 
-          if [[ "$WORKING_DIRECTORY" == "." ]]; then
-            normalized_files+=("$file")
-          else
-            normalized_files+=("${WORKING_DIRECTORY%/}/$file")
-          fi
+          normalized_files+=("$(normalize_workspace_path "$file")")
         done
+
+        normalized_before_hook=""
+        normalized_after_hook=""
+        if [[ -n "$BEFORE_COMPOSE_HOOK" ]]; then
+          validate_relative_path "$BEFORE_COMPOSE_HOOK" "before-compose-hook"
+          normalized_before_hook="$(normalize_workspace_path "$BEFORE_COMPOSE_HOOK")"
+        fi
+        if [[ -n "$AFTER_HEALTH_HOOK" ]]; then
+          validate_relative_path "$AFTER_HEALTH_HOOK" "after-health-hook"
+          normalized_after_hook="$(normalize_workspace_path "$AFTER_HEALTH_HOOK")"
+        fi
 
         while IFS= read -r url; do
           [[ -z "$url" ]] && continue
@@ -209,6 +240,15 @@ runs:
         validate_service_name() {
           [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "service names must match ^[A-Za-z0-9][A-Za-z0-9._-]*$: $1"
         }
+
+        profile_names=()
+        IFS=$' \t\r\n' read -r -d '' -a profile_tokens < <(printf '%s\0' "${PROFILES//,/ }")
+        for token in "${profile_tokens[@]}"; do
+          [[ -z "$token" ]] && continue
+          validate_service_name "$token"
+          profile_names+=("$token")
+        done
+        compose_profiles="${profile_names[*]}"
 
         compose_services=""
         service_names=()
@@ -247,6 +287,9 @@ runs:
           printf '%s\n' "${normalized_files[@]}"
           printf 'COMPOSE_FILES_EOF\n'
           printf 'COMPOSE_SERVICES_NORMALIZED=%s\n' "$compose_services"
+          printf 'COMPOSE_PROFILES_NORMALIZED=%s\n' "$compose_profiles"
+          printf 'COMPOSE_BEFORE_HOOK_NORMALIZED=%s\n' "$normalized_before_hook"
+          printf 'COMPOSE_AFTER_HOOK_NORMALIZED=%s\n' "$normalized_after_hook"
           printf 'COMPOSE_WORKING_DIRECTORY=%s\n' "$WORKING_DIRECTORY"
           printf 'COMPOSE_TIMEOUT_SECONDS=%s\n' "$timeout_seconds"
           printf 'COMPOSE_URL_TIMEOUT_SECONDS=%s\n' "$url_timeout_seconds"
@@ -255,10 +298,13 @@ runs:
 
     - id: compose-health
       name: Start Compose with standalone health engine
-      uses: quokkify/compose-health-check-action@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0
+      uses: quokkify/compose-health-check-action@a4dc3d435607cf623008334f2ad0d643465537f4 # pending v2.4.0; update to the release commit before merge
       with:
         compose-files: ${{ env.COMPOSE_FILES_NORMALIZED }}
         compose-services: ${{ env.COMPOSE_SERVICES_NORMALIZED }}
+        compose-profiles: ${{ env.COMPOSE_PROFILES_NORMALIZED }}
+        before-compose-hook: ${{ env.COMPOSE_BEFORE_HOOK_NORMALIZED }}
+        after-health-hook: ${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}
         timeout: ${{ env.COMPOSE_TIMEOUT_SECONDS }}
         additional-compose-args: ${{ inputs.build == 'true' && '--build' || '' }}
 

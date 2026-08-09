@@ -82,8 +82,8 @@ FEATURE_PATHS = {
     "release_please": ".github/workflows/release.yml",
     "renovate": ".github/renovate.json",
 }
-ALLURE_CONFIG_PATH = ".github/allure/allurerc.mjs"
-ALLURE_EXTRACTOR_PATH = ".github/allure/safe_extract.py"
+ALLURE_CONFIG_PATH = "tools/allure/allurerc.mjs"
+ALLURE_EXTRACTOR_PATH = "tools/allure/safe_extract.py"
 ALLURE_EXPECTED_PATHS = (
     FEATURE_PATHS["allure_report"],
     ALLURE_CONFIG_PATH,

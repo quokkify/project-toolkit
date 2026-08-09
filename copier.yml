@@ -5,8 +5,8 @@ _templates_suffix: .jinja
 _exclude:
   - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
-  - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
-  - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
+  - "{% if not allure_report %}tools/allure/allurerc.mjs{% endif %}"
+  - "{% if not allure_report %}tools/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
 
 project_name:

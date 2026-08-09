@@ -1184,14 +1184,14 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "      - run: echo fixture\n",
                 encoding="utf-8",
             )
-            categories = dest / ".github/allure/categories.json"
+            categories = dest / "tools/allure/categories.json"
             categories.parent.mkdir(parents=True, exist_ok=True)
             categories.write_text("[]\n", encoding="utf-8")
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
         allure_workflow_path = dest / ".github/workflows/allure-report.yml"
-        allure_config_path = dest / ".github/allure/allurerc.mjs"
-        allure_extractor_path = dest / ".github/allure/safe_extract.py"
+        allure_config_path = dest / "tools/allure/allurerc.mjs"
+        allure_extractor_path = dest / "tools/allure/safe_extract.py"
         if scenario.startswith("allure-"):
             run([actionlint, str(allure_workflow_path)])
             check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
@@ -1284,7 +1284,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "${{ runner.temp }}/allure-expanded" in report_text
                 and "MATERIALIZE_ROOT: ${{ github.workspace }}/.allure-input/source-artifacts"
                 in report_text
-                and "python .github/allure/safe_extract.py" in report_text,
+                and "python tools/allure/safe_extract.py" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
             )
             check(
@@ -1313,8 +1313,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             validate_text = (dest / ".github/workflows/validate.yml").read_text()
             check(
                 'answers.get("allure_report")' in validate_text
-                and 'Path(".github/allure/allurerc.mjs")' in validate_text
-                and 'Path(".github/allure/safe_extract.py")' in validate_text,
+                and 'Path("tools/allure/allurerc.mjs")' in validate_text
+                and 'Path("tools/allure/safe_extract.py")' in validate_text,
                 f"{scenario}: generated contract does not verify Allure outputs",
             )
             artifact_names = ["allure-results-python-1"]
@@ -1328,7 +1328,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     and 'const artifactPrefix = "external-allure-"' in report_text
                     and "const minimumArtifacts = 2" in report_text
                     and "const maximumArtifacts = 7" in report_text
-                    and 'categories-file: ".github/allure/categories.json"' in report_text
+                    and 'categories-file: "tools/allure/categories.json"' in report_text
                     and "new Set(actualNames).size" in report_text
                     and "allureArtifacts.map((artifact) => ({" in report_text
                     and "expectedArtifacts.map((name)" not in report_text,

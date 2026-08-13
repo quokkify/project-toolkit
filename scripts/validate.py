@@ -1087,7 +1087,12 @@ for path in sorted(ROOT.rglob("*.json5")):
 uses_re = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 sha_re = re.compile(r"^[0-9a-f]{40}$")
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
-    for use in uses_re.findall(path.read_text()):
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        ERRORS.append(f"{path.relative_to(ROOT)}: action scan failed: {exc}")
+        continue
+    for use in uses_re.findall(text):
         if use.startswith("./"):
             continue
         target, sep, ref = use.rpartition("@")

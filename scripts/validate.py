@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from validate_helpers import load_yaml_or_error
+
 from validate_python_fixture import validate_python_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +124,90 @@ def release_workflow_errors(path: Path) -> list[str]:
         },
         "caller job must pass manifest mode and current config/manifest paths",
     )
+    return errors
+
+
+def _version_tuple(value: str) -> tuple[int, int, int] | None:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", value):
+        return None
+    major, minor, patch = (int(part) for part in value.split("."))
+    return (major, minor, patch)
+
+
+def copier_fleet_workflow_errors(path: Path) -> list[str]:
+    """Validate the Copier fleet audit workflow and its pin."""
+
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+
+    jobs = workflow.get("jobs")
+    require(isinstance(jobs, dict), "jobs block must be a mapping")
+    if not isinstance(jobs, dict):
+        return errors
+
+    audit = jobs.get("audit")
+    require(isinstance(audit, dict), "audit job must be present")
+    if not isinstance(audit, dict):
+        return errors
+
+    steps = audit.get("steps")
+    require(isinstance(steps, list), "audit job must define steps")
+    if not isinstance(steps, list):
+        return errors
+
+    setup_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and step.get("name") == "Set up Python and Copier"
+            and step.get("uses") == "./actions/setup-python"
+        ),
+        None,
+    )
+    require(setup_step is not None, "missing Set up Python and Copier step")
+    if not isinstance(setup_step, dict):
+        return errors
+
+    with_block = setup_step.get("with")
+    require(isinstance(with_block, dict), "setup step must define with:")
+    if not isinstance(with_block, dict):
+        return errors
+
+    install_command = with_block.get("install-command")
+    require(isinstance(install_command, str), "setup step must pin Copier via install-command")
+    if not isinstance(install_command, str):
+        return errors
+
+    match = re.fullmatch(r"python -m pip install copier==(\d+\.\d+\.\d+)", install_command)
+    require(bool(match), "install-command must be a direct copier==X.Y.Z pin")
+    if not match:
+        return errors
+
+    pin = match.group(1)
+    pin_tuple = _version_tuple(pin)
+    require(pin_tuple is not None, "Copier pin must be an exact semantic version")
+    copier_config = load_yaml_or_error(ROOT / "copier.yml", ERRORS, "copier.yml")
+    min_version = copier_config.get("_min_copier_version") if isinstance(copier_config, dict) else None
+    min_tuple = _version_tuple(min_version) if isinstance(min_version, str) else None
+    require(min_tuple is not None, "copier.yml:_min_copier_version must be an exact semantic version")
+    if pin_tuple is not None and min_tuple is not None:
+        require(
+            pin_tuple >= min_tuple,
+            "Copier fleet audit pin is lower than copier.yml:_min_copier_version",
+        )
+
     return errors
 
 
@@ -1085,6 +1171,7 @@ check(
     "Release Please config must preserve the simple project-toolkit SemVer contract",
 )
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
+ERRORS.extend(copier_fleet_workflow_errors(ROOT / ".github/workflows/copier-fleet-update.yml"))
 ERRORS.extend(
     validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
 )

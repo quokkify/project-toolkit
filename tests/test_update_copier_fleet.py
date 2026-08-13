@@ -657,6 +657,31 @@ class CommandLineTests(TestCase):
         self.assertEqual(fleet.main(["--dry-run"]), 0)
         self.assertEqual(discover_mock.call_args.kwargs["env"]["GH_TOKEN"], "repository-scoped-token")
 
+    @mock.patch.object(fleet, "discover_repositories", return_value=[])
+    @mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.dict(
+        "os.environ",
+        {
+            "GITHUB_TOKEN": "repository-scoped-token",
+            "GH_TOKEN": "ambient-codeowner-token",
+            "PATH": "/opt/toolchain/bin",
+        },
+        clear=False,
+    )
+    def test_command_lookup_uses_process_path_only(
+        self,
+        which_mock: mock.Mock,
+        _: mock.Mock,
+    ) -> None:
+        self.assertEqual(fleet.main(["--dry-run"]), 0)
+        self.assertEqual(
+            [call.args[0] for call in which_mock.call_args_list],
+            ["copier", "gh", "git"],
+        )
+        self.assertTrue(
+            all(call.kwargs.get("path") == "/opt/toolchain/bin" for call in which_mock.call_args_list)
+        )
+
     @mock.patch.object(
         fleet,
         "process_repository",

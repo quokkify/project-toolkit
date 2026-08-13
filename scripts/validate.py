@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from validate_helpers import load_yaml_or_error
+
 from validate_python_fixture import validate_python_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -196,7 +198,7 @@ def copier_fleet_workflow_errors(path: Path) -> list[str]:
     pin = match.group(1)
     pin_tuple = _version_tuple(pin)
     require(pin_tuple is not None, "Copier pin must be an exact semantic version")
-    copier_config = yaml.safe_load((ROOT / "copier.yml").read_text())
+    copier_config = load_yaml_or_error(ROOT / "copier.yml", ERRORS, "copier.yml")
     min_version = copier_config.get("_min_copier_version") if isinstance(copier_config, dict) else None
     min_tuple = _version_tuple(min_version) if isinstance(min_version, str) else None
     require(min_tuple is not None, "copier.yml:_min_copier_version must be an exact semantic version")

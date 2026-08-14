@@ -46,7 +46,7 @@ class SetupActionTests(unittest.TestCase):
     def test_gradle_wrapper_validation_defaults_on_and_can_be_disabled(self) -> None:
         steps = action("setup-java-gradle")["runs"]["steps"]
         validation = next(step for step in steps if step.get("name") == "Validate Gradle wrappers")
-        self.assertEqual(validation["uses"], "gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92")
+        self.assertEqual(validation["uses"], "gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb")
         self.assertEqual(validation["if"], "${{ inputs.validate-wrappers == 'true' }}")
         self.assertIn("'true'", validation["if"])
         self.assertNotIn("'false'", validation["if"])

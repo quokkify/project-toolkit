@@ -31,7 +31,7 @@
       "description": "Update the minimum Copier version required by the template.",
       "managerFilePatterns": ["/^copier\\.yml$/"],
       "matchStrings": [
-        "_min_copier_version:\\s*[\\\"](?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]"
+        "_min_copier_version:\\s*[\\\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]?"
       ],
       "depNameTemplate": "copier",
       "datasourceTemplate": "pypi",
@@ -100,6 +100,16 @@
         "ACTIONLINT_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
       "depNameTemplate": "rhysd/actionlint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Update pinned GitHub Actions in project template workflow files.",
+      "managerFilePatterns": ["/^templates/project/template/\\.github/workflows/[^/]+\\.ya?ml\\.jinja$/"],
+      "matchStrings": [
+        "uses:\\s*(?<depName>[A-Za-z0-9_/-]+)@(?<currentDigest>[0-9a-f]{40})\\s+#\\s+(?<currentValue>v\\d+(?:\\.\\d+\\.\\d+)?)"
+      ],
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
     }

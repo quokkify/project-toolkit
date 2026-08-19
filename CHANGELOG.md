@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.12.1](https://github.com/quokkify/project-toolkit/compare/v2.12.0...v2.12.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **actions:** update Allure report action ([#114](https://github.com/quokkify/project-toolkit/issues/114)) ([18d4ec6](https://github.com/quokkify/project-toolkit/commit/18d4ec65143bda06cd6629683fc806b6b824c721))
+
+## [2.12.0](https://github.com/quokkify/project-toolkit/compare/v2.11.1...v2.12.0) (2026-08-09)
+
+
+### Features
+
+* **actions:** forward compose lifecycle hooks ([#106](https://github.com/quokkify/project-toolkit/issues/106)) ([cb0391a](https://github.com/quokkify/project-toolkit/commit/cb0391aa5546172dca8ba10c0a7a66ef9ee510e9))
+
+## [2.11.1](https://github.com/quokkify/project-toolkit/compare/v2.11.0...v2.11.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **allure:** harden generated workflow inputs ([#99](https://github.com/quokkify/project-toolkit/issues/99)) ([0e8adfb](https://github.com/quokkify/project-toolkit/commit/0e8adfbb5cced488e281cbfe180e2a1a04f755b1))
+
+## [2.11.0](https://github.com/quokkify/project-toolkit/compare/v2.10.1...v2.11.0) (2026-08-08)
+
+
+### Features
+
+* **allure:** support external workflow artifacts ([#98](https://github.com/quokkify/project-toolkit/issues/98)) ([cb1357e](https://github.com/quokkify/project-toolkit/commit/cb1357e29a77075d2168e2a1cbd375f0a45a1aff))
+
+
+### Bug Fixes
+
+* **fleet:** align Copier release answers ([#94](https://github.com/quokkify/project-toolkit/issues/94)) ([6b171ce](https://github.com/quokkify/project-toolkit/commit/6b171cea17b7e2d4e4798380b4a75fe36aaabb52))
+
+## [2.10.1](https://github.com/quokkify/project-toolkit/compare/v2.10.0...v2.10.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **allure:** update report action to v0.2.1 ([#91](https://github.com/quokkify/project-toolkit/issues/91)) ([9e0c1a6](https://github.com/quokkify/project-toolkit/commit/9e0c1a62551b22b8a8b161a17d9174f7d801b3d2))
+
+## [2.10.0](https://github.com/quokkify/project-toolkit/compare/v2.9.1...v2.10.0) (2026-08-06)
+
+
+### Features
+
+* add Copier Allure reporting to project template ([#84](https://github.com/quokkify/project-toolkit/issues/84)) ([e3e384d](https://github.com/quokkify/project-toolkit/commit/e3e384db947cbead8b79c4219d95f25bbac81a5c))
+
 ## [2.9.1](https://github.com/quokkify/project-toolkit/compare/v2.9.0...v2.9.1) (2026-08-06)
 
 

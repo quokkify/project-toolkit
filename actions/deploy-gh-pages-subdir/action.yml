@@ -27,7 +27,7 @@ runs:
   using: composite
   steps:
     - name: Publish with the standalone action
-      uses: quokkify/gh-pages-subdir-action@816d85aa756f480457befb42168633cb6ccf09c7 # v0.1.0
+      uses: quokkify/gh-pages-subdir-action@e936122cbdf5a9676b5587d5a812fadf7ddfde6b # v0.1.1
       with:
         token: ${{ inputs.token }}
         publish-dir: ${{ inputs.publish-dir }}

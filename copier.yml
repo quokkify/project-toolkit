@@ -1,4 +1,4 @@
-_min_copier_version: "9.17.0"
+_min_copier_version: "9.17.1"
 _subdirectory: templates/project/template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
@@ -17,8 +17,8 @@ project_name:
 toolkit_version:
   type: str
   help: Immutable project-toolkit SemVer tag used by generated workflows.
-  default: v2.8.2
-  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.8.2{% endif %}"
+  default: v2.12.1
+  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.12.1{% endif %}"
 
 components:
   type: yaml
@@ -41,9 +41,47 @@ docker:
   default: false
 allure_report:
   type: bool
-  help: Generate and comment an Allure 3 report from component-level allure-results artifacts.
+  help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.
   default: false
-  validator: "{% if allure_report and not components %}Allure reporting requires at least one generated CI component.{% endif %}"
+allure_external_workflow_name:
+  type: str
+  help: Exact workflow name that uploads Allure artifacts when components is empty.
+  default: Validate
+  when: "{{ allure_report and not components }}"
+  validator: "{% if not (allure_external_workflow_name | regex_search('^[A-Za-z0-9][A-Za-z0-9 ._()/:-]{0,99}$')) %}Use a non-empty workflow name containing only letters, digits, spaces, and ._()/:- characters.{% endif %}"
+allure_external_workflow_path:
+  type: str
+  help: Repository-relative source workflow path when components is empty.
+  default: .github/workflows/validate.yml
+  when: "{{ allure_report and not components }}"
+  validator: "{% if not (allure_external_workflow_path | regex_search('^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$')) %}Use a workflow path such as .github/workflows/test.yml.{% endif %}"
+allure_external_artifact_prefix:
+  type: str
+  help: Prefix selecting dedicated Allure artifacts from the external source workflow.
+  default: allure-results-
+  when: "{{ allure_report and not components }}"
+  validator: "{% if not (allure_external_artifact_prefix | regex_search('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')) %}Use a 1-64 character artifact prefix containing only letters, digits, dots, underscores, and hyphens.{% endif %}"
+allure_external_artifact_min_count:
+  type: int
+  help: Minimum number of matching, non-expired Allure artifacts required.
+  default: 1
+  when: "{{ allure_report and not components }}"
+  validator: "{% if allure_external_artifact_min_count < 1 or allure_external_artifact_min_count > 50 %}Choose a minimum artifact count from 1 through 50.{% endif %}"
+allure_external_artifact_max_count:
+  type: int
+  help: Maximum number of matching Allure artifacts accepted by the bounded extractor.
+  default: 50
+  when: "{{ allure_report and not components }}"
+  validator: "{% if allure_external_artifact_max_count < allure_external_artifact_min_count or allure_external_artifact_max_count > 50 %}Choose a maximum from the configured minimum through 50.{% endif %}"
+allure_categories_file:
+  type: str
+  help: Optional safe repository-relative Allure categories JSON file.
+  default: ""
+  when: "{{ allure_report }}"
+  validator: >-
+    {% if allure_categories_file and (not (allure_categories_file | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.json$')) or '.' in allure_categories_file.split('/') or '..' in allure_categories_file.split('/')) %}
+    Use a safe repository-relative JSON path without traversal or globs.
+    {% endif %}
 allure_publish_pages:
   type: bool
   help: Publish each pull request report below allure/pr-N on the gh-pages branch.

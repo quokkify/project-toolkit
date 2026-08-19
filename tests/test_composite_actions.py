@@ -46,7 +46,7 @@ class SetupActionTests(unittest.TestCase):
     def test_gradle_wrapper_validation_defaults_on_and_can_be_disabled(self) -> None:
         steps = action("setup-java-gradle")["runs"]["steps"]
         validation = next(step for step in steps if step.get("name") == "Validate Gradle wrappers")
-        self.assertEqual(validation["uses"], "gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92")
+        self.assertRegex(validation["uses"], r"\Agradle/actions/wrapper-validation@[0-9a-f]{40}\Z")
         self.assertEqual(validation["if"], "${{ inputs.validate-wrappers == 'true' }}")
         self.assertIn("'true'", validation["if"])
         self.assertNotIn("'false'", validation["if"])
@@ -466,8 +466,10 @@ class ComposeActionTests(unittest.TestCase):
             root = Path(tmp)
             env_file = root / "github-env"
             values = {
+                "AFTER_HEALTH_HOOK": "hooks/check.sh", "BEFORE_COMPOSE_HOOK": "hooks/prepare.sh",
                 "BUILD": "false", "COMPLETED_SERVICES": "migrate", "COMPOSE_FILES": "docker-compose.yml\ncompose.prod.yml",
                 "DOWN_ON_TIMEOUT": "false", "SERVICES": "web,worker", "SHOW_LOGS_ON_FAILURE": "true",
+                "PROFILES": "storage, redis",
                 "TIMEOUT_SECONDS": "120", "URL_TIMEOUT_SECONDS": "5", "WAIT_FOR_HEALTH": "true",
                 "WAIT_URLS": "http://127.0.0.1:8080/health", "WORKING_DIRECTORY": "deploy",
                 "RUNNER_OS": "Linux", "GITHUB_ENV": str(env_file),
@@ -479,13 +481,17 @@ class ComposeActionTests(unittest.TestCase):
     def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
         text = (ROOT / "actions/compose-up/action.yml").read_text()
         self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
-        self.assertIn("@c11a8fa409adc13a0b7c401728d680872903af99 # v2.3.0", text)
+        self.assertIn("@1bd4a5793d977cdd8a14cca7bbfe3544b49bb3e0 # v2.4.0", text)
+        self.assertNotIn("compose-health-check-action v2.3.0", text)
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
         standalone = self.steps["Start Compose with standalone health engine"]
         self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
         self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")
+        self.assertEqual(standalone["with"]["compose-profiles"], "${{ env.COMPOSE_PROFILES_NORMALIZED }}")
+        self.assertEqual(standalone["with"]["before-compose-hook"], "${{ env.COMPOSE_BEFORE_HOOK_NORMALIZED }}")
+        self.assertEqual(standalone["with"]["after-health-hook"], "${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}")
         self.assertNotIn("--project-directory", text)
 
     def test_validation_rejects_unsupported_legacy_flags_before_startup(self) -> None:
@@ -516,6 +522,10 @@ class ComposeActionTests(unittest.TestCase):
             {"WAIT_URLS": "http://127.0.0.1:8080/a\x1bb"}, "control characters"
         ), (
             {"COMPOSE_FILES": "../secret.yml"}, "traversal"
+        ), (
+            {"BEFORE_COMPOSE_HOOK": "../prepare.sh"}, "traversal"
+        ), (
+            {"AFTER_HEALTH_HOOK": "/tmp/check.sh"}, "absolute forms"
         ), (
             {"WORKING_DIRECTORY": "/tmp"}, "absolute forms"
         ), (
@@ -550,6 +560,9 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("deploy/docker-compose.yml", env_file)
         self.assertIn("deploy/compose.prod.yml", env_file)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=web worker migrate", env_file)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=storage redis", env_file)
+        self.assertIn("COMPOSE_BEFORE_HOOK_NORMALIZED=deploy/hooks/prepare.sh", env_file)
+        self.assertIn("COMPOSE_AFTER_HOOK_NORMALIZED=deploy/hooks/check.sh", env_file)
         self.assertIn("COMPOSE_TIMEOUT_SECONDS=120", env_file)
         result, _ = self.run_validation(TIMEOUT_SECONDS="0")
         self.assertEqual(result.returncode, 2)
@@ -576,12 +589,26 @@ class ComposeActionTests(unittest.TestCase):
     def test_default_inputs_pass_validation(self) -> None:
         result, env_file = self.run_validation(
             COMPOSE_FILES="docker-compose.yml", SERVICES="", COMPLETED_SERVICES="",
+            PROFILES="", BEFORE_COMPOSE_HOOK="", AFTER_HEALTH_HOOK="",
             WAIT_URLS="", WORKING_DIRECTORY=".",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("COMPOSE_FILES_NORMALIZED<<", env_file)
         self.assertIn("docker-compose.yml", env_file)
         self.assertIn("COMPOSE_SERVICES_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_BEFORE_HOOK_NORMALIZED=\n", env_file)
+        self.assertIn("COMPOSE_AFTER_HOOK_NORMALIZED=\n", env_file)
+
+    def test_profile_validation_enforces_compose_grammar(self) -> None:
+        for unsafe in ("a", "--profile", "../foreign", "$(id)", "web;id"):
+            result, env_file = self.run_validation(PROFILES=unsafe)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("profile names must match", result.stderr)
+            self.assertEqual(env_file, "")
+        result, env_file = self.run_validation(PROFILES="a1,b_2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("COMPOSE_PROFILES_NORMALIZED=a1 b_2", env_file)
 
     def test_service_union_is_unique_and_completed_only_preserves_standalone_defaults(self) -> None:
         result, env_file = self.run_validation(SERVICES="web,\nworker web", COMPLETED_SERVICES="worker\nmigrate")
@@ -605,7 +632,7 @@ class ComposeActionTests(unittest.TestCase):
             self.assertEqual(env_file, "")
 
     def test_pinned_standalone_command_contract_keeps_global_flags_before_up(self) -> None:
-        # v2.3.0 appends additional-compose-args after `up -d`, so this fake
+        # v2.4.0 appends additional-compose-args after `up -d`, so this fake
         # mirrors its exact command order and guards against passing global
         # Compose flags such as --project-directory through that input.
         _, env_file = self.run_validation(WORKING_DIRECTORY="deploy", BUILD="true")
@@ -689,6 +716,15 @@ class ComposeActionTests(unittest.TestCase):
         self.assertIn("env.COMPOSE_STARTED == 'true'", step["if"])
         self.assertIn("inputs.down-on-timeout == 'true'", step["if"])
         self.assertEqual(self.data["inputs"]["down-on-timeout"]["default"], "false")
+        marker = self.steps["Mark Compose startup complete"]
+        self.assertEqual(marker["if"], "${{ steps.compose-health.outcome == 'success' }}")
+        self.assertIn("COMPOSE_STARTED=true", marker["run"])
+        self.assertNotIn("COMPOSE_STARTED=true", self.steps["Validate Compose inputs"]["run"])
+
+    def test_invalid_hook_cannot_enable_cleanup(self) -> None:
+        result, env_file = self.run_validation(AFTER_HEALTH_HOOK="../outside.sh", DOWN_ON_TIMEOUT="true")
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("COMPOSE_STARTED=true", env_file)
 
     def test_cleanup_uses_prefixed_files_from_repository_root(self) -> None:
         step = self.steps["Optional Compose cleanup after failure"]
@@ -700,11 +736,12 @@ class ComposeActionTests(unittest.TestCase):
             env = {
                 **os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "DOCKER_LOG": str(log),
                 "COMPOSE_FILES": "deploy/docker-compose.yml\ndeploy/compose.prod.yml",
+                "COMPOSE_PROFILES": "storage redis",
             }
             result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             command = log.read_text()
-            self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml down", command)
+            self.assertIn("--file deploy/docker-compose.yml --file deploy/compose.prod.yml --profile storage --profile redis down", command)
             self.assertNotIn("deploy/deploy", command)
 
 
@@ -721,6 +758,7 @@ class AllureReportActionTests(unittest.TestCase):
                 "categories-file",
                 "allure-version",
                 "module-environment-label",
+                "source-artifacts-directory",
                 "pr-number",
                 "pages-url",
                 "fork-pr",
@@ -747,6 +785,7 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
         self.assertEqual(data["inputs"]["module-environment-label"]["default"], "module")
+        self.assertEqual(data["inputs"]["source-artifacts-directory"]["default"], "auto")
         self.assertEqual(
             data["inputs"]["pyramid-policy-path"]["default"],
             "docs/testing/test-pyramid.md",
@@ -769,7 +808,7 @@ class AllureReportActionTests(unittest.TestCase):
             {name: f"${{{{ inputs.{name} }}}}" for name in data["inputs"]},
         )
 
-    def test_wrapper_uses_immutable_release_and_has_no_vendor_copy(self) -> None:
+    def test_wrapper_uses_sidecar_metadata_release_and_has_no_vendor_copy(self) -> None:
         action_path = ROOT / "actions/allure-report/action.yml"
         text = action_path.read_text()
         self.assertRegex(
@@ -777,7 +816,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@07563998d9d52ef39b8375b360d02910006d4b3d # v0.2.0",
+            "uses: quokkify/allure-report-action@80d3bd357fe58f8fec13343d254bc9b21ab99be9 # v0.2.3",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -805,8 +844,8 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "07563998d9d52ef39b8375b360d02910006d4b3d")
-        self.assertEqual(match.group("currentValue"), "v0.2.0")
+        self.assertEqual(match.group("currentDigest"), "80d3bd357fe58f8fec13343d254bc9b21ab99be9")
+        self.assertEqual(match.group("currentValue"), "v0.2.3")
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

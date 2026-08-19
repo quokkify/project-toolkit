@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from validate_helpers import load_yaml_or_error
+
 from validate_python_fixture import validate_python_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +124,90 @@ def release_workflow_errors(path: Path) -> list[str]:
         },
         "caller job must pass manifest mode and current config/manifest paths",
     )
+    return errors
+
+
+def _version_tuple(value: str) -> tuple[int, int, int] | None:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", value):
+        return None
+    major, minor, patch = (int(part) for part in value.split("."))
+    return (major, minor, patch)
+
+
+def copier_fleet_workflow_errors(path: Path) -> list[str]:
+    """Validate the Copier fleet audit workflow and its pin."""
+
+    errors: list[str] = []
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{rel}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{rel}: workflow root must be a mapping"]
+
+    jobs = workflow.get("jobs")
+    require(isinstance(jobs, dict), "jobs block must be a mapping")
+    if not isinstance(jobs, dict):
+        return errors
+
+    audit = jobs.get("audit")
+    require(isinstance(audit, dict), "audit job must be present")
+    if not isinstance(audit, dict):
+        return errors
+
+    steps = audit.get("steps")
+    require(isinstance(steps, list), "audit job must define steps")
+    if not isinstance(steps, list):
+        return errors
+
+    setup_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict)
+            and step.get("name") == "Set up Python and Copier"
+            and step.get("uses") == "./actions/setup-python"
+        ),
+        None,
+    )
+    require(setup_step is not None, "missing Set up Python and Copier step")
+    if not isinstance(setup_step, dict):
+        return errors
+
+    with_block = setup_step.get("with")
+    require(isinstance(with_block, dict), "setup step must define with:")
+    if not isinstance(with_block, dict):
+        return errors
+
+    install_command = with_block.get("install-command")
+    require(isinstance(install_command, str), "setup step must pin Copier via install-command")
+    if not isinstance(install_command, str):
+        return errors
+
+    match = re.fullmatch(r"python -m pip install copier==(\d+\.\d+\.\d+)", install_command)
+    require(bool(match), "install-command must be a direct copier==X.Y.Z pin")
+    if not match:
+        return errors
+
+    pin = match.group(1)
+    pin_tuple = _version_tuple(pin)
+    require(pin_tuple is not None, "Copier pin must be an exact semantic version")
+    copier_config = load_yaml_or_error(ROOT / "copier.yml", ERRORS, "copier.yml")
+    min_version = copier_config.get("_min_copier_version") if isinstance(copier_config, dict) else None
+    min_tuple = _version_tuple(min_version) if isinstance(min_version, str) else None
+    require(min_tuple is not None, "copier.yml:_min_copier_version must be an exact semantic version")
+    if pin_tuple is not None and min_tuple is not None:
+        require(
+            pin_tuple >= min_tuple,
+            "Copier fleet audit pin is lower than copier.yml:_min_copier_version",
+        )
+
     return errors
 
 
@@ -1001,7 +1087,12 @@ for path in sorted(ROOT.rglob("*.json5")):
 uses_re = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 sha_re = re.compile(r"^[0-9a-f]{40}$")
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
-    for use in uses_re.findall(path.read_text()):
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        ERRORS.append(f"{path.relative_to(ROOT)}: action scan failed: {exc}")
+        continue
+    for use in uses_re.findall(text):
         if use.startswith("./"):
             continue
         target, sep, ref = use.rpartition("@")
@@ -1085,6 +1176,7 @@ check(
     "Release Please config must preserve the simple project-toolkit SemVer contract",
 )
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
+ERRORS.extend(copier_fleet_workflow_errors(ROOT / ".github/workflows/copier-fleet-update.yml"))
 ERRORS.extend(
     validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
 )
@@ -1151,6 +1243,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
+        "allure-external": ["default", "github-actions"],
         "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
@@ -1169,6 +1262,23 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 str(dest),
             ]
         )
+        if scenario == "allure-external":
+            external_workflow = dest / ".github/workflows/test.yml"
+            external_workflow.write_text(
+                "name: Run tests\n"
+                "on: [pull_request]\n"
+                "permissions:\n"
+                "  contents: read\n"
+                "jobs:\n"
+                "  test:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: echo fixture\n",
+                encoding="utf-8",
+            )
+            categories = dest / ".github/allure/categories.json"
+            categories.parent.mkdir(parents=True, exist_ok=True)
+            categories.write_text("[]\n", encoding="utf-8")
         for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
             run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
         allure_workflow_path = dest / ".github/workflows/allure-report.yml"
@@ -1184,10 +1294,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
             allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
             allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
+            expected_source_workflow = "Run tests" if scenario == "allure-external" else "Validate"
             check(
                 allure_triggers
-                == {"workflow_run": {"workflows": ["Validate"], "types": ["completed"]}},
-                f"{scenario}: report workflow must run only after Validate completes",
+                == {"workflow_run": {"workflows": [expected_source_workflow], "types": ["completed"]}},
+                f"{scenario}: report workflow has the wrong source workflow trigger",
             )
             check(
                 allure_workflow.get("permissions") == {},
@@ -1198,6 +1309,14 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 jobs.get("resolve", {}).get("permissions")
                 == {"actions": "read", "contents": "read", "pull-requests": "read"},
                 f"{scenario}: resolver permissions are not read-only",
+            )
+            resolve_condition = jobs.get("resolve", {}).get("if", "")
+            check(
+                "github.event.workflow_run.event == 'pull_request'" in resolve_condition
+                and 'fromJSON(\'["success","failure","neutral","timed_out"]\')'
+                in resolve_condition
+                and "github.event.workflow_run.conclusion" in resolve_condition,
+                f"{scenario}: resolver does not allowlist reportable source conclusions",
             )
             check(
                 jobs.get("generate", {}).get("permissions")
@@ -1220,6 +1339,25 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 f"{scenario}: only the opt-in Pages job may receive contents:write",
             )
             report_text = allure_workflow_path.read_text()
+            pr_number_script_steps = []
+            for job_name in ("comment", "pages"):
+                for step in jobs.get(job_name, {}).get("steps", []):
+                    script = step.get("with", {}).get("script", "")
+                    if "const prNumber" in script:
+                        pr_number_script_steps.append(step)
+            check(
+                len(pr_number_script_steps) == (2 if scenario == "allure-pages" else 1)
+                and all(
+                    step.get("env", {}).get("PR_NUMBER")
+                    == "${{ needs.resolve.outputs.pr-number }}"
+                    and "const prNumber = Number(process.env.PR_NUMBER);"
+                    in step.get("with", {}).get("script", "")
+                    and "${{ needs.resolve.outputs.pr-number }}"
+                    not in step.get("with", {}).get("script", "")
+                    for step in pr_number_script_steps
+                ),
+                f"{scenario}: PR number is interpolated directly into a github-script body",
+            )
             check(
                 "ref: ${{ github.sha }}" in report_text
                 and "github.event.repository.default_branch" not in report_text,
@@ -1243,7 +1381,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(
                 "workflow_run.pull_requests[0]" not in report_text
                 and "Expected exactly one current open PR" in report_text
-                and "A newer Validate run exists" in report_text,
+                and "A newer source workflow run exists" in report_text,
                 f"{scenario}: PR resolution or stale-run suppression is incomplete",
             )
             check(
@@ -1264,11 +1402,26 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             artifact_names = ["allure-results-python-1"]
             if scenario == "allure-polyglot":
                 artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
-            for artifact_name in artifact_names:
+            if scenario == "allure-external":
+                artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
-                    artifact_name in validate_text and artifact_name in report_text,
-                    f"{scenario}: missing exact artifact contract for {artifact_name}",
+                    'workflows: ["Run tests"]' in report_text
+                    and 'run.path !== ".github/workflows/test.yml"' in report_text
+                    and 'const artifactPrefix = "external-allure-"' in report_text
+                    and "const minimumArtifacts = 2" in report_text
+                    and "const maximumArtifacts = 7" in report_text
+                    and 'categories-file: ".github/allure/categories.json"' in report_text
+                    and "new Set(actualNames).size" in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text
+                    and "expectedArtifacts.map((name)" not in report_text,
+                    "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
+            else:
+                for artifact_name in artifact_names:
+                    check(
+                        artifact_name in validate_text and artifact_name in report_text,
+                        f"{scenario}: missing exact artifact contract for {artifact_name}",
+                    )
             if scenario == "allure-polyglot":
                 check(
                     'test-artifact-path: "reports/allure-results"' in validate_text
@@ -1818,6 +1971,47 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check=False,
         )
         check(result.returncode != 0, f"unsafe allure_pages_url accepted: {invalid_url}")
+
+    invalid_external_values: tuple[tuple[str, str, object], ...] = (
+        ("workflow-path-traversal", "allure_external_workflow_path", "../test.yml"),
+        ("artifact-prefix-glob", "allure_external_artifact_prefix", "allure-*"),
+        ("minimum-zero", "allure_external_artifact_min_count", 0),
+        ("minimum-over-limit", "allure_external_artifact_min_count", 51),
+        ("maximum-over-limit", "allure_external_artifact_max_count", 51),
+        ("maximum-below-minimum", "allure_external_artifact_max_count", 1),
+        ("categories-traversal", "allure_categories_file", "../categories.json"),
+    )
+    for invalid_label, field, invalid_value in invalid_external_values:
+        external_data: dict[str, object] = {
+            "components": [],
+            "allure_report": True,
+            "allure_external_workflow_name": "Run tests",
+            "allure_external_workflow_path": ".github/workflows/test.yml",
+            "allure_external_artifact_prefix": "allure-results-",
+            "allure_external_artifact_min_count": 2,
+            "allure_external_artifact_max_count": 7,
+        }
+        external_data[field] = invalid_value
+        invalid_data = tmp_path / f"invalid-allure-external-{invalid_label}.yml"
+        invalid_data.write_text(yaml.safe_dump(external_data), encoding="utf-8")
+        result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(tmp_path / f"invalid-allure-external-{invalid_label}"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
 
 run([sys.executable, "tests/test_composite_actions.py"])
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])

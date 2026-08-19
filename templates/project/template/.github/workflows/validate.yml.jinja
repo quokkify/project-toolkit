@@ -111,6 +111,8 @@ jobs:
     uses: quokkify/project-toolkit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
     with:
       working-directory: {{ component.path | tojson }}
+{% if allure_report and component.type == 'python' %}      install-command: "python -m pip install pytest allure-pytest"
+{% endif -%}
 {% if allure_report %}      upload-test-artifacts: true
       test-artifact-path: {{ component.get('allure_results_path', 'allure-results') | tojson }}
       test-artifact-name: allure-results-{{ component.type }}-{{ loop.index }}

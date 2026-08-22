@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.2](https://github.com/quokkify/project-toolkit/compare/v2.12.1...v2.12.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **ci:** add install-command for python components with allure_report ([#140](https://github.com/quokkify/project-toolkit/issues/140)) ([f6eb9ef](https://github.com/quokkify/project-toolkit/commit/f6eb9ef739255ee5bf7f66d61a9700c6496ca8af))
+* pin copier fleet audit workflow ([#121](https://github.com/quokkify/project-toolkit/issues/121)) ([1f6c137](https://github.com/quokkify/project-toolkit/commit/1f6c1378f2dd7cadf32d398e4f4de5c82bf015f7))
+* **validate:** handle unreadable copier.yml ([#123](https://github.com/quokkify/project-toolkit/issues/123)) ([baf0aab](https://github.com/quokkify/project-toolkit/commit/baf0aab9b5ce68a5e277df5efb56086b5e0b054a))
+
 ## [2.12.1](https://github.com/quokkify/project-toolkit/compare/v2.12.0...v2.12.1) (2026-08-11)
 
 

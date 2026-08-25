@@ -816,7 +816,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@80d3bd357fe58f8fec13343d254bc9b21ab99be9 # v0.2.3",
+            "uses: quokkify/allure-report-action@138f38432a14c332dfc23832b8028502631f4c5e # v0.3.0",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -844,8 +844,8 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "80d3bd357fe58f8fec13343d254bc9b21ab99be9")
-        self.assertEqual(match.group("currentValue"), "v0.2.3")
+        self.assertEqual(match.group("currentDigest"), "138f38432a14c332dfc23832b8028502631f4c5e")
+        self.assertEqual(match.group("currentValue"), "v0.3.0")
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

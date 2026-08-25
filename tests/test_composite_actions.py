@@ -939,7 +939,6 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             # action's compact body is uploaded as an artifact, then consumed
             # by the lower-privilege trusted poster job below.
             (generated_artifact / "allure-pr-comment.md").write_text(compact_body)
-            posted = destination / "posted.json"
             wrapper = """\
 const fs = require("fs");
 const posted = [];

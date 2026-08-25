@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.3](https://github.com/quokkify/project-toolkit/compare/v2.12.2...v2.12.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* preserve trusted Allure compact comment content ([e138033](https://github.com/quokkify/project-toolkit/commit/e13803375369b08f395c43f9dd453702de8107f6))
+
 ## [2.12.2](https://github.com/quokkify/project-toolkit/compare/v2.12.1...v2.12.2) (2026-08-25)
 
 

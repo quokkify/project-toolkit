@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -816,7 +817,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@80d3bd357fe58f8fec13343d254bc9b21ab99be9 # v0.2.3",
+            "uses: quokkify/allure-report-action@138f38432a14c332dfc23832b8028502631f4c5e # v0.3.0",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -844,8 +845,33 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "80d3bd357fe58f8fec13343d254bc9b21ab99be9")
-        self.assertEqual(match.group("currentValue"), "v0.2.3")
+        self.assertEqual(match.group("currentDigest"), "138f38432a14c332dfc23832b8028502631f4c5e")
+        self.assertEqual(match.group("currentValue"), "v0.3.0")
+
+
+class AllureTrustedCommentPropagationTests(unittest.TestCase):
+    def test_generated_workflow_forwards_compact_comment_artifact_unchanged(self) -> None:
+        copier = shutil.which("copier")
+        if copier is None:
+            self.skipTest("copier is required for generated workflow regression coverage")
+        with tempfile.TemporaryDirectory(prefix="allure-comment-workflow-") as temporary:
+            source = Path(temporary) / "template-source"
+            shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            destination = Path(temporary) / "fixture"
+            subprocess.run(
+                [copier, "copy", "--trust", "--defaults", "--data-file",
+                 str(ROOT / "tests/scenarios/allure-pages.yml"), str(source), str(destination)],
+                check=True, capture_output=True, text=True,
+            )
+            workflow = (destination / ".github/workflows/allure-report.yml").read_text()
+
+        self.assertIn("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", workflow)
+        self.assertIn('readFileSync(".allure-generated/allure-pr-comment.md", "utf8")', workflow)
+        self.assertIn("body.endsWith(marker)", workflow)
+        self.assertIn("allure-pr-comment.md", workflow)
+        self.assertNotIn('let body = `${marker}', workflow)
+        self.assertNotIn("Download the Allure HTML artifact]", workflow)
+        self.assertNotIn("Open the source validation run]", workflow)
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

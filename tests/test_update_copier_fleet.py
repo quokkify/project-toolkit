@@ -311,6 +311,37 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(still_incomplete.allure_report, "missing")
         self.assertEqual(enabled.allure_report, "enabled")
 
+    def test_allure_accepts_complete_custom_helper_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / fleet.FEATURE_PATHS["allure_report"]
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: Allure report\n\n"
+                "steps:\n"
+                "  - run: python tools/allure/safe_extract.py\n"
+                "    with:\n"
+                "      config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# trusted extractor\n", encoding="utf-8")
+            for path in fleet.BASELINE_PATHS:
+                baseline = repository / path
+                baseline.parent.mkdir(parents=True, exist_ok=True)
+                baseline.write_text("name: baseline\n", encoding="utf-8")
+
+            inventory = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n",
+                repository,
+            )
+
+        self.assertEqual(inventory.allure_report, "custom")
+        self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

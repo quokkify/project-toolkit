@@ -275,6 +275,32 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def has_custom_allure_outputs(repository_path: Path) -> bool:
+    """Recognize a complete Allure setup that keeps its helpers outside the template paths."""
+    workflow_path = repository_path / FEATURE_PATHS["allure_report"]
+    if not is_regular_file(workflow_path, repository_root=repository_path):
+        return False
+    workflow = workflow_path.read_text(encoding="utf-8")
+    config_match = re.search(
+        r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
+        workflow,
+        re.MULTILINE,
+    )
+    extractor_match = re.search(
+        r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
+        workflow,
+        re.MULTILINE,
+    )
+    if not config_match or not extractor_match:
+        return False
+    config_path = next(value for value in config_match.groups() if value is not None)
+    extractor_path = extractor_match.group(1)
+    return all(
+        is_regular_file(repository_path / path, repository_root=repository_path)
+        for path in (config_path, extractor_path)
+    )
+
+
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
     configured = answers.get(key)
     if not isinstance(configured, bool):
@@ -285,7 +311,11 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
         for path in expected_paths
     )
     if configured:
-        return "enabled" if all(materialized) else "missing"
+        if all(materialized):
+            return "enabled"
+        if key == "allure_report" and has_custom_allure_outputs(repository_path):
+            return "custom"
+        return "missing"
     return "custom" if any(materialized) else "disabled"
 
 

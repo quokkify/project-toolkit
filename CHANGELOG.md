@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.4](https://github.com/quokkify/project-toolkit/compare/v2.12.3...v2.12.4) (2026-08-27)
+
+
+### Bug Fixes
+
+* update Allure action to v0.4.1 ([#148](https://github.com/quokkify/project-toolkit/issues/148)) ([9a3c32e](https://github.com/quokkify/project-toolkit/commit/9a3c32e7e3eea9481fb0595392a108465a606025))
+
 ## [2.12.3](https://github.com/quokkify/project-toolkit/compare/v2.12.2...v2.12.3) (2026-08-25)
 
 

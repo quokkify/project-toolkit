@@ -39,7 +39,7 @@ inputs:
   additional-compose-args:
     description: Additional arguments for the Compose startup command, such as --quiet-pull.
     required: false
-    default: "--quiet-pull"
+    default: ""
   wait-for-health:
     description: Retained for compatibility; v2 requires the standalone health engine.
     required: false

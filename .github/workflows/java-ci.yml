@@ -46,6 +46,10 @@ on:
       cache-dependencies:
         type: boolean
         default: true
+      cache-jdk:
+        description: Cache downloaded JDK installations independently of dependency caching.
+        type: boolean
+        default: true
       timeout-minutes:
         type: number
         default: 30
@@ -78,22 +82,33 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Resolve build tool for dependency cache
+        id: cache
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+        run: |
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          [[ "$tool" == gradle || "$tool" == maven ]] || { echo "Unsupported build-tool: $tool" >&2; exit 2; }
+          echo "tool=$tool" >> "$GITHUB_OUTPUT"
       - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           java-version: ${{ inputs.java-version }}
           distribution: ${{ inputs.distribution }}
-      - name: Cache Java dependencies
-        if: ${{ inputs.cache-dependencies }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            ~/.m2/repository
-          key: java-${{ runner.os }}-${{ inputs.java-version }}-${{ hashFiles(format('{0}/**/gradle-wrapper.properties', inputs.working-directory), format('{0}/**/*.gradle*', inputs.working-directory), format('{0}/**/pom.xml', inputs.working-directory)) }}
-          restore-keys: |
-            java-${{ runner.os }}-${{ inputs.java-version }}-
+          cache: ${{ inputs.cache-dependencies && steps.cache.outputs.tool || '' }}
+          cache-jdk: ${{ inputs.cache-jdk }}
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/**/gradle-wrapper.properties
+            ${{ inputs.working-directory }}/**/*.gradle*
+            ${{ inputs.working-directory }}/**/gradle.properties
+            ${{ inputs.working-directory }}/**/pom.xml
+            ${{ inputs.working-directory }}/**/.mvn/extensions.xml
       - name: Resolve build tool and commands
         id: commands
         env:

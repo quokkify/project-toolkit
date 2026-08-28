@@ -857,6 +857,7 @@ for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
 BOOLEAN_INPUTS = {
     "build",
     "cache-dependencies",
+    "cache-jdk",
     "down-on-timeout",
     "fail-on-missing",
     "fork-pr",

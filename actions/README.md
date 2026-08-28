@@ -9,7 +9,7 @@ Examples use the current toolkit release, `v2.6.0`. Renovate updates the referen
 - `actions/setup-node/action.yml`
   - setup-node with package-manager detection and cache
 - `actions/setup-java-gradle/action.yml`
-  - setup-java + Gradle-only caching with wrapper validation enabled by default and workspace-relative wrapper resolution
+  - setup-java + Gradle caching with wrapper validation enabled by default and workspace-relative wrapper resolution
 - `actions/compose-up/action.yml`
   - validates safe Compose/profile/hook inputs, delegates one startup lifecycle to the standalone health action, and optionally waits for HTTP readiness
 - `actions/deploy-gh-pages-subdir/action.yml`
@@ -23,7 +23,7 @@ Consumers call these from their own jobs when they need the setup/runtime sequen
 
 `allure-report` delegates unchanged inputs to [`quokkify/allure-report-action`](https://github.com/quokkify/allure-report-action). Its default `source-artifacts-directory: auto` uses provenance-aware merge and attribution when complete `ci-env-fragment.properties` sidecars are present, and otherwise preserves compatible already-merged results. By default, a `module` result label creates separate Allure environments and scopes matching variables to those environments; set `module-environment-label` to an empty value to disable this behavior. Tests without an `epic` label remain in overall totals: Playwright is classified as `E2E`, while otherwise unclassified results appear under `No epic assigned`. The wrapper preserves `docs/testing/test-pyramid.md` as the default policy link; callers can provide another path or leave it empty. Pass `github-token: ${{ secrets.GITHUB_TOKEN }}` and grant `pull-requests: write` in both public and private repositories. GitHub Pages is optional and disabled by default; enable it only with `contents: write` and a destination directory. The hidden comment marker is configurable so repositories do not overwrite one another's report comments.
 
-The Python and Node actions install dependencies by default. Set `install-dependencies: "false"` for runtime-only setup. The Java/Gradle action validates repository-contained Gradle Wrapper JAR files by default; set `validate-wrappers: "false"` only for repositories that intentionally do not use a wrapper. It deliberately leaves dependency and build commands to the caller. Inputs such as `install-command` are trusted workflow configuration; never construct them from pull-request titles, branch names, or other untrusted event data.
+The Python and Node actions install dependencies by default. Set `install-dependencies: "false"` for runtime-only setup. The Java/Gradle action uses setup-java v6 for dependency and JDK caching, includes Gradle properties in cache inputs, and validates repository-contained Gradle Wrapper JAR files by default; set `cache-dependencies: "false"` or `cache-jdk: "false"` to disable either cache independently. It deliberately leaves dependency and build commands to the caller. Inputs such as `install-command` are trusted workflow configuration; never construct them from pull-request titles, branch names, or other untrusted event data.
 
 pnpm and modern Yarn projects must pin the package-manager version in `package.json` with `packageManager` (for example, `pnpm@10.0.0` or `yarn@4.0.0`). Yarn Classic lockfiles use the action's pinned Yarn 1 compatibility version. This avoids Corepack selecting an environment-dependent known-good release.
 

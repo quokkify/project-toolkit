@@ -890,7 +890,7 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             )
             workflow = (destination / ".github/workflows/allure-report.yml").read_text()
 
-        self.assertIn("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", workflow)
+        self.assertIn("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", workflow)
         self.assertIn('readFileSync(".allure-generated/allure-pr-comment.md", "utf8")', workflow)
         self.assertIn("body.endsWith(marker)", workflow)
         self.assertIn("allure-pr-comment.md", workflow)

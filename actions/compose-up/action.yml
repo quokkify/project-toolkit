@@ -36,6 +36,10 @@ inputs:
     description: Build images while bringing services up.
     required: false
     default: "false"
+  additional-compose-args:
+    description: Additional arguments for the Compose startup command, such as --quiet-pull.
+    required: false
+    default: ""
   wait-for-health:
     description: Retained for compatibility; v2 requires the standalone health engine.
     required: false
@@ -309,7 +313,7 @@ runs:
         before-compose-hook: ${{ env.COMPOSE_BEFORE_HOOK_NORMALIZED }}
         after-health-hook: ${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}
         timeout: ${{ env.COMPOSE_TIMEOUT_SECONDS }}
-        additional-compose-args: ${{ inputs.build == 'true' && '--build' || '' }}
+        additional-compose-args: ${{ inputs.build == 'true' && format('{0} --build', inputs.additional-compose-args) || inputs.additional-compose-args }}
 
     - name: Mark Compose startup complete
       if: ${{ steps.compose-health.outcome == 'success' }}

@@ -489,7 +489,10 @@ class ComposeActionTests(unittest.TestCase):
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
         standalone = self.steps["Start Compose with standalone health engine"]
         self.assertEqual(standalone["with"]["timeout"], "${{ env.COMPOSE_TIMEOUT_SECONDS }}")
-        self.assertEqual(standalone["with"]["additional-compose-args"], "${{ inputs.build == 'true' && '--build' || '' }}")
+        self.assertEqual(
+            standalone["with"]["additional-compose-args"],
+            "${{ inputs.build == 'true' && format('{0} --build', inputs.additional-compose-args) || inputs.additional-compose-args }}",
+        )
         self.assertEqual(standalone["with"]["compose-profiles"], "${{ env.COMPOSE_PROFILES_NORMALIZED }}")
         self.assertEqual(standalone["with"]["before-compose-hook"], "${{ env.COMPOSE_BEFORE_HOOK_NORMALIZED }}")
         self.assertEqual(standalone["with"]["after-health-hook"], "${{ env.COMPOSE_AFTER_HOOK_NORMALIZED }}")

@@ -26,7 +26,7 @@ class SetupActionTests(unittest.TestCase):
         cases = {
             "setup-python": {"CACHE_DEPENDENCIES": "maybe", "INSTALL_DEPENDENCIES": "true", "PACKAGE_MANAGER": "auto", "POETRY_VERSION": "2.1.4", "UV_VERSION": "0.8.15"},
             "setup-node": {"CACHE_DEPENDENCIES": "true", "INSTALL_DEPENDENCIES": "TRUE", "PACKAGE_MANAGER": "auto"},
-            "setup-java-gradle": {"CACHE_DEPENDENCIES": "true", "VALIDATE_WRAPPERS": "yes"},
+            "setup-java-gradle": {"CACHE_DEPENDENCIES": "true", "CACHE_JDK": "maybe", "VALIDATE_WRAPPERS": "true"},
         }
         for name, values in cases.items():
             with self.subTest(name=name):
@@ -54,6 +54,13 @@ class SetupActionTests(unittest.TestCase):
         inputs = action("setup-java-gradle")["inputs"]
         self.assertEqual(inputs["validate-wrappers"]["default"], "true")
         self.assertLess(steps.index(validation), next(i for i, step in enumerate(steps) if step.get("name") == "Set up Java"))
+
+    def test_java_cache_is_delegated_to_setup_java_v6(self) -> None:
+        steps = action("setup-java-gradle")["runs"]["steps"]
+        setup = next(step for step in steps if step.get("name") == "Set up Java")
+        self.assertEqual(setup["with"]["cache"], "${{ inputs.cache-dependencies == 'true' && 'gradle' || '' }}")
+        self.assertEqual(setup["with"]["cache-jdk"], "${{ inputs.cache-jdk }}")
+        self.assertFalse(any(step.get("uses", "").startswith("actions/cache@") for step in steps))
 
     def test_python_auto_detects_single_nondefault_requirements_file(self) -> None:
         install = action("setup-python")["runs"]["steps"][-1]

@@ -851,6 +851,28 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(match.group("currentDigest"), "05778ce0c6cee483892e2cc80b841e031dc4c7d0")
         self.assertEqual(match.group("currentValue"), "v0.4.1")
 
+    def test_renovate_manages_copier_in_audit_workflow(self) -> None:
+        config = yaml.safe_load((ROOT / ".github/renovate.json").read_text())
+        manager = next(
+            item
+            for item in config["customManagers"]
+            if "Update pinned Python validation dependencies" in item.get("description", "")
+        )
+        self.assertIn(
+            "/^\\.github/workflows/copier-fleet-update\\.ya?ml$/",
+            manager["managerFilePatterns"],
+        )
+        pattern = (
+            manager["matchStrings"][0]
+            .replace("(?<depName>", "(?P<depName>")
+            .replace("(?<currentValue>", "(?P<currentValue>")
+        )
+        match = re.search(pattern, "install-command: python -m pip install copier==9.17.2")
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(match.group("depName"), "copier")
+        self.assertEqual(match.group("currentValue"), "9.17.2")
+
 
 class AllureTrustedCommentPropagationTests(unittest.TestCase):
     def test_generated_workflow_forwards_compact_comment_artifact_unchanged(self) -> None:

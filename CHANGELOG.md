@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.13.0](https://github.com/quokkify/project-toolkit/compare/v2.12.4...v2.13.0) (2026-08-28)
+
+
+### Features
+
+* **compose-up:** support quiet compose pulls ([#152](https://github.com/quokkify/project-toolkit/issues/152)) ([685f139](https://github.com/quokkify/project-toolkit/commit/685f139130e857513dcf3b42baa810f33010c1e2))
+
+
+### Bug Fixes
+
+* recognize custom Allure audit layouts ([#150](https://github.com/quokkify/project-toolkit/issues/150)) ([cc2cadf](https://github.com/quokkify/project-toolkit/commit/cc2cadfcb033f3ccaa2957f0f498676aba50bc25))
+
 ## [2.12.4](https://github.com/quokkify/project-toolkit/compare/v2.12.3...v2.12.4) (2026-08-27)
 
 

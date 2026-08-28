@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.14.0](https://github.com/quokkify/project-toolkit/compare/v2.13.0...v2.14.0) (2026-08-28)
+
+
+### ✨ Features
+
+* **deps:** update actions/setup-java action to v6 ([#160](https://github.com/quokkify/project-toolkit/issues/160)) ([e15bbed](https://github.com/quokkify/project-toolkit/commit/e15bbed541f0ede907009fa4e3dd886eccb8aa34))
+
+
+### ⚙️ CI
+
+* add emoji changelog sections ([#158](https://github.com/quokkify/project-toolkit/issues/158)) ([2f24d16](https://github.com/quokkify/project-toolkit/commit/2f24d1618b36fa6734b3f120f72c6c1002928f9b))
+
+
+### 🧹 Chores
+
+* **deps:** update actions/download-artifact to v8 ([#157](https://github.com/quokkify/project-toolkit/issues/157)) ([575ec41](https://github.com/quokkify/project-toolkit/commit/575ec41bacf7f499d719ebb1b6a0ad5a87640a5e))
+* **deps:** update copier to v9.17.2 ([#137](https://github.com/quokkify/project-toolkit/issues/137)) ([789159a](https://github.com/quokkify/project-toolkit/commit/789159af62f9ff737f2e0d7db97bbdaed54ee1a6))
+* **deps:** update github actions non-major updates ([#155](https://github.com/quokkify/project-toolkit/issues/155)) ([60aa749](https://github.com/quokkify/project-toolkit/commit/60aa74968fecc586ef6442b6e0872a2902d4be3b))
+* **deps:** update renovate to v44.42.0 ([#153](https://github.com/quokkify/project-toolkit/issues/153)) ([f0b3d79](https://github.com/quokkify/project-toolkit/commit/f0b3d795ca479e3e3da2c949b2fab22f8cdae5e7))
+* **deps:** update renovate to v44.42.1 ([#154](https://github.com/quokkify/project-toolkit/issues/154)) ([c0828a5](https://github.com/quokkify/project-toolkit/commit/c0828a57a517b13eb96cbd4f6e351f238c9fe1f4))
+* **deps:** update renovate to v44.49.1 ([#156](https://github.com/quokkify/project-toolkit/issues/156)) ([42d7c09](https://github.com/quokkify/project-toolkit/commit/42d7c0972b198f1144aed91eac7e2718c00f80cc))
+
 ## [2.13.0](https://github.com/quokkify/project-toolkit/compare/v2.12.4...v2.13.0) (2026-08-28)
 
 

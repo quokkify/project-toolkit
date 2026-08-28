@@ -1,0 +1,96 @@
+name: Auto-update Copier-managed repositories
+
+on:
+  schedule:
+    # Run weekly on Monday at 4:17 AM UTC (after the daily audit)
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Optional owner/repository to update instead of the whole organization.
+        type: string
+        required: false
+      template-ref:
+        description: Optional project-toolkit ref; empty uses the latest released tag.
+        type: string
+        required: false
+      dry-run:
+        description: Run in dry-run mode (audit only, no PRs created).
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: copier-fleet-auto-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update Copier fleet and create PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out project-toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and Copier
+        uses: ./actions/setup-python
+        with:
+          python-version: "3.14"
+          package-manager: pip
+          cache-dependencies: "false"
+          install-command: python -m pip install copier==9.17.2
+
+      - name: Update Copier fleet
+        env:
+          REQUESTED_REPOSITORY: ${{ inputs.repository }}
+          TEMPLATE_REF: ${{ inputs.template-ref }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --org quokkify
+            --public-only
+            --exclude quokkify/.github
+            --exclude quokkify/project-toolkit
+            --branch automation/copier-template-update
+          )
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            args+=(--dry-run)
+          else
+            args+=(--write)
+          fi
+          if [[ -n "$REQUESTED_REPOSITORY" ]]; then
+            args+=(--repo "$REQUESTED_REPOSITORY")
+          fi
+          if [[ -n "$TEMPLATE_REF" ]]; then
+            args+=(--template-ref "$TEMPLATE_REF")
+          fi
+          output="$RUNNER_TEMP/copier-fleet-update.txt"
+          markdown_report="$RUNNER_TEMP/copier-fleet-update.md"
+          json_report="$RUNNER_TEMP/copier-fleet-update.json"
+          args+=(--markdown-report "$markdown_report" --json-report "$json_report")
+          set +e
+          python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
+          status=${PIPESTATUS[0]}
+          set -e
+          cat "$markdown_report" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+        id: update
+
+      - name: Upload Copier fleet update report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: copier-fleet-update
+          path: ${{ runner.temp }}/copier-fleet-update.json
+          if-no-files-found: warn

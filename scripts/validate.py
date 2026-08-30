@@ -1101,6 +1101,59 @@ for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-
         f"{fixture.relative_to(ROOT)} must fail release driver validation",
     )
 
+def allure_publisher_workflow_errors(path: Path) -> list[str]:
+    """Validate the reusable Allure publisher's trust boundaries."""
+    errors: list[str] = []
+    label = str(path.relative_to(ROOT))
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{label}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{label}: workflow root must be a mapping"]
+    triggers = workflow.get("on", workflow.get(True))
+    if not isinstance(triggers, dict) or "workflow_call" not in triggers:
+        errors.append(f"{label}: must expose workflow_call")
+    if workflow.get("permissions") != {}:
+        errors.append(f"{label}: workflow-level permissions must be empty")
+    jobs = workflow.get("jobs", {})
+    expected_jobs = {"resolve", "download", "generate", "comment", "pages"}
+    if not isinstance(jobs, dict) or set(jobs) != expected_jobs:
+        errors.append(f"{label}: must define resolve/download/generate/comment/pages jobs")
+        return errors
+    required_permissions = {
+        "resolve": {"actions": "read", "contents": "read", "pull-requests": "read"},
+        "download": {"actions": "read", "contents": "read"},
+        "generate": {"actions": "read", "contents": "read"},
+        "comment": {"actions": "read", "pull-requests": "write"},
+        "pages": {"actions": "read", "contents": "write", "pull-requests": "read"},
+    }
+    for name, permissions in required_permissions.items():
+        if jobs[name].get("permissions") != permissions:
+            errors.append(f"{label}: {name} permissions are not narrowly scoped")
+    uses = [
+        step.get("uses", "")
+        for job in jobs.values()
+        for step in job.get("steps", [])
+        if isinstance(step, dict) and step.get("uses")
+    ]
+    if any(re.search(r"@[0-9a-f]{1,39}$|@(v|main|master)", use) for use in uses):
+        errors.append(f"{label}: every external action must use a full SHA")
+    text = path.read_text()
+    for required in (
+        "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
+        "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
+        "Allure artifact contract mismatch",
+        'pull.user?.login === "dependabot[bot]"',
+        "A newer source workflow run exists",
+    ):
+        if required not in text:
+            errors.append(f"{label}: missing trust-boundary assertion {required}")
+    return errors
+
+
+ERRORS.extend(allure_publisher_workflow_errors(ROOT / ".github/workflows/allure-publisher.yml"))
+
 secret_patterns = [
     r"ghp_[A-Za-z0-9]{20,}",
     r"github_pat_[A-Za-z0-9_]{20,}",

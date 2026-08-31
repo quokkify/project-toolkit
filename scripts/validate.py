@@ -1128,31 +1128,114 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
         "comment": {"actions": "read", "pull-requests": "write"},
         "pages": {"actions": "read", "contents": "write", "pull-requests": "read"},
     }
+    valid_jobs: dict[str, dict] = {}
     for name, permissions in required_permissions.items():
-        if jobs[name].get("permissions") != permissions:
+        job = jobs[name]
+        if not isinstance(job, dict):
+            errors.append(f"{label}: {name} job must be a mapping")
+            continue
+        valid_jobs[name] = job
+        if job.get("permissions") != permissions:
             errors.append(f"{label}: {name} permissions are not narrowly scoped")
-    uses = [
-        step.get("uses", "")
-        for job in jobs.values()
-        for step in job.get("steps", [])
-        if isinstance(step, dict) and step.get("uses")
-    ]
+    uses: list[str] = []
+    for name, job in valid_jobs.items():
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            errors.append(f"{label}: {name} steps must be a list")
+            continue
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict):
+                errors.append(f"{label}: {name} step {index} must be a mapping")
+                continue
+            if step.get("uses"):
+                uses.append(step["uses"])
     if any(re.search(r"@[0-9a-f]{1,39}$|@(v|main|master)", use) for use in uses):
         errors.append(f"{label}: every external action must use a full SHA")
-    text = path.read_text()
-    for required in (
-        "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
-        "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
-        "Allure artifact contract mismatch",
-        'pull.user?.login === "dependabot[bot]"',
-        "A newer source workflow run exists",
-    ):
-        if required not in text:
-            errors.append(f"{label}: missing trust-boundary assertion {required}")
+    executable_literals = {
+        "generate": (
+            "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
+        ),
+        "resolve": (
+            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
+            "Allure artifact contract mismatch",
+            'pull.user?.login === "dependabot[bot]"',
+            "A newer source workflow run exists",
+        ),
+    }
+    for job_name, required_literals in executable_literals.items():
+        job = valid_jobs.get(job_name)
+        if job is None:
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for required in required_literals:
+            if not any(
+                required in str(
+                    (step.get("with") or {}).get("script", "")
+                )
+                or required in str(step.get("uses", ""))
+                for step in steps
+                if isinstance(step, dict)
+            ):
+                errors.append(f"{label}: missing trust-boundary assertion {required}")
     return errors
 
 
-ERRORS.extend(allure_publisher_workflow_errors(ROOT / ".github/workflows/allure-publisher.yml"))
+def allure_publisher_negative_probes(path: Path) -> list[str]:
+    """Prove trust checks fail when executable guards are removed or malformed."""
+    errors: list[str] = []
+    source = path.read_text()
+    required_by_job = {
+        "generate": "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
+        "resolve": (
+            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
+            "Allure artifact contract mismatch",
+            'pull.user?.login === "dependabot[bot]"',
+            "A newer source workflow run exists",
+        ),
+    }
+    with tempfile.TemporaryDirectory(prefix="allure-validator-probes-", dir=ROOT) as tmp:
+        probe_root = Path(tmp)
+        for job_name, literals in required_by_job.items():
+            for literal in (literals,) if isinstance(literals, str) else literals:
+                mutated = source.replace(literal, "removed-trust-guard", 1)
+                fixture = probe_root / f"missing-{job_name}-{len(errors)}.yml"
+                fixture.write_text(mutated, encoding="utf-8")
+                if not any(literal in error for error in allure_publisher_workflow_errors(fixture)):
+                    errors.append(f"missing executable guard probe did not fail: {job_name}/{literal}")
+
+        comment_only = source.replace(
+            "A newer source workflow run exists",
+            "removed-trust-guard",
+            1,
+        ) + "\n# A newer source workflow run exists\n"
+        fixture = probe_root / "comment-only.yml"
+        fixture.write_text(comment_only, encoding="utf-8")
+        if not any(
+            "A newer source workflow run exists" in error
+            for error in allure_publisher_workflow_errors(fixture)
+        ):
+            errors.append("comment-only trust guard probe did not fail")
+
+        parsed = yaml.safe_load(source)
+        for mutation, expected in (("job", "resolve job must be a mapping"), ("steps", "resolve steps must be a list")):
+            malformed = json.loads(json.dumps(parsed))
+            if mutation == "job":
+                malformed["jobs"]["resolve"] = None
+            else:
+                malformed["jobs"]["resolve"]["steps"] = None
+            fixture = probe_root / f"malformed-{len(errors)}.yml"
+            fixture.write_text(yaml.safe_dump(malformed, sort_keys=False), encoding="utf-8")
+            fixture_errors = allure_publisher_workflow_errors(fixture)
+            if not any(expected in error for error in fixture_errors):
+                errors.append(f"malformed workflow probe did not report: {expected}")
+    return errors
+
+
+ALLURE_WORKFLOW = ROOT / ".github/workflows/allure-publisher.yml"
+ERRORS.extend(allure_publisher_workflow_errors(ALLURE_WORKFLOW))
+ERRORS.extend(allure_publisher_negative_probes(ALLURE_WORKFLOW))
 
 secret_patterns = [
     r"ghp_[A-Za-z0-9]{20,}",

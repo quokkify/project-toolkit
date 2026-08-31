@@ -78,7 +78,7 @@ jobs:
       ready: ${{ steps.resolve.outputs.ready }}
       pr-number: ${{ steps.resolve.outputs.pr-number }}
       fork-pr: ${{ steps.resolve.outputs.fork-pr }}
-      artifact-manifest: ${{ steps.resolve.outputs.artifact-manifest }}
+      artifact-ids: ${{ steps.resolve.outputs.artifact-ids }}
     steps:
       - name: Validate source identity and artifact contract
         id: resolve
@@ -148,7 +148,7 @@ jobs:
               core.setFailed(`Allure artifacts exceed the 250 MiB compressed limit: ${compressedBytes} bytes.`);
               return;
             }
-            core.setOutput("artifact-manifest", JSON.stringify(selected.map((artifact) => ({ name: artifact.name, id: Number(artifact.id) }))));
+            core.setOutput("artifact-ids", selected.map((artifact) => String(artifact.id)).join(","));
             const pull = matches[0];
             core.setOutput("ready", "true");
             core.setOutput("pr-number", String(pull.number));
@@ -167,7 +167,7 @@ jobs:
       - name: Download only the validated artifact set
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: ${{ inputs.artifact-prefix }}*
+          artifact-ids: ${{ needs.resolve.outputs.artifact-ids }}
           path: .allure-input/source-artifacts
           merge-multiple: true
           github-token: ${{ secrets.github-token }}

@@ -1215,6 +1215,14 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
     """Prove trust checks fail when executable guards are removed or malformed."""
     errors: list[str] = []
     source = path.read_text()
+    parsed = yaml.safe_load(source)
+    # The canonical validator reports malformed shapes before this negative
+    # probe driver runs.  Do not dereference those shapes while probing guards.
+    jobs = parsed.get("jobs") if isinstance(parsed, dict) else None
+    resolve = jobs.get("resolve") if isinstance(jobs, dict) else None
+    steps = resolve.get("steps") if isinstance(resolve, dict) else None
+    if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+        return errors
     required_by_job = {
         "generate": "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
         "resolve": (
@@ -1288,17 +1296,22 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
                 errors.append(f"dead-branch trust guard probe did not fail: {marker}")
 
         parsed = yaml.safe_load(source)
-        for mutation, expected in (("job", "resolve job must be a mapping"), ("steps", "resolve steps must be a list")):
+        malformed_mutations = (
+            ("null job", lambda workflow: workflow["jobs"].__setitem__("resolve", None), "resolve job must be a mapping"),
+            ("scalar job", lambda workflow: workflow["jobs"].__setitem__("resolve", "invalid"), "resolve job must be a mapping"),
+            ("null steps", lambda workflow: workflow["jobs"]["resolve"].__setitem__("steps", None), "resolve steps must be a list"),
+            ("scalar steps", lambda workflow: workflow["jobs"]["resolve"].__setitem__("steps", "invalid"), "resolve steps must be a list"),
+            ("null step item", lambda workflow: workflow["jobs"]["resolve"]["steps"].__setitem__(0, None), "resolve step 0 must be a mapping"),
+            ("scalar step item", lambda workflow: workflow["jobs"]["resolve"]["steps"].__setitem__(0, "invalid"), "resolve step 0 must be a mapping"),
+        )
+        for mutation, apply_mutation, expected in malformed_mutations:
             malformed = json.loads(json.dumps(parsed))
-            if mutation == "job":
-                malformed["jobs"]["resolve"] = None
-            else:
-                malformed["jobs"]["resolve"]["steps"] = None
+            apply_mutation(malformed)
             fixture = probe_root / f"malformed-{len(errors)}.yml"
             fixture.write_text(yaml.safe_dump(malformed, sort_keys=False), encoding="utf-8")
             fixture_errors = allure_publisher_workflow_errors(fixture)
             if not any(expected in error for error in fixture_errors):
-                errors.append(f"malformed workflow probe did not report: {expected}")
+                errors.append(f"malformed workflow probe did not report {expected} ({mutation})")
     return errors
 
 

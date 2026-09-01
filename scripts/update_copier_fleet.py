@@ -30,8 +30,8 @@ DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
 PR_TITLE = "chore(template): update shared project template"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
-    "public fleet automation and update themselves with the self-service "
-    "'Update project template' workflow or a local CODEOWNER run"
+    "public fleet automation and are updated by a maintainer running this script without "
+    "--public-only from a short-lived local gh session"
 )
 RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
@@ -190,6 +190,14 @@ def resolve_template_ref(
     return tag_name
 
 
+def is_public(metadata: object) -> bool:
+    """Return whether GitHub reports this repository as public."""
+    if not isinstance(metadata, dict):
+        return False
+    visibility = metadata.get("visibility")
+    return isinstance(visibility, str) and visibility.casefold() == "public"
+
+
 def discover_repositories(
     org: str,
     *,
@@ -203,7 +211,7 @@ def discover_repositories(
         "--limit",
         "1000",
         "--json",
-        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+        "nameWithOwner,defaultBranchRef,isArchived,isFork,visibility",
     ]
     if public_only:
         arguments.extend(["--visibility", "public"])
@@ -215,6 +223,8 @@ def discover_repositories(
         )
     repositories: list[Repository] = []
     for item in items:
+        if public_only and not is_public(item):
+            continue
         if item.get("isArchived") or item.get("isFork"):
             continue
         default_ref = item.get("defaultBranchRef")
@@ -910,14 +920,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 default_ref = metadata.get("defaultBranchRef")
                 full_name = metadata.get("nameWithOwner")
+                if args.public_only and not is_public(metadata):
+                    raise FleetUpdateError(PRIVATE_REPOSITORY_ERROR)
                 if metadata.get("isArchived") or metadata.get("isFork"):
                     result = Result(requested_name, "excluded", "archived or fork")
                     results.append(result)
                     continue
-                if args.public_only:
-                    visibility = metadata.get("visibility")
-                    if not isinstance(visibility, str) or visibility.casefold() != "public":
-                        raise FleetUpdateError(PRIVATE_REPOSITORY_ERROR)
                 if (
                     not isinstance(full_name, str)
                     or not isinstance(default_ref, dict)

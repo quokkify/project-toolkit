@@ -66,7 +66,7 @@ jobs:
             --exclude quokkify/project-toolkit
             --branch automation/copier-template-update
           )
-          if [[ "$DRY_RUN" == "true" ]]; then
+          if [[ "${DRY_RUN:-}" == "true" ]]; then
             args+=(--dry-run)
           else
             if [[ -z "${GH_TOKEN:-}" ]]; then
@@ -75,10 +75,15 @@ jobs:
             fi
             args+=(--write)
           fi
-          if [[ -n "$REQUESTED_REPOSITORY" ]]; then
+          if [[ -n "${REQUESTED_REPOSITORY:-}" ]]; then
+            # --repo bypasses organization discovery entirely, so --org cannot contain it.
+            if [[ "$REQUESTED_REPOSITORY" != quokkify/* ]]; then
+              echo "::error::repository must be a quokkify/* slug; this front serves one organization." >&2
+              exit 2
+            fi
             args+=(--repo "$REQUESTED_REPOSITORY")
           fi
-          if [[ -n "$TEMPLATE_REF" ]]; then
+          if [[ -n "${TEMPLATE_REF:-}" ]]; then
             args+=(--template-ref "$TEMPLATE_REF")
           fi
           output="$RUNNER_TEMP/copier-fleet-update.txt"

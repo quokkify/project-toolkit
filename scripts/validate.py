@@ -134,8 +134,8 @@ def _version_tuple(value: str) -> tuple[int, int, int] | None:
     return (major, minor, patch)
 
 
-def copier_fleet_workflow_errors(path: Path) -> list[str]:
-    """Validate the Copier fleet audit workflow and its pin."""
+def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[str]:
+    """Validate a Copier fleet workflow and its pin."""
 
     errors: list[str] = []
     rel = path.relative_to(ROOT)
@@ -156,13 +156,13 @@ def copier_fleet_workflow_errors(path: Path) -> list[str]:
     if not isinstance(jobs, dict):
         return errors
 
-    audit = jobs.get("audit")
-    require(isinstance(audit, dict), "audit job must be present")
+    audit = jobs.get(job_name)
+    require(isinstance(audit, dict), f"{job_name} job must be present")
     if not isinstance(audit, dict):
         return errors
 
     steps = audit.get("steps")
-    require(isinstance(steps, list), "audit job must define steps")
+    require(isinstance(steps, list), f"{job_name} job must define steps")
     if not isinstance(steps, list):
         return errors
 
@@ -207,6 +207,72 @@ def copier_fleet_workflow_errors(path: Path) -> list[str]:
             pin_tuple >= min_tuple,
             "Copier fleet audit pin is lower than copier.yml:_min_copier_version",
         )
+
+    return errors
+
+
+def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
+    """Guard the invariants that keep the public update front away from private repositories.
+
+    The security argument for storing a write-capable token in this public repository rests on
+    three properties of this file. Deleting any of them leaves every test and every other check
+    green while the token starts running unbounded, so assert them here.
+    """
+
+    errors = copier_fleet_workflow_errors(path, job_name="update")
+    rel = path.relative_to(ROOT)
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: {message}")
+
+    workflow = load_yaml_or_error(path, errors, str(rel))
+    if not isinstance(workflow, dict):
+        return errors
+
+    permissions = workflow.get("permissions")
+    require(
+        permissions == {"contents": "read"},
+        f"top-level permissions must be exactly contents: read, found {permissions!r}",
+    )
+
+    jobs = workflow.get("jobs")
+    update = jobs.get("update") if isinstance(jobs, dict) else None
+    if not isinstance(update, dict):
+        return errors
+
+    require(
+        "github.repository == 'quokkify/project-toolkit'" in str(update.get("if", "")),
+        "update job must be guarded against forks",
+    )
+
+    steps = update.get("steps")
+    update_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Update Copier fleet"
+        ),
+        None,
+    ) if isinstance(steps, list) else None
+    require(isinstance(update_step, dict), "missing Update Copier fleet step")
+    if not isinstance(update_step, dict):
+        return errors
+
+    script = str(update_step.get("run", ""))
+    require("--public-only" in script, "update step must pass --public-only")
+    require("--write" in script, "update step must be able to run in write mode")
+
+    env = update_step.get("env")
+    require(isinstance(env, dict), "update step must define env:")
+    if not isinstance(env, dict):
+        return errors
+
+    write_token = str(env.get("GH_TOKEN", ""))
+    require(
+        "secrets." in write_token and "github.token" not in write_token,
+        "GH_TOKEN must come from a secret with no github.token fallback",
+    )
 
     return errors
 
@@ -1219,6 +1285,11 @@ check(
 )
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
 ERRORS.extend(copier_fleet_workflow_errors(ROOT / ".github/workflows/copier-fleet-update.yml"))
+ERRORS.extend(
+    copier_fleet_auto_update_workflow_errors(
+        ROOT / ".github/workflows/copier-fleet-auto-update.yml"
+    )
+)
 ERRORS.extend(
     validate_toolkit_workflow_errors(ROOT / ".github/workflows/validate-toolkit.yml")
 )
@@ -2346,9 +2417,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         )
         check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
 
-run([sys.executable, "tests/test_composite_actions.py"])
-run([sys.executable, "tests/test_update_copier_fleet.py"])
-run([sys.executable, "tests/test_validate_helpers.py"])
+# tests/test_validate_helpers.py runs this script again inside a temporary copy of the
+# repository, and that copy reaches this block too. Mark the child environment so the nested
+# run skips the suites instead of spawning its own, which would recurse without bound. The
+# marker is set here rather than in the test so the invariant does not depend on the caller.
+NESTED_MARKER = "PROJECT_TOOLKIT_NESTED_VALIDATION"
+if os.environ.get(NESTED_MARKER) == "1":
+    print("nested validation: skipping suites that re-enter scripts/validate.py")
+else:
+    suite_env = {**os.environ, NESTED_MARKER: "1"}
+    run([sys.executable, "tests/test_composite_actions.py"], env=suite_env)
+    run([sys.executable, "tests/test_update_copier_fleet.py"], env=suite_env)
+    run([sys.executable, "tests/test_validate_helpers.py"], env=suite_env)
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
 
 if not ARGS.static:

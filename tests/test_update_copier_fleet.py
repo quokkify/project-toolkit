@@ -35,6 +35,31 @@ class DiscoveryTests(TestCase):
         arguments = gh_json_mock.call_args.args[0]
         self.assertIn("--visibility", arguments)
         self.assertEqual(arguments[arguments.index("--visibility") + 1], "public")
+        self.assertIn("visibility", arguments[arguments.index("--json") + 1].split(","))
+
+    @mock.patch.object(
+        fleet,
+        "gh_json",
+        return_value=[
+            {
+                "nameWithOwner": "quokkify/leaked-private",
+                "defaultBranchRef": {"name": "main"},
+                "isArchived": False,
+                "isFork": False,
+                "visibility": "PRIVATE",
+            },
+            {
+                "nameWithOwner": "quokkify/public-example",
+                "defaultBranchRef": {"name": "main"},
+                "isArchived": False,
+                "isFork": False,
+                "visibility": "PUBLIC",
+            },
+        ],
+    )
+    def test_public_only_discovery_rechecks_visibility_client_side(self, _: mock.Mock) -> None:
+        discovered = fleet.discover_repositories("quokkify", env={}, public_only=True)
+        self.assertEqual([repo.name_with_owner for repo in discovered], ["quokkify/public-example"])
 
 
 class ExplicitRepositoryVisibilityTests(TestCase):
@@ -53,7 +78,7 @@ class ExplicitRepositoryVisibilityTests(TestCase):
             mock.patch.object(fleet, "resolve_template_ref", return_value="v2.16.0"),
             mock.patch.dict(
                 "os.environ",
-                {"GITHUB_TOKEN": "repository-scoped-token", "GH_TOKEN": ""},
+                {"GITHUB_TOKEN": "repository-scoped-token"},
                 clear=False,
             ),
             redirect_stdout(buffer),
@@ -75,7 +100,7 @@ class ExplicitRepositoryVisibilityTests(TestCase):
         )
         self.assertEqual(status, 1)
         self.assertIn("--public-only rejects non-public repositories", output)
-        self.assertIn("self-service", output)
+        self.assertIn("without --public-only", output)
         self.assertEqual(self.processed, 0)
 
     def test_public_only_rejects_an_internal_repository(self) -> None:
@@ -91,6 +116,64 @@ class ExplicitRepositoryVisibilityTests(TestCase):
         )
         self.assertEqual(status, 1)
         self.assertIn("--public-only rejects non-public repositories", output)
+        self.assertEqual(self.processed, 0)
+
+    def test_public_only_rejects_metadata_without_a_visibility_field(self) -> None:
+        status, output = self.run_main(
+            {
+                "nameWithOwner": "quokkify/unknown-example",
+                "defaultBranchRef": {"name": "main"},
+                "isArchived": False,
+                "isFork": False,
+            },
+            ["--dry-run", "--public-only", "--repo", "quokkify/unknown-example"],
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("--public-only rejects non-public repositories", output)
+        self.assertEqual(self.processed, 0)
+
+    def test_public_only_rejects_a_null_visibility_field(self) -> None:
+        status, _ = self.run_main(
+            {
+                "nameWithOwner": "quokkify/null-example",
+                "defaultBranchRef": {"name": "main"},
+                "isArchived": False,
+                "isFork": False,
+                "visibility": None,
+            },
+            ["--dry-run", "--public-only", "--repo", "quokkify/null-example"],
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(self.processed, 0)
+
+    def test_public_only_rejects_a_private_repository_in_write_mode(self) -> None:
+        with mock.patch.dict("os.environ", {"GH_TOKEN": "codeowner-token"}, clear=False):
+            status, output = self.run_main(
+                {
+                    "nameWithOwner": "quokkify/private-example",
+                    "defaultBranchRef": {"name": "main"},
+                    "isArchived": False,
+                    "isFork": False,
+                    "visibility": "PRIVATE",
+                },
+                ["--write", "--public-only", "--repo", "quokkify/private-example"],
+            )
+        self.assertEqual(status, 1)
+        self.assertIn("--public-only rejects non-public repositories", output)
+        self.assertEqual(self.processed, 0)
+
+    def test_public_only_rejects_a_private_archived_repository_loudly(self) -> None:
+        status, _ = self.run_main(
+            {
+                "nameWithOwner": "quokkify/private-archived",
+                "defaultBranchRef": {"name": "main"},
+                "isArchived": True,
+                "isFork": False,
+                "visibility": "PRIVATE",
+            },
+            ["--dry-run", "--public-only", "--repo", "quokkify/private-archived"],
+        )
+        self.assertEqual(status, 1)
         self.assertEqual(self.processed, 0)
 
     def test_public_only_accepts_an_explicitly_requested_public_repository(self) -> None:

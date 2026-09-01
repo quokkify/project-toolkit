@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.16.0](https://github.com/quokkify/project-toolkit/compare/v2.15.0...v2.16.0) (2026-09-01)
+
+
+### ✨ Features
+
+* **copier:** make the CodeQL workflow opt-out ([#172](https://github.com/quokkify/project-toolkit/issues/172)) ([cf34077](https://github.com/quokkify/project-toolkit/commit/cf34077bed1d76e024459600ab9f054a3945bdfe))
+
+
+### 🐛 Bug Fixes
+
+* **gitleaks:** stop fetching a ref the checkout already has ([#170](https://github.com/quokkify/project-toolkit/issues/170)) ([92b4ce6](https://github.com/quokkify/project-toolkit/commit/92b4ce6f19f7319ea90348b803399f76b9ea5262))
+
 ## [2.15.0](https://github.com/quokkify/project-toolkit/compare/v2.14.0...v2.15.0) (2026-09-01)
 
 

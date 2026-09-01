@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.19.0](https://github.com/quokkify/project-toolkit/compare/v2.18.1...v2.19.0) (2026-09-01)
+
+
+### ✨ Features
+
+* **copier:** support manifest release mode ([#190](https://github.com/quokkify/project-toolkit/issues/190)) ([e5e8257](https://github.com/quokkify/project-toolkit/commit/e5e825736c71f08257a7c749821ebff7c6f7bcc2))
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** let git use the token the workflow already provides ([#187](https://github.com/quokkify/project-toolkit/issues/187)) ([a00b4fa](https://github.com/quokkify/project-toolkit/commit/a00b4fad2ca34f768aaf7abc6c3fb6a5355adacb))
+
+
+### 📚 Documentation
+
+* state the permissions the fleet token actually needs ([#189](https://github.com/quokkify/project-toolkit/issues/189)) ([a7570b4](https://github.com/quokkify/project-toolkit/commit/a7570b4606e60cb971853d81c9f9c2ed569309aa))
+
 ## [2.18.1](https://github.com/quokkify/project-toolkit/compare/v2.18.0...v2.18.1) (2026-09-01)
 
 

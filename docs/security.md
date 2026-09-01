@@ -12,6 +12,12 @@ Language and Docker workflows request only `contents: read`. Release Please need
 
 Only Docker push accepts secrets (`registry-username` and `registry-password`). They are passed directly to the pinned login Action and are never echoed. Build arguments are not secret-safe. Reusable workflows cannot elevate permissions granted by their caller, and secrets are not automatically forwarded through nested workflows unless explicitly passed or inherited.
 
+## Cross-repository fleet automation
+
+The scheduled `Auto-update Copier-managed repositories` workflow writes to other repositories, which the repository-scoped `GITHUB_TOKEN` cannot do. It therefore uses a stored `FLEET_UPDATE_TOKEN` secret, a deliberate reversal of the earlier position that cross-repository writes never happen inside Actions. The reversal is bounded by three properties. The credential must be a GitHub App installation token or fine-grained token installed on public Quokkify repositories only, so it structurally cannot reach a private repository even if the script is misused. The script enforces the same boundary independently: `--public-only` filters organization discovery and rejects an explicitly requested non-public repository. Write mode fails fast when the secret is absent instead of silently falling back to a read-only token and failing deep inside the run.
+
+The workflow itself needs no elevated rights on this repository, so it requests `contents: read`; every write travels through the separate token. A repository guard keeps the schedule from running on forks. Private consumers are outside this automation entirely and are updated by a maintainer from a short-lived local `gh` session, so no credential with private access is stored in this public repository.
+
 ## Fork pull requests
 
 GitHub normally withholds repository secrets from workflows triggered by untrusted fork pull requests. Keep PR validation read-only, do not use `pull_request_target` to execute fork code with write tokens, and keep push/release paths on trusted branch events.

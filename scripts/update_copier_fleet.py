@@ -28,6 +28,11 @@ ANSWERS_FILE = ".copier-answers.yml"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
 PR_TITLE = "chore(template): update shared project template"
+PRIVATE_REPOSITORY_ERROR = (
+    "--public-only rejects non-public repositories; private consumers are not served by the "
+    "public fleet automation and are updated by a maintainer running this script without "
+    "--public-only from a short-lived local gh session"
+)
 RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
@@ -185,6 +190,14 @@ def resolve_template_ref(
     return tag_name
 
 
+def is_public(metadata: object) -> bool:
+    """Return whether GitHub reports this repository as public."""
+    if not isinstance(metadata, dict):
+        return False
+    visibility = metadata.get("visibility")
+    return isinstance(visibility, str) and visibility.casefold() == "public"
+
+
 def discover_repositories(
     org: str,
     *,
@@ -198,7 +211,7 @@ def discover_repositories(
         "--limit",
         "1000",
         "--json",
-        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+        "nameWithOwner,defaultBranchRef,isArchived,isFork,visibility",
     ]
     if public_only:
         arguments.extend(["--visibility", "public"])
@@ -210,6 +223,8 @@ def discover_repositories(
         )
     repositories: list[Repository] = []
     for item in items:
+        if public_only and not is_public(item):
+            continue
         if item.get("isArchived") or item.get("isFork"):
             continue
         default_ref = item.get("defaultBranchRef")
@@ -855,7 +870,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--public-only",
         action="store_true",
-        help="Limit organization discovery to the public fleet visible to repository-scoped Actions tokens.",
+        help="Serve only public repositories; organization discovery is filtered and an explicit --repo that is not public fails.",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
@@ -899,12 +914,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "view",
                         requested_name,
                         "--json",
-                        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+                        "nameWithOwner,defaultBranchRef,isArchived,isFork,visibility",
                     ],
                     env=env,
                 )
                 default_ref = metadata.get("defaultBranchRef")
                 full_name = metadata.get("nameWithOwner")
+                if args.public_only and not is_public(metadata):
+                    raise FleetUpdateError(PRIVATE_REPOSITORY_ERROR)
                 if metadata.get("isArchived") or metadata.get("isFork"):
                     result = Result(requested_name, "excluded", "archived or fork")
                     results.append(result)

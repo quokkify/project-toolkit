@@ -62,6 +62,55 @@ class DiscoveryTests(TestCase):
         self.assertEqual([repo.name_with_owner for repo in discovered], ["quokkify/public-example"])
 
 
+class AuthenticatedGitTests(TestCase):
+    """git does not read GH_TOKEN; a hosted runner has no credential helper at all."""
+
+    def test_push_and_ls_remote_authenticate_through_gh(self) -> None:
+        repository = fleet.Repository("quokkify/example", "main")
+        with (
+            mock.patch.object(fleet, "run") as run_mock,
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            run_mock.return_value.stdout = ""
+            fleet.push_automation_branch(
+                repository,
+                Path(temporary),
+                branch="automation/copier-template-update",
+                env={"GH_TOKEN": "token"},
+            )
+        remote_commands = [
+            call.args[0]
+            for call in run_mock.call_args_list
+            if call.args[0][0] == "git" and any(arg in ("push", "ls-remote") for arg in call.args[0])
+        ]
+        self.assertEqual(len(remote_commands), 2)
+        for command in remote_commands:
+            self.assertIn("credential.helper=!gh auth git-credential", command)
+            # The empty helper must come first so an ambient one cannot win.
+            self.assertLess(
+                command.index("credential.helper="),
+                command.index("credential.helper=!gh auth git-credential"),
+            )
+
+    def test_local_git_operations_are_not_given_credentials(self) -> None:
+        repository = fleet.Repository("quokkify/example", "main")
+        with (
+            mock.patch.object(fleet, "run") as run_mock,
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            run_mock.return_value.stdout = ""
+            fleet.push_automation_branch(
+                repository,
+                Path(temporary),
+                branch="automation/copier-template-update",
+                env={"GH_TOKEN": "token"},
+            )
+        for call in run_mock.call_args_list:
+            command = call.args[0]
+            if command[0] == "git" and command[1] in ("config", "add", "commit", "switch"):
+                self.assertNotIn("credential.helper=!gh auth git-credential", command)
+
+
 class ExplicitRepositoryVisibilityTests(TestCase):
     """--public-only is an invariant of the public fleet front, not only a discovery filter."""
 

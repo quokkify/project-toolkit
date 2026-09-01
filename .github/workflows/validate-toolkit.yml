@@ -57,6 +57,10 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           install -m 0755 actionlint "$HOME/.local/bin/actionlint"
       - name: Validate toolkit policies and templates
+        env:
+          # Lets the shared-preset coverage check read the preset through the API
+          # instead of skipping on the unauthenticated rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/validate.py --static
       - name: Validate Renovate configuration
         run: >-

@@ -12,6 +12,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -883,6 +885,68 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
 TEMPLATE_WORKFLOW_SOURCES = ROOT / "templates/project/template/.github/workflows"
+# The API endpoint rather than raw.githubusercontent.com: raw is CDN-cached for
+# several minutes, which would fail this check against a preset that was already
+# updated. Authorization is attached when a token is present so CI is not subject
+# to the unauthenticated rate limit.
+SHARED_PRESET_BASE_URL = (
+    "https://api.github.com/repos/quokkify/renovate-presets/contents/presets/base.json"
+)
+
+
+def template_owned_workflow_paths() -> list[str]:
+    """Return the workflow paths whose versions project-toolkit owns."""
+    return sorted(
+        f".github/workflows/{source.name.removesuffix('.jinja')}"
+        for source in TEMPLATE_WORKFLOW_SOURCES.glob("*.yml.jinja")
+    )
+
+
+def assert_shared_preset_covers_template_workflows() -> None:
+    """The shared preset must disable Renovate for every template-owned workflow.
+
+    Those files carry pins that this repository updates and ships through `copier update`.
+    A template workflow missing from the preset would be updated from both sides at once,
+    so adding one here without updating the preset must fail rather than drift silently.
+    The rule lives in the preset because the consumer's renovate.json is owned by the
+    project and cannot be rewritten.
+    """
+    request = urllib.request.Request(
+        SHARED_PRESET_BASE_URL,
+        headers={"Accept": "application/vnd.github.raw+json"},
+    )
+    token = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            preset = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        print(f"shared preset unreachable ({exc}): skipping template-owned coverage check")
+        return
+    rules = preset.get("packageRules") if isinstance(preset, dict) else None
+    if not isinstance(rules, list):
+        ERRORS.append("shared preset has no packageRules array")
+        return
+    covered = [
+        rule.get("matchFileNames")
+        for rule in rules
+        if isinstance(rule, dict) and rule.get("enabled") is False and "matchFileNames" in rule
+    ]
+    if len(covered) != 1:
+        ERRORS.append(
+            f"shared preset must carry exactly one disabled template-owned rule, found {len(covered)}"
+        )
+        return
+    expected = template_owned_workflow_paths()
+    check(
+        sorted(covered[0] or []) == expected,
+        "shared preset template-owned coverage mismatch: "
+        f"preset={covered[0]!r} template={expected!r}; update "
+        "quokkify/renovate-presets//presets/base before adding a template workflow",
+    )
+
+
 _copier_config = load_yaml_or_error(ROOT / "copier.yml", ERRORS, "copier.yml")
 skip_if_exists = _copier_config.get("_skip_if_exists") or [] if isinstance(_copier_config, dict) else []
 RENOVATE_PRESET_PATHS = {
@@ -916,46 +980,6 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
     check(
         data.get("extends") == expected_extends,
         f"{label}: renovate extends mismatch: {data.get('extends')!r}",
-    )
-    assert_template_owned_workflows_are_disabled(path, data, label)
-
-
-def assert_template_owned_workflows_are_disabled(path: Path, data: object, label: str) -> None:
-    """Every template-owned workflow must be excluded from the consumer's own Renovate.
-
-    Template-owned workflow files carry pins that project-toolkit updates and ships through
-    `copier update`. One missing from the rule would be updated from both sides at once, so
-    a new template workflow must fail here instead of drifting silently. Workflows the
-    project owns itself are deliberately absent from this set and stay Renovate-managed.
-    """
-    template_workflows = {
-        f".github/workflows/{source.name.removesuffix('.jinja')}"
-        for source in TEMPLATE_WORKFLOW_SOURCES.glob("*.yml.jinja")
-    }
-    generated_workflows = sorted(
-        relative
-        for workflow in (path.parents[1] / ".github" / "workflows").glob("*.yml")
-        if (relative := workflow.relative_to(path.parents[1]).as_posix()) in template_workflows
-    )
-    rules = data.get("packageRules") if isinstance(data, dict) else None
-    if not isinstance(rules, list):
-        ERRORS.append(f"{label}: renovate.json has no packageRules array")
-        return
-    disabled = [
-        rule
-        for rule in rules
-        if isinstance(rule, dict) and rule.get("enabled") is False and "matchFileNames" in rule
-    ]
-    if len(disabled) != 1:
-        ERRORS.append(
-            f"{label}: expected exactly one disabled template-owned rule, found {len(disabled)}"
-        )
-        return
-    covered = disabled[0].get("matchFileNames")
-    check(
-        covered == generated_workflows,
-        f"{label}: template-owned workflow coverage mismatch: "
-        f"rule={covered!r} generated={generated_workflows!r}",
     )
 
 
@@ -1290,6 +1314,7 @@ check(
     == "project-toolkit",
     "Release Please config must preserve the simple project-toolkit SemVer contract",
 )
+assert_shared_preset_covers_template_workflows()
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
 ERRORS.extend(copier_fleet_workflow_errors(ROOT / ".github/workflows/copier-fleet-update.yml"))
 ERRORS.extend(
@@ -1995,11 +2020,12 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
         )
-        check(
-            "README.md" in skip_if_exists,
-            "copier.yml must keep README.md in _skip_if_exists so an update never "
-            "replaces a project's own documentation with the starter text",
-        )
+        for owned in ("README.md", ".github/renovate.json"):
+            check(
+                owned in skip_if_exists,
+                f"copier.yml must keep {owned} in _skip_if_exists so an update never "
+                "overwrites a file the project owns",
+            )
         check(
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",

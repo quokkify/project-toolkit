@@ -11,10 +11,14 @@ _exclude:
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
 
 # Written once when the project is generated, then owned by the project.
-# The template ships a starter README; every real project replaces it, and a
-# later `copier update` must not overwrite that with the starter text again.
+# The template ships a starter README and a minimal Renovate config; real
+# projects rewrite the README and extend the Renovate config with their own
+# managers and rules, so a later `copier update` must not overwrite either.
+# Toolkit-owned Renovate policy reaches these projects through the shared
+# preset in `extends`, not by rewriting the file.
 _skip_if_exists:
   - README.md
+  - .github/renovate.json
 
 project_name:
   type: str

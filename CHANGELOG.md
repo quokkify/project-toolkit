@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.19.1](https://github.com/quokkify/project-toolkit/compare/v2.19.0...v2.19.1) (2026-09-01)
+
+
+### 🐛 Bug Fixes
+
+* **allure:** link the PR comment to the published report ([#194](https://github.com/quokkify/project-toolkit/issues/194)) ([bf3913b](https://github.com/quokkify/project-toolkit/commit/bf3913b605e20e0672530f75286a8b7911e0da7e))
+* **fleet:** bump toolkit references in project-owned workflows ([#191](https://github.com/quokkify/project-toolkit/issues/191)) ([aa4d4e1](https://github.com/quokkify/project-toolkit/commit/aa4d4e19d6e84bfb1542c26bf84e861caf3d9039))
+
 ## [2.19.0](https://github.com/quokkify/project-toolkit/compare/v2.18.1...v2.19.0) (2026-09-01)
 
 

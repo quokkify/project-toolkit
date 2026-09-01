@@ -2006,6 +2006,33 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 == (scenario == "allure-pages"),
                 f"{scenario}: Pages publishing does not match the Copier answers",
             )
+            if scenario == "allure-pages":
+                report_step = next(
+                    step
+                    for step in jobs["generate"]["steps"]
+                    if str(step.get("uses", "")).startswith(
+                        "quokkify/project-toolkit/actions/allure-report@"
+                    )
+                )
+                deploy_step = next(
+                    step
+                    for step in jobs["pages"]["steps"]
+                    if str(step.get("uses", "")).startswith(
+                        "quokkify/project-toolkit/actions/deploy-gh-pages-subdir@"
+                    )
+                )
+                published_url = "/".join(
+                    (
+                        "https://quokkify.github.io/fixture-allure-pages",
+                        str(deploy_step["with"]["destination-dir"]),
+                        str(report_step["with"]["report-directory"]),
+                        "",
+                    )
+                )
+                check(
+                    str(report_step["with"]["pages-url"]) == published_url,
+                    "allure-pages: commented report URL does not address the published report directory",
+                )
         else:
             check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
             check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")

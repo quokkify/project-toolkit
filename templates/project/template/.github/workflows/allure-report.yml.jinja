@@ -178,7 +178,7 @@ jobs:
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}
 {% endif %}          source-run-id: {% raw %}${{ github.event.workflow_run.id }}{% endraw %}
-          pages-url: {% if allure_publish_pages %}{{ allure_pages_url | tojson }}{% else %}""{% endif %}
+          pages-url: {% if allure_publish_pages %}"{{ allure_pages_url }}/allure/pr-{% raw %}${{ needs.resolve.outputs.pr-number }}{% endraw %}/allure-report/"{% else %}""{% endif %}
           fork-pr: {% raw %}${{ needs.resolve.outputs.fork-pr }}{% endraw %}
           comment-marker: "<!-- project-toolkit-allure-report -->"
       - name: Upload generated Allure HTML

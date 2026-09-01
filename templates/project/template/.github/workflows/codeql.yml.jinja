@@ -1,8 +1,12 @@
 {%- set codeql_state = namespace(languages=['actions']) -%}
+{%- if codeql_languages -%}
+{%- set codeql_state.languages = codeql_languages -%}
+{%- else -%}
 {%- for component in components -%}
 {%- set language = {'python': 'python', 'node': 'javascript-typescript', 'java': 'java-kotlin'}[component.type] -%}
 {%- if language not in codeql_state.languages -%}{%- set codeql_state.languages = codeql_state.languages + [language] -%}{%- endif -%}
 {%- endfor -%}
+{%- endif -%}
 name: CodeQL
 
 on:

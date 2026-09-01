@@ -107,6 +107,16 @@ The split is by file, not by manager: Renovate in the generated project keeps fu
 
 `scripts/validate.py` fails when the generated rule and the set of generated template workflows disagree, so a new template workflow cannot silently ship without this protection.
 
+### CodeQL languages
+
+The generated CodeQL workflow scans `actions` plus the languages implied by `components`. A repository that builds real source without describing it through `components` therefore gets `actions` only, and its application code is silently not scanned. Set `codeql_languages` to an explicit list to say what CodeQL should analyze:
+
+```yaml
+codeql_languages: [actions, java-kotlin]
+```
+
+Supported names are `actions`, `c-cpp`, `csharp`, `go`, `java-kotlin`, `javascript-typescript`, `python`, `ruby`, `rust`, and `swift`; unknown names, duplicates, and non-list values are rejected. Leave it empty to keep deriving the list from `components`.
+
 The template accepts an optional YAML list of `python`, `node`, and `java` components plus Docker, CodeQL, Allure, Release Please, and Renovate booleans. Leave `components` empty when the repository owns custom language-specific validation; the shared template-contract validation and Gitleaks still remain present, and CodeQL Actions analysis does too unless it is switched off. Generated projects use Renovate presets from `quokkify/renovate-presets` by default. Set `renovate_config_repository` to another GitHub `owner/repo` slug when a project should consume a different shared preset repository; it names the preset repository, not the generated consumer repository. Set `renovate_presets` to a non-empty YAML list of selected preset names, preserving the desired extends order. Supported names map to paths as follows: `default` -> `presets/base`, `python` -> `presets/python/default`, `javascript` -> `presets/npm/default`, `java` -> `presets/gradle/default`, `docker` -> `presets/docker/default`, and `github-actions` -> `presets/github-actions/default`. New projects infer `default`, `github-actions`, and the language/Docker presets selected by `components` and `docker`. The generated extends entries follow that preset repository's default branch intentionally; pin them manually later if a stricter stability policy requires it. Set `codeql: false` when a repository cannot run code scanning: GitHub Advanced Security is required for private repositories, and without it the generated job fails on every pull request. Repositories generated before this answer existed report CodeQL as `unknown` rather than `missing`, so an audit does not flag them. Commit `.copier-answers.yml`; it is the update contract. Review generated pull requests before merging them.
 
 ## Copier Allure reporting

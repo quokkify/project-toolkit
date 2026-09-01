@@ -14,13 +14,27 @@
 {%- if codeql -%}{%- set _ = template_owned_workflows.append('.github/workflows/codeql.yml') -%}{%- endif -%}
 {%- if release_please -%}{%- set _ = template_owned_workflows.append('.github/workflows/release.yml') -%}{%- endif -%}
 {%- if allure_report -%}{%- set _ = template_owned_workflows.append('.github/workflows/allure-report.yml') -%}{%- endif -%}
+{#- Emit arrays the way Prettier's default profile would: inline while the whole
+    line fits in 80 columns, otherwise one entry per line. Consumers run
+    formatters over generated files, and a config that never matches their
+    formatter fails their checks on every template update. -#}
+{%- macro json_array(items, key, indent) -%}
+{%- set inline = items | to_json -%}
+{%- if indent + (key | length) + 4 + (inline | length) <= 80 -%}
+{{ inline }}
+{%- else -%}
+[
+{% for item in items %}{{ ' ' * (indent + 2) }}{{ item | to_json }}{{ "," if not loop.last }}
+{% endfor %}{{ ' ' * indent }}]
+{%- endif -%}
+{%- endmacro -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": {{ renovate_extends | to_json }},
+  "extends": {{ json_array(renovate_extends, 'extends', 2) }},
   "packageRules": [
     {
       "description": "Disable competing updates inside template-owned workflows; project-toolkit owns those versions and delivers them through copier update.",
-      "matchFileNames": {{ template_owned_workflows | sort | to_json }},
+      "matchFileNames": {{ json_array(template_owned_workflows | sort, 'matchFileNames', 6) }},
       "enabled": false
     }
   ]

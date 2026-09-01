@@ -1564,8 +1564,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             categories = dest / ".github/allure/categories.json"
             categories.parent.mkdir(parents=True, exist_ok=True)
             categories.write_text("[]\n", encoding="utf-8")
-        for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
-            run([actionlint, str(dest / f".github/workflows/{workflow_name}")])
+        for generated_workflow in sorted((dest / ".github/workflows").glob("*.yml")):
+            if generated_workflow.name == "allure-report.yml":
+                continue
+            run([actionlint, str(generated_workflow)])
         allure_workflow_path = dest / ".github/workflows/allure-report.yml"
         allure_config_path = dest / ".github/allure/allurerc.mjs"
         allure_extractor_path = dest / ".github/allure/safe_extract.py"
@@ -1967,8 +1969,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             workflow_name not in config_only_validate,
             f"config-only project unexpectedly generated {workflow_name}",
         )
-    for workflow_name in ("validate.yml", "codeql.yml", "gitleaks.yml"):
-        run([actionlint, str(config_only_dest / f".github/workflows/{workflow_name}")])
+    for generated_workflow in sorted((config_only_dest / ".github/workflows").glob("*.yml")):
+        run([actionlint, str(generated_workflow)])
     config_only_gitleaks = (config_only_dest / ".github/workflows/gitleaks.yml").read_text()
     check(
         'install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"' in config_only_gitleaks,

@@ -79,6 +79,16 @@ gh workflow run copier-fleet-update.yml --repo quokkify/project-toolkit
 
 The first command creates or refreshes `chore: update shared project template` pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit template version. Existing project changes are preserved by Copier's update algorithm; `.rej` conflicts fail that repository loudly instead of opening a partial PR. The deterministic `automation/copier-template-update` branch is automation-owned and may be force-updated with an exact lease, so maintainers should not add manual commits to it. Normal updates follow the latest release tag rather than unreleased `main`.
 
+### Self-service template update
+
+Generated projects ship an `Update project template` workflow with a single `workflow_dispatch` trigger and no schedule. It runs `copier update` against the latest released template tag (or an explicit `template-ref` input) and pushes the deterministic `automation/copier-template-update` branch using the project's own `GITHUB_TOKEN`, so this path needs no cross-repository credential anywhere.
+
+It deliberately stops at pushing the branch and prints a compare link instead of opening the pull request. A pull request opened with `GITHUB_TOKEN` does not trigger `pull_request` workflows, so `Validate`, `Gitleaks`, and `CodeQL` would never run on it, and a repository with a required-status-check ruleset could never merge it. Opening it by hand costs one click and keeps every check honest.
+
+`.rej` conflicts fail the run and nothing is pushed, so the branch never holds a half-applied template. A run that finds no changes exits cleanly without pushing.
+
+This is the supported in-repository path for private consumers, which the public fleet automation does not serve at all, and an escape hatch for public ones that do not want to wait for the weekly schedule. Both fronts write the same branch, so on a public repository a self-service run can collide with the scheduled one; the push uses an exact lease and fails rather than discarding an unseen commit. Treat it on a public repository as the exceptional path.
+
 ### Ownership of pinned tool versions
 
 Versions inside template-owned workflow files belong to this repository, not to Renovate in the generated project. Renovate here bumps the pinned `uses:` digests and `ACTIONLINT_VERSION` inside `templates/project/template`, and those bumps reach consumers through `copier update`.

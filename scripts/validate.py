@@ -816,6 +816,7 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
+TEMPLATE_WORKFLOW_SOURCES = ROOT / "templates/project/template/.github/workflows"
 RENOVATE_PRESET_PATHS = {
     "default": "presets/base",
     "python": "presets/python/default",
@@ -842,6 +843,46 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
     check(
         data.get("extends") == expected_extends,
         f"{label}: renovate extends mismatch: {data.get('extends')!r}",
+    )
+    assert_template_owned_workflows_are_disabled(path, data, label)
+
+
+def assert_template_owned_workflows_are_disabled(path: Path, data: object, label: str) -> None:
+    """Every template-owned workflow must be excluded from the consumer's own Renovate.
+
+    Template-owned workflow files carry pins that project-toolkit updates and ships through
+    `copier update`. One missing from the rule would be updated from both sides at once, so
+    a new template workflow must fail here instead of drifting silently. Workflows the
+    project owns itself are deliberately absent from this set and stay Renovate-managed.
+    """
+    template_workflows = {
+        f".github/workflows/{source.name.removesuffix('.jinja')}"
+        for source in TEMPLATE_WORKFLOW_SOURCES.glob("*.yml.jinja")
+    }
+    generated_workflows = sorted(
+        relative
+        for workflow in (path.parents[1] / ".github" / "workflows").glob("*.yml")
+        if (relative := workflow.relative_to(path.parents[1]).as_posix()) in template_workflows
+    )
+    rules = data.get("packageRules") if isinstance(data, dict) else None
+    if not isinstance(rules, list):
+        ERRORS.append(f"{label}: renovate.json has no packageRules array")
+        return
+    disabled = [
+        rule
+        for rule in rules
+        if isinstance(rule, dict) and rule.get("enabled") is False and "matchFileNames" in rule
+    ]
+    if len(disabled) != 1:
+        ERRORS.append(
+            f"{label}: expected exactly one disabled template-owned rule, found {len(disabled)}"
+        )
+        return
+    covered = disabled[0].get("matchFileNames")
+    check(
+        covered == generated_workflows,
+        f"{label}: template-owned workflow coverage mismatch: "
+        f"rule={covered!r} generated={generated_workflows!r}",
     )
 
 

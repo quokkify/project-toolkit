@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.17.0](https://github.com/quokkify/project-toolkit/compare/v2.16.0...v2.17.0) (2026-09-01)
+
+
+### ✨ Features
+
+* **copier:** add a self-service template update workflow ([#179](https://github.com/quokkify/project-toolkit/issues/179)) ([7c81411](https://github.com/quokkify/project-toolkit/commit/7c814118849320dd458babb0e0935fd375c28504))
+* **copier:** give project-toolkit sole ownership of template-owned pins ([#173](https://github.com/quokkify/project-toolkit/issues/173)) ([82a18e4](https://github.com/quokkify/project-toolkit/commit/82a18e43bb8e0bb4547c640f355e213e07c889e8))
+* **workflows:** add the public-only Copier fleet auto-update workflow ([#162](https://github.com/quokkify/project-toolkit/issues/162)) ([44bf820](https://github.com/quokkify/project-toolkit/commit/44bf820dc0b74e97524be4c88c70842024e1a963))
+
+
+### 🐛 Bug Fixes
+
+* match Allure resolve step by action name, not pinned SHA ([#178](https://github.com/quokkify/project-toolkit/issues/178)) ([259c5a8](https://github.com/quokkify/project-toolkit/commit/259c5a8306356e402b6370c049e6b251f4208958))
+* match the Allure report action by name, not by its pinned SHA ([#180](https://github.com/quokkify/project-toolkit/issues/180)) ([dee812c](https://github.com/quokkify/project-toolkit/commit/dee812c9a3ed4305332d96f2931adf700754bb5b))
+
+
+### 🧹 Chores
+
+* **deps:** update actions/github-script action to v9 ([#176](https://github.com/quokkify/project-toolkit/issues/176)) ([fab8049](https://github.com/quokkify/project-toolkit/commit/fab8049d052ca7395de8087bc7681f3117ea47b5))
+* **deps:** update quokkify/allure-report-action action to v0.4.1 ([#174](https://github.com/quokkify/project-toolkit/issues/174)) ([56a5ce2](https://github.com/quokkify/project-toolkit/commit/56a5ce2634b67bc2d16cee90e7a8122d79af4074))
+* **deps:** update renovate to v44.54.0 ([#175](https://github.com/quokkify/project-toolkit/issues/175)) ([de5bff6](https://github.com/quokkify/project-toolkit/commit/de5bff6e33ffe4f10fd725f90aad05895cd93250))
+
 ## [2.16.0](https://github.com/quokkify/project-toolkit/compare/v2.15.0...v2.16.0) (2026-09-01)
 
 

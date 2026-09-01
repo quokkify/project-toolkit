@@ -101,11 +101,13 @@ This is the supported in-repository path for private consumers, which the public
 
 Versions inside template-owned workflow files belong to this repository, not to Renovate in the generated project. Renovate here bumps the pinned `uses:` digests and `ACTIONLINT_VERSION` inside `templates/project/template`, and those bumps reach consumers through `copier update`.
 
-The generated `.github/renovate.json` therefore carries a `packageRules` entry that disables Renovate for exactly the workflow files the template owns, computed from the answers so an opted-out workflow such as `codeql.yml` is not listed. Without it the same pin is proposed twice — once here and once in every consumer — and a later `copier update` lands on top of a locally moved pin, producing a `.rej` conflict in a file the project never edited.
+The rule that stops a consumer's Renovate from editing those same files lives in the shared preset, `quokkify/renovate-presets//presets/base`, and reaches projects through `extends`. It disables Renovate for exactly the workflow paths this template owns. Without it the same pin is proposed twice — once here and once in every consumer — and a later `copier update` lands on top of a locally moved pin, producing a `.rej` conflict in a file the project never edited.
+
+The generated `.github/renovate.json` deliberately does **not** carry that rule, and is written only when a project is first generated. Projects extend that file with their own custom managers and package rules, so an update that rewrote it would destroy their configuration; `_skip_if_exists` keeps it owned by the project.
 
 The split is by file, not by manager: Renovate in the generated project keeps full ownership of everything else, including project-owned workflows such as `ci.yml` and all language and runtime dependencies.
 
-`scripts/validate.py` fails when the generated rule and the set of generated template workflows disagree, so a new template workflow cannot silently ship without this protection.
+`scripts/validate.py` fails when the shared preset and the set of template workflows disagree, so a new template workflow cannot ship without extending that rule. A project pointing at a different preset repository through `renovate_config_repository` does not receive the rule and must carry its own equivalent.
 
 ### CodeQL languages
 

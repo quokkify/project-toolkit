@@ -2352,6 +2352,74 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             f"invalid renovate_presets accepted: {invalid_label}={invalid_value!r}",
         )
 
+    # A repository whose source is not described by components must still be able to
+    # declare what CodeQL scans; deriving the list from components alone silently
+    # dropped Java and Python coverage across the fleet.
+    explicit_languages_data = tmp_path / "codeql-languages.yml"
+    explicit_languages_data.write_text(
+        yaml.safe_dump({"components": [], "codeql": True, "codeql_languages": ["actions", "java-kotlin"]})
+    )
+    explicit_languages_dest = tmp_path / "codeql-languages"
+    run(
+        [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "--data-file", str(explicit_languages_data),
+            str(template_source), str(explicit_languages_dest),
+        ]
+    )
+    explicit_codeql = (explicit_languages_dest / ".github/workflows/codeql.yml").read_text()
+    check(
+        'language: ["actions", "java-kotlin"]' in explicit_codeql,
+        "codeql_languages must override the language matrix derived from components",
+    )
+    run([actionlint, str(explicit_languages_dest / ".github/workflows/codeql.yml")])
+
+    derived_languages_data = tmp_path / "codeql-derived.yml"
+    derived_languages_data.write_text(
+        yaml.safe_dump({"components": [{"type": "java", "path": "."}], "codeql": True})
+    )
+    derived_languages_dest = tmp_path / "codeql-derived"
+    run(
+        [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "--data-file", str(derived_languages_data),
+            str(template_source), str(derived_languages_dest),
+        ]
+    )
+    check(
+        'language: ["actions", "java-kotlin"]'
+        in (derived_languages_dest / ".github/workflows/codeql.yml").read_text(),
+        "an empty codeql_languages must still derive the matrix from components",
+    )
+
+    invalid_language_values: tuple[tuple[str, object], ...] = (
+        ("unsupported", ["actions", "cobol"]),
+        ("duplicate", ["actions", "actions"]),
+        ("scalar-string", "actions"),
+        ("map", {"actions": True}),
+        ("non-string-entry", ["actions", 1]),
+    )
+    for invalid_label, invalid_value in invalid_language_values:
+        invalid_data = tmp_path / f"invalid-codeql-languages-{invalid_label}.yml"
+        invalid_data.write_text(
+            yaml.safe_dump({"codeql": True, "codeql_languages": invalid_value})
+        )
+        bad_dest = tmp_path / f"invalid-codeql-languages-{invalid_label}"
+        result = subprocess.run(
+            [
+                copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+                "--data-file", str(invalid_data),
+                str(template_source), str(bad_dest),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(
+            result.returncode != 0,
+            f"invalid codeql_languages accepted: {invalid_label}={invalid_value!r}",
+        )
+
     for invalid_label, invalid_path in (
         ("traversal", "../allure-results"),
         ("absolute", "/tmp/allure-results"),

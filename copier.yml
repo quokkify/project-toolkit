@@ -50,6 +50,22 @@ codeql:
   type: bool
   help: Generate the CodeQL workflow. Code scanning needs GitHub Advanced Security, which private repositories do not receive by default.
   default: true
+codeql_languages:
+  type: yaml
+  help: "Optional explicit CodeQL language list. Empty derives the list from components, which is wrong for a repository whose source is not described by components. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
+  default: []
+  when: "{{ codeql }}"
+  validator: >-
+    {% set allowed_codeql_languages = ['actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'] %}
+    {% if codeql_languages is string or codeql_languages is mapping or codeql_languages is not sequence %}
+    codeql_languages must be a YAML list of supported CodeQL language names.
+    {% else %}
+    {% set codeql_language_state = namespace(seen=[]) %}
+    {% for language in codeql_languages %}
+    {% if language is not string %}Every codeql_languages entry must be a string.{% elif language not in allowed_codeql_languages %}Unsupported CodeQL language: {{ language }}.{% elif language in codeql_language_state.seen %}Duplicate CodeQL language: {{ language }}.{% else %}{% set codeql_language_state.seen = codeql_language_state.seen + [language] %}{% endif %}
+    {% endfor %}
+    {% endif %}
+
 allure_report:
   type: bool
   help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.

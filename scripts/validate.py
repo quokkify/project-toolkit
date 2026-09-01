@@ -1307,6 +1307,7 @@ for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-
     )
 
 RESOLVE_SCRIPT_ACTION = "actions/github-script"
+GENERATE_REPORT_ACTION = "quokkify/allure-report-action"
 
 
 def allure_publisher_workflow_errors(path: Path) -> list[str]:
@@ -1359,18 +1360,21 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
                 uses.append(step["uses"])
     if any(re.search(r"@[0-9a-f]{1,39}$|@(v|main|master)", use) for use in uses):
         errors.append(f"{label}: every external action must use a full SHA")
-    generate_action = "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa"
     generate_job = valid_jobs.get("generate")
     generate_steps = generate_job.get("steps", []) if generate_job else []
     if not isinstance(generate_steps, list):
         generate_steps = []
+    # Match the action by name, not by its pinned SHA. The SHA moves with every
+    # release bump, while the trust boundary being asserted here is "this step runs
+    # the report builder without write privileges". SHA pinning itself stays enforced
+    # by the full-SHA check above.
     if not any(
         isinstance(step, dict)
         and step.get("name") == "Build report without write privileges"
-        and step.get("uses") == generate_action
+        and str(step.get("uses", "")).split("@", 1)[0] == GENERATE_REPORT_ACTION
         for step in generate_steps
     ):
-        errors.append(f"{label}: missing trust-boundary assertion {generate_action}")
+        errors.append(f"{label}: missing trust-boundary assertion {GENERATE_REPORT_ACTION}")
 
     # These patterns deliberately describe the complete guard, rather than
     # searching for a marker.  This prevents comments, dead branches, and an
@@ -1435,8 +1439,19 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
     steps = resolve.get("steps") if isinstance(resolve, dict) else None
     if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
         return errors
+    generate_pin = next(
+        (
+            str(step.get("uses"))
+            for job in (jobs or {}).values()
+            if isinstance(job, dict)
+            for step in (job.get("steps") or [])
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith(f"{GENERATE_REPORT_ACTION}@")
+        ),
+        f"{GENERATE_REPORT_ACTION}@" + "0" * 40,
+    )
     required_by_job = {
-        "generate": "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
+        "generate": generate_pin,
         "resolve": (
             "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
             "Allure artifact contract mismatch",
@@ -1451,7 +1466,10 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
                 mutated = source.replace(literal, "removed-trust-guard", 1)
                 fixture = probe_root / f"missing-{job_name}-{len(errors)}.yml"
                 fixture.write_text(mutated, encoding="utf-8")
-                if not any(literal in error for error in allure_publisher_workflow_errors(fixture)):
+                # The generate guard is reported by action name, since the pin it
+                # carries is expected to move with every release bump.
+                expected = GENERATE_REPORT_ACTION if literal == generate_pin else literal
+                if not any(expected in error for error in allure_publisher_workflow_errors(fixture)):
                     errors.append(f"missing executable guard probe did not fail: {job_name}/{literal}")
 
         comment_only = source.replace(
@@ -1523,6 +1541,25 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
         if bumped_errors:
             errors.append(
                 "github-script pin bump probe lost trust guards: " + "; ".join(bumped_errors)
+            )
+
+        # Regression guard: the same must hold for the report builder pin, whose
+        # bump broke this validator in PR #174.
+        bumped_generate = re.sub(
+            rf"(uses: {re.escape(GENERATE_REPORT_ACTION)}@)[0-9a-f]{{40}}",
+            r"\g<1>" + "0" * 40,
+            source,
+        )
+        bumped_generate_fixture = probe_root / "bumped-report-action.yml"
+        bumped_generate_fixture.write_text(bumped_generate, encoding="utf-8")
+        bumped_generate_errors = [
+            error for error in allure_publisher_workflow_errors(bumped_generate_fixture)
+            if "trust-boundary assertion" in error
+        ]
+        if bumped_generate_errors:
+            errors.append(
+                "report action pin bump probe lost trust guards: "
+                + "; ".join(bumped_generate_errors)
             )
 
         parsed = yaml.safe_load(source)

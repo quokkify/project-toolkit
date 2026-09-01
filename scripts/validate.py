@@ -900,8 +900,13 @@ def renovate_extends(repository: str, presets: list[str]) -> list[str]:
     return [f"github>{repository}//{RENOVATE_PRESET_PATHS[preset]}" for preset in presets]
 
 
+GENERATED_RENOVATE_CONFIGS: list[tuple[str, str]] = []
+
+
 def assert_generated_renovate_config(path: Path, expected_extends: list[str], label: str) -> None:
     """Validate the generated Renovate file shape and exact shared preset refs."""
+    if path.is_file():
+        GENERATED_RENOVATE_CONFIGS.append((label, path.read_text()))
     try:
         data = json.loads(path.read_text())
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -2530,6 +2535,31 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check=False,
         )
         check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
+
+# Consumers run formatters over generated files. A config the template emits in a
+# shape no formatter agrees with fails their checks on every template update, so
+# hold the generated Renovate config to Prettier's default profile.
+if GENERATED_RENOVATE_CONFIGS:
+    if shutil.which("npx") is None:
+        print("npx unavailable: skipping Prettier check for generated Renovate configs")
+    else:
+        with tempfile.TemporaryDirectory(prefix="renovate-prettier-") as prettier_dir:
+            samples = []
+            for label, content in GENERATED_RENOVATE_CONFIGS:
+                sample = Path(prettier_dir) / f"{label}.json"
+                sample.write_text(content, encoding="utf-8")
+                samples.append(str(sample))
+            prettier = subprocess.run(
+                ["npx", "--yes", "prettier@3.9.6", "--check", *samples],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            check(
+                prettier.returncode == 0,
+                "generated renovate.json is not Prettier-formatted: "
+                + (prettier.stderr or prettier.stdout).strip(),
+            )
 
 # tests/test_validate_helpers.py runs this script again inside a temporary copy of the
 # repository, and that copy reaches this block too. Mark the child environment so the nested

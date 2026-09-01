@@ -97,8 +97,11 @@
     },
     {
       "customType": "regex",
-      "description": "Update the pinned actionlint release.",
-      "managerFilePatterns": ["/^\\.github/workflows/validate-toolkit\\.ya?ml$/"],
+      "description": "Update the pinned actionlint release in the toolkit and in the project template.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/validate-toolkit\\.ya?ml$/",
+        "/^templates/project/template/\\.github/workflows/validate\\.ya?ml\\.jinja$/"
+      ],
       "matchStrings": [
         "ACTIONLINT_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],

@@ -1194,6 +1194,9 @@ for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-
         f"{fixture.relative_to(ROOT)} must fail release driver validation",
     )
 
+RESOLVE_SCRIPT_ACTION = "actions/github-script"
+
+
 def allure_publisher_workflow_errors(path: Path) -> list[str]:
     """Validate the reusable Allure publisher's trust boundaries."""
     errors: list[str] = []
@@ -1288,12 +1291,16 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
     resolve_steps = resolve_job.get("steps", []) if resolve_job else []
     if not isinstance(resolve_steps, list):
         resolve_steps = []
+    # Match the action by name, not by pinned SHA: the SHA is owned by the
+    # dependency updater, and every ``uses`` above is already required to be a
+    # full SHA.  Pinning it here too made a routine github-script bump report
+    # all four guards as missing.
     resolve_step = next(
         (
             step for step in resolve_steps
             if isinstance(step, dict)
             and step.get("id") == "resolve"
-            and step.get("uses") == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+            and str(step.get("uses", "")).split("@", 1)[0] == RESOLVE_SCRIPT_ACTION
         ),
         None,
     )
@@ -1369,7 +1376,7 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
             resolve["steps"].append(
                 {
                     "name": "Unrelated marker text",
-                    "uses": "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd",
+                    "uses": resolve["steps"][0]["uses"],
                     "with": {"script": f"core.info({marker!r});"},
                 }
             )
@@ -1387,6 +1394,24 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
             dead_fixture.write_text(yaml.safe_dump(dead, sort_keys=False), encoding="utf-8")
             if not allure_publisher_workflow_errors(dead_fixture):
                 errors.append(f"dead-branch trust guard probe did not fail: {marker}")
+
+        # Regression guard: a dependency bump of the github-script pin must not
+        # make the trust guards look absent (surfaced by PR #176).
+        bumped = re.sub(
+            r"(uses: actions/github-script@)[0-9a-f]{40}",
+            r"\g<1>" + "0" * 40,
+            source,
+        )
+        bumped_fixture = probe_root / "bumped-github-script.yml"
+        bumped_fixture.write_text(bumped, encoding="utf-8")
+        bumped_errors = [
+            error for error in allure_publisher_workflow_errors(bumped_fixture)
+            if "trust-boundary assertion" in error
+        ]
+        if bumped_errors:
+            errors.append(
+                "github-script pin bump probe lost trust guards: " + "; ".join(bumped_errors)
+            )
 
         parsed = yaml.safe_load(source)
         malformed_mutations = (

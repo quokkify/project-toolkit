@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.15.0](https://github.com/quokkify/project-toolkit/compare/v2.14.0...v2.15.0) (2026-09-01)
+
+
+### ✨ Features
+
+* **workflows:** add trusted reusable Allure publisher ([b5ecec8](https://github.com/quokkify/project-toolkit/commit/b5ecec8724d6dc86064c2741bd1292fda273e09d))
+
+
+### 🧹 Chores
+
+* **deps:** update quokkify/project-toolkit to v2.12.3 ([#163](https://github.com/quokkify/project-toolkit/issues/163)) ([a64f31d](https://github.com/quokkify/project-toolkit/commit/a64f31d1458ece4685c71a229902ee053c3dfe4f))
+* **deps:** update quokkify/project-toolkit to v2.12.4 ([#166](https://github.com/quokkify/project-toolkit/issues/166)) ([7c7f2eb](https://github.com/quokkify/project-toolkit/commit/7c7f2eb6db6856d9069d696faf4738651b5af1b4))
+* **deps:** update quokkify/project-toolkit to v2.14.0 ([#167](https://github.com/quokkify/project-toolkit/issues/167)) ([7bdc88c](https://github.com/quokkify/project-toolkit/commit/7bdc88c77feb91ed86b6ed97321132b65a97d960))
+* **deps:** update renovate to v44.50.3 ([#168](https://github.com/quokkify/project-toolkit/issues/168)) ([be1ab05](https://github.com/quokkify/project-toolkit/commit/be1ab05837e71a5e633620860af207e864fff9b0))
+
 ## [2.14.0](https://github.com/quokkify/project-toolkit/compare/v2.13.0...v2.14.0) (2026-08-28)
 
 

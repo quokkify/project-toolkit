@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.18.0](https://github.com/quokkify/project-toolkit/compare/v2.17.0...v2.18.0) (2026-09-01)
+
+
+### ✨ Features
+
+* **copier:** let a project declare what CodeQL scans ([#182](https://github.com/quokkify/project-toolkit/issues/182)) ([72340c7](https://github.com/quokkify/project-toolkit/commit/72340c75e4e40d8e7d3ae29a835c3349421dc194))
+
+
+### 🐛 Bug Fixes
+
+* **copier:** emit a Renovate config that matches a formatter ([#183](https://github.com/quokkify/project-toolkit/issues/183)) ([c294840](https://github.com/quokkify/project-toolkit/commit/c294840c878aa87d628f28e7211abcf1f05f86aa))
+* **copier:** stop template updates from overwriting a project's README ([#181](https://github.com/quokkify/project-toolkit/issues/181)) ([b4d8aec](https://github.com/quokkify/project-toolkit/commit/b4d8aec4a1aacf521ee1656a2f3a7595ce162058))
+
 ## [2.17.0](https://github.com/quokkify/project-toolkit/compare/v2.16.0...v2.17.0) (2026-09-01)
 
 

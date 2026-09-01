@@ -1915,6 +1915,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "generated Gitleaks workflow does not protect policy from pull request changes",
     )
     check(
+        'if ! git cat-file -e "$TRUSTED_REF^{commit}" 2>/dev/null; then' in config_only_gitleaks,
+        "generated Gitleaks workflow fetches a ref the credential-less checkout already contains",
+    )
+    check(
         'Path(".github/renovate.json")' in config_only_validate
         and 'git diff --check "$BASE_SHA..$HEAD_SHA"' in config_only_validate
         and '"$RUNNER_TEMP/bin/actionlint"' in config_only_validate,

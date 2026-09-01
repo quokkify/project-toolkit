@@ -10,6 +10,12 @@ _exclude:
   - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
 
+# Written once when the project is generated, then owned by the project.
+# The template ships a starter README; every real project replaces it, and a
+# later `copier update` must not overwrite that with the starter text again.
+_skip_if_exists:
+  - README.md
+
 project_name:
   type: str
   help: Human-readable project name.

@@ -883,6 +883,8 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
 TEMPLATE_WORKFLOW_SOURCES = ROOT / "templates/project/template/.github/workflows"
+_copier_config = load_yaml_or_error(ROOT / "copier.yml", ERRORS, "copier.yml")
+skip_if_exists = _copier_config.get("_skip_if_exists") or [] if isinstance(_copier_config, dict) else []
 RENOVATE_PRESET_PATHS = {
     "default": "presets/base",
     "python": "presets/python/default",
@@ -1987,6 +1989,11 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         check(
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
+        )
+        check(
+            "README.md" in skip_if_exists,
+            "copier.yml must keep README.md in _skip_if_exists so an update never "
+            "replaces a project's own documentation with the starter text",
         )
         check(
             (dest / ".copier-answers.yml").exists(),

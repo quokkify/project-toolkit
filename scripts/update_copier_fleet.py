@@ -67,6 +67,7 @@ class TemplateInventory:
     baseline: str
     missing_baseline: tuple[str, ...]
     docker: str
+    codeql: str
     allure_report: str
     release_please: str
     renovate: str
@@ -74,10 +75,10 @@ class TemplateInventory:
 
 BASELINE_PATHS = (
     ".github/workflows/validate.yml",
-    ".github/workflows/codeql.yml",
     ".github/workflows/gitleaks.yml",
 )
 FEATURE_PATHS = {
+    "codeql": ".github/workflows/codeql.yml",
     "allure_report": ".github/workflows/allure-report.yml",
     "release_please": ".github/workflows/release.yml",
     "renovate": ".github/renovate.json",
@@ -361,6 +362,7 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
         baseline=f"{present_baseline}/{len(BASELINE_PATHS)}",
         missing_baseline=missing_baseline,
         docker=docker_state,
+        codeql=feature_state(answers, "codeql", repository_path),
         allure_report=feature_state(answers, "allure_report", repository_path),
         release_please=feature_state(answers, "release_please", repository_path),
         renovate=feature_state(answers, "renovate", repository_path),
@@ -372,6 +374,7 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
         return False
     return (
         inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}"
+        or inventory.codeql == "missing"
         or inventory.allure_report == "missing"
         or inventory.release_please == "missing"
         or inventory.renovate == "missing"
@@ -392,6 +395,7 @@ def console_lines(result: Result) -> list[str]:
             f"components={sanitize_text(','.join(inventory.components))} "
             f"baseline={inventory.baseline} "
             f"docker={FEATURE_LABELS[inventory.docker]} "
+            f"codeql={FEATURE_LABELS[inventory.codeql]} "
             f"allure={FEATURE_LABELS[inventory.allure_report]} "
             f"release-please={FEATURE_LABELS[inventory.release_please]} "
             f"renovate={FEATURE_LABELS[inventory.renovate]}"
@@ -404,6 +408,7 @@ def feature_summary(results: Sequence[Result]) -> tuple[str, str]:
     denominator = len(inventories)
     enabled = {
         "docker": sum(inventory.docker == "enabled" for inventory in inventories),
+        "codeql": sum(inventory.codeql == "enabled" for inventory in inventories),
         "allure": sum(inventory.allure_report == "enabled" for inventory in inventories),
         "release-please": sum(inventory.release_please == "enabled" for inventory in inventories),
         "renovate": sum(inventory.renovate == "enabled" for inventory in inventories),
@@ -444,8 +449,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "",
         f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⏭️ {excluded} excluded",
         "",
-        "| Repository | Sync | Template | Components | Baseline | Docker | Allure | Release Please | Renovate |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     status_labels = {
         "up-to-date": "✅ Current",
@@ -467,12 +472,13 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 ", ".join(inventory.components),
                 inventory.baseline,
                 MARKDOWN_FEATURE_LABELS[inventory.docker],
+                MARKDOWN_FEATURE_LABELS[inventory.codeql],
                 MARKDOWN_FEATURE_LABELS[inventory.allure_report],
                 MARKDOWN_FEATURE_LABELS[inventory.release_please],
                 MARKDOWN_FEATURE_LABELS[inventory.renovate],
             )
         else:
-            cells = ("—", "—", "—", "—", "—", "—", "—")
+            cells = ("—", "—", "—", "—", "—", "—", "—", "—")
         lines.append(
             "| "
             + " | ".join(
@@ -501,6 +507,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             if inventory and inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}":
                 lines.append(f"- Baseline files present: {inventory.baseline}")
                 lines.extend(f"  - Missing: `{path}`" for path in inventory.missing_baseline)
+            if inventory and inventory.codeql == "missing":
+                lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['codeql']}`")
             if inventory and inventory.release_please == "missing":
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['release_please']}`")
             if inventory and inventory.allure_report == "missing":
@@ -533,13 +541,14 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                     "missing": list(result.inventory.missing_baseline),
                 },
                 "docker": result.inventory.docker,
+                "codeql": result.inventory.codeql,
                 "allure_report": result.inventory.allure_report,
                 "release_please": result.inventory.release_please,
                 "renovate": result.inventory.renovate,
             }
         repositories.append(item)
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "summary": counts,
         "configuration_mismatches": sum(inventory_has_mismatch(result.inventory) for result in results),
         "repositories": repositories,

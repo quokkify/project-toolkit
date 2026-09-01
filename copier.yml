@@ -5,6 +5,7 @@ _templates_suffix: .jinja
 _exclude:
   - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
+  - "{% if not codeql %}.github/workflows/codeql.yml{% endif %}"
   - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
@@ -39,6 +40,10 @@ components:
 docker:
   type: bool
   default: false
+codeql:
+  type: bool
+  help: Generate the CodeQL workflow. Code scanning needs GitHub Advanced Security, which private repositories do not receive by default.
+  default: true
 allure_report:
   type: bool
   help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.

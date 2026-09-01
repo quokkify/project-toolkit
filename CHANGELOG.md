@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/quokkify/project-toolkit/compare/v2.18.0...v2.18.1) (2026-09-01)
+
+
+### 🐛 Bug Fixes
+
+* **copier:** return the Renovate config to the project that owns it ([#185](https://github.com/quokkify/project-toolkit/issues/185)) ([c070151](https://github.com/quokkify/project-toolkit/commit/c070151789d7305ca0e79b0902d0b9185fe56163))
+
 ## [2.18.0](https://github.com/quokkify/project-toolkit/compare/v2.17.0...v2.18.0) (2026-09-01)
 
 

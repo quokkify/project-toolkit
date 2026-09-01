@@ -713,6 +713,24 @@ def update_template(
     return changed_paths(repository_path)
 
 
+def authenticated_git() -> list[str]:
+    """Return a git invocation that authenticates through gh rather than a prompt.
+
+    git does not read GH_TOKEN. A local maintainer session usually has a credential
+    helper configured already, which is why the write path worked there, but a hosted
+    runner has none and the push fails with "could not read Username for
+    https://github.com". Clearing inherited helpers first keeps an ambient one from
+    taking precedence, and the token never reaches a remote URL or the reflog.
+    """
+    return [
+        "git",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "credential.helper=!gh auth git-credential",
+    ]
+
+
 def push_automation_branch(
     repository: Repository,
     repository_path: Path,
@@ -731,11 +749,11 @@ def push_automation_branch(
     run(["git", "commit", "-m", PR_TITLE], cwd=repository_path)
 
     remote = run(
-        ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
+        [*authenticated_git(), "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
         cwd=repository_path,
         env=env,
     ).stdout.strip()
-    push = ["git", "push"]
+    push = [*authenticated_git(), "push"]
     if remote:
         remote_sha = remote.split()[0]
         push.append(f"--force-with-lease=refs/heads/{branch}:{remote_sha}")

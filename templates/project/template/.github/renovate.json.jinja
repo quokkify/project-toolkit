@@ -10,7 +10,7 @@
 {%- for renovate_preset in renovate_presets -%}
 {%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset]) -%}
 {%- endfor -%}
-{%- set template_owned_workflows = ['.github/workflows/validate.yml', '.github/workflows/gitleaks.yml'] -%}
+{%- set template_owned_workflows = ['.github/workflows/validate.yml', '.github/workflows/gitleaks.yml', '.github/workflows/copier-update.yml'] -%}
 {%- if codeql -%}{%- set _ = template_owned_workflows.append('.github/workflows/codeql.yml') -%}{%- endif -%}
 {%- if release_please -%}{%- set _ = template_owned_workflows.append('.github/workflows/release.yml') -%}{%- endif -%}
 {%- if allure_report -%}{%- set _ = template_owned_workflows.append('.github/workflows/allure-report.yml') -%}{%- endif -%}

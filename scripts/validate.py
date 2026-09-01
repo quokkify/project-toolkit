@@ -1194,6 +1194,224 @@ for fixture in sorted((ROOT / "tests/fixtures/release-workflows").glob("invalid-
         f"{fixture.relative_to(ROOT)} must fail release driver validation",
     )
 
+def allure_publisher_workflow_errors(path: Path) -> list[str]:
+    """Validate the reusable Allure publisher's trust boundaries."""
+    errors: list[str] = []
+    label = str(path.relative_to(ROOT))
+    try:
+        workflow = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        return [f"{label}: YAML parse failed: {exc}"]
+    if not isinstance(workflow, dict):
+        return [f"{label}: workflow root must be a mapping"]
+    triggers = workflow.get("on", workflow.get(True))
+    if not isinstance(triggers, dict) or "workflow_call" not in triggers:
+        errors.append(f"{label}: must expose workflow_call")
+    if workflow.get("permissions") != {}:
+        errors.append(f"{label}: workflow-level permissions must be empty")
+    jobs = workflow.get("jobs", {})
+    expected_jobs = {"resolve", "download", "generate", "comment", "pages"}
+    if not isinstance(jobs, dict) or set(jobs) != expected_jobs:
+        errors.append(f"{label}: must define resolve/download/generate/comment/pages jobs")
+        return errors
+    required_permissions = {
+        "resolve": {"actions": "read", "contents": "read", "pull-requests": "read"},
+        "download": {"actions": "read", "contents": "read"},
+        "generate": {"actions": "read", "contents": "read"},
+        "comment": {"actions": "read", "pull-requests": "write"},
+        "pages": {"actions": "read", "contents": "write", "pull-requests": "read"},
+    }
+    valid_jobs: dict[str, dict] = {}
+    for name, permissions in required_permissions.items():
+        job = jobs[name]
+        if not isinstance(job, dict):
+            errors.append(f"{label}: {name} job must be a mapping")
+            continue
+        valid_jobs[name] = job
+        if job.get("permissions") != permissions:
+            errors.append(f"{label}: {name} permissions are not narrowly scoped")
+    uses: list[str] = []
+    for name, job in valid_jobs.items():
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            errors.append(f"{label}: {name} steps must be a list")
+            continue
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict):
+                errors.append(f"{label}: {name} step {index} must be a mapping")
+                continue
+            if step.get("uses"):
+                uses.append(step["uses"])
+    if any(re.search(r"@[0-9a-f]{1,39}$|@(v|main|master)", use) for use in uses):
+        errors.append(f"{label}: every external action must use a full SHA")
+    generate_action = "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa"
+    generate_job = valid_jobs.get("generate")
+    generate_steps = generate_job.get("steps", []) if generate_job else []
+    if not isinstance(generate_steps, list):
+        generate_steps = []
+    if not any(
+        isinstance(step, dict)
+        and step.get("name") == "Build report without write privileges"
+        and step.get("uses") == generate_action
+        for step in generate_steps
+    ):
+        errors.append(f"{label}: missing trust-boundary assertion {generate_action}")
+
+    # These patterns deliberately describe the complete guard, rather than
+    # searching for a marker.  This prevents comments, dead branches, and an
+    # unrelated github-script step from satisfying the contract.
+    resolve_guards = {
+        "No ${process.env.ARTIFACT_PREFIX} artifacts were produced": re.compile(
+            r"if\s*\(\s*names\.length\s*===\s*0\s*&&\s*minimum\s*===\s*0\s*\)\s*\{.*?"
+            r"skip\(\s*`No \${process\.env\.ARTIFACT_PREFIX} artifacts were produced; skipping Allure report\.`\s*\)\s*;"
+            r".*?return\s*;\s*\}",
+            re.DOTALL,
+        ),
+        "Allure artifact contract mismatch": re.compile(
+            r"if\s*\(.*?names\.length\s*<\s*minimum.*?selected\.some\(.*?artifact\.expired.*?\)\s*\)\s*\{.*?"
+            r"core\.setFailed\(\s*`Allure artifact contract mismatch for \${process\.env\.ARTIFACT_PREFIX}.*?`\s*\)\s*;"
+            r".*?return\s*;\s*\}",
+            re.DOTALL,
+        ),
+        'pull.user?.login === "dependabot[bot]"': re.compile(
+            r"core\.setOutput\(\s*['\"]fork-pr['\"]\s*,[^\n]*pull\.user\?\.login\s*===\s*['\"]dependabot\[bot\]['\"]",
+            re.DOTALL,
+        ),
+        "A newer source workflow run exists": re.compile(
+            r"if\s*\(\s*!Number\.isSafeInteger\(newestRunId\).*?Number\(run\.id\)\s*!==\s*newestRunId\s*\)\s*\{.*?"
+            r"skip\(\s*['\"]A newer source workflow run exists for this PR head; stale report suppressed\.['\"]\s*\)\s*;"
+            r".*?return\s*;\s*\}",
+            re.DOTALL,
+        ),
+    }
+    resolve_job = valid_jobs.get("resolve")
+    resolve_steps = resolve_job.get("steps", []) if resolve_job else []
+    if not isinstance(resolve_steps, list):
+        resolve_steps = []
+    resolve_step = next(
+        (
+            step for step in resolve_steps
+            if isinstance(step, dict)
+            and step.get("id") == "resolve"
+            and step.get("uses") == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+        ),
+        None,
+    )
+    resolve_script = ((resolve_step or {}).get("with") or {}).get("script", "")
+    for marker, guard in resolve_guards.items():
+        if not guard.search(str(resolve_script)):
+            errors.append(f"{label}: missing trust-boundary assertion {marker}")
+    return errors
+
+
+def allure_publisher_negative_probes(path: Path) -> list[str]:
+    """Prove trust checks fail when executable guards are removed or malformed."""
+    errors: list[str] = []
+    source = path.read_text()
+    parsed = yaml.safe_load(source)
+    # The canonical validator reports malformed shapes before this negative
+    # probe driver runs.  Do not dereference those shapes while probing guards.
+    jobs = parsed.get("jobs") if isinstance(parsed, dict) else None
+    resolve = jobs.get("resolve") if isinstance(jobs, dict) else None
+    steps = resolve.get("steps") if isinstance(resolve, dict) else None
+    if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+        return errors
+    required_by_job = {
+        "generate": "quokkify/allure-report-action@73c66b277ec7c73cdec2ee81b3b72410272b66fa",
+        "resolve": (
+            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
+            "Allure artifact contract mismatch",
+            'pull.user?.login === "dependabot[bot]"',
+            "A newer source workflow run exists",
+        ),
+    }
+    with tempfile.TemporaryDirectory(prefix="allure-validator-probes-", dir=ROOT) as tmp:
+        probe_root = Path(tmp)
+        for job_name, literals in required_by_job.items():
+            for literal in (literals,) if isinstance(literals, str) else literals:
+                mutated = source.replace(literal, "removed-trust-guard", 1)
+                fixture = probe_root / f"missing-{job_name}-{len(errors)}.yml"
+                fixture.write_text(mutated, encoding="utf-8")
+                if not any(literal in error for error in allure_publisher_workflow_errors(fixture)):
+                    errors.append(f"missing executable guard probe did not fail: {job_name}/{literal}")
+
+        comment_only = source.replace(
+            "A newer source workflow run exists",
+            "removed-trust-guard",
+            1,
+        ) + "\n# A newer source workflow run exists\n"
+        fixture = probe_root / "comment-only.yml"
+        fixture.write_text(comment_only, encoding="utf-8")
+        if not any(
+            "A newer source workflow run exists" in error
+            for error in allure_publisher_workflow_errors(fixture)
+        ):
+            errors.append("comment-only trust guard probe did not fail")
+
+        # Each assertion must remain tied to the executable resolve step.  For
+        # every marker, retain it only as a comment, in an unrelated step, or
+        # below an unreachable branch; all three mutations must fail.
+        resolve_markers = (
+            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
+            "Allure artifact contract mismatch",
+            'pull.user?.login === "dependabot[bot]"',
+            "A newer source workflow run exists",
+        )
+        for marker in resolve_markers:
+            removed = source.replace(marker, "removed-trust-guard", 1)
+            comment_fixture = probe_root / f"comment-{len(errors)}.yml"
+            comment_fixture.write_text(removed + f"\n// {marker}\n", encoding="utf-8")
+            if not allure_publisher_workflow_errors(comment_fixture):
+                errors.append(f"comment-only trust guard probe did not fail: {marker}")
+
+            unrelated = yaml.safe_load(removed)
+            resolve = unrelated["jobs"]["resolve"]
+            resolve["steps"].append(
+                {
+                    "name": "Unrelated marker text",
+                    "uses": "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd",
+                    "with": {"script": f"core.info({marker!r});"},
+                }
+            )
+            unrelated_fixture = probe_root / f"unrelated-{len(errors)}.yml"
+            unrelated_fixture.write_text(yaml.safe_dump(unrelated, sort_keys=False), encoding="utf-8")
+            if not allure_publisher_workflow_errors(unrelated_fixture):
+                errors.append(f"unrelated-step trust guard probe did not fail: {marker}")
+
+            dead = yaml.safe_load(removed)
+            dead_script = dead["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            dead["jobs"]["resolve"]["steps"][0]["with"]["script"] = (
+                dead_script + f"\nif (false) {{ core.info({marker!r}); }}\n"
+            )
+            dead_fixture = probe_root / f"dead-{len(errors)}.yml"
+            dead_fixture.write_text(yaml.safe_dump(dead, sort_keys=False), encoding="utf-8")
+            if not allure_publisher_workflow_errors(dead_fixture):
+                errors.append(f"dead-branch trust guard probe did not fail: {marker}")
+
+        parsed = yaml.safe_load(source)
+        malformed_mutations = (
+            ("null job", lambda workflow: workflow["jobs"].__setitem__("resolve", None), "resolve job must be a mapping"),
+            ("scalar job", lambda workflow: workflow["jobs"].__setitem__("resolve", "invalid"), "resolve job must be a mapping"),
+            ("null steps", lambda workflow: workflow["jobs"]["resolve"].__setitem__("steps", None), "resolve steps must be a list"),
+            ("scalar steps", lambda workflow: workflow["jobs"]["resolve"].__setitem__("steps", "invalid"), "resolve steps must be a list"),
+            ("null step item", lambda workflow: workflow["jobs"]["resolve"]["steps"].__setitem__(0, None), "resolve step 0 must be a mapping"),
+            ("scalar step item", lambda workflow: workflow["jobs"]["resolve"]["steps"].__setitem__(0, "invalid"), "resolve step 0 must be a mapping"),
+        )
+        for mutation, apply_mutation, expected in malformed_mutations:
+            malformed = json.loads(json.dumps(parsed))
+            apply_mutation(malformed)
+            fixture = probe_root / f"malformed-{len(errors)}.yml"
+            fixture.write_text(yaml.safe_dump(malformed, sort_keys=False), encoding="utf-8")
+            fixture_errors = allure_publisher_workflow_errors(fixture)
+            if not any(expected in error for error in fixture_errors):
+                errors.append(f"malformed workflow probe did not report {expected} ({mutation})")
+    return errors
+
+
+ALLURE_WORKFLOW = ROOT / ".github/workflows/allure-publisher.yml"
+ERRORS.extend(allure_publisher_workflow_errors(ALLURE_WORKFLOW))
+ERRORS.extend(allure_publisher_negative_probes(ALLURE_WORKFLOW))
+
 secret_patterns = [
     r"ghp_[A-Za-z0-9]{20,}",
     r"github_pat_[A-Za-z0-9_]{20,}",

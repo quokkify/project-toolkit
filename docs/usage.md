@@ -83,6 +83,32 @@ The template accepts an optional YAML list of `python`, `node`, and `java` compo
 
 ## Copier Allure reporting
 
+For consumers that own their test workflow, call the trusted publisher at job level from a thin `workflow_run` trigger. Pass the exact source workflow name/path, a dedicated artifact prefix, caller-owned Allure config, and a repository token explicitly:
+
+```yaml
+jobs:
+  allure:
+    uses: quokkify/project-toolkit/.github/workflows/allure-publisher.yml@v2.14.0
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      source-workflow: Run tests
+      source-workflow-path: .github/workflows/test.yml
+      artifact-prefix: allure-results-
+      minimum-artifacts: 1
+      config-file: tools/allure/allurerc.mjs
+      categories-file: tools/allure/categories.json
+      publish-pages: false
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+The reusable workflow keeps resolve, validated download, unprivileged generation, PR-comment write, and optional Pages write in separate jobs. Zero matching artifacts warn and skip when `minimum-artifacts: 0`; a partial/expired/oversized contract fails closed. It resolves exactly one current open PR, suppresses stale source runs, and never publishes Pages for fork or Dependabot PRs. The workflow pins every action by full commit SHA and delegates report generation to the standalone `quokkify/allure-report-action`; callers remain responsible for project-specific config, categories, URLs, and the source artifact upload.
+
+The caller permissions above are required for artifact reads and pull-request comments. If `publish-pages: true`, set `contents: write` instead of `contents: read` so the Pages job can publish to `gh-pages`; keep `actions: read` and `pull-requests: write`.
+
 Set `allure_report: true` to generate `.github/allure/allurerc.mjs`, `.github/allure/safe_extract.py`, and `.github/workflows/allure-report.yml`. With generated `components`, each component job uploads one required, uniquely named `allure-results-<type>-<index>` artifact. The default source is `<component path>/allure-results`; set an optional safe relative `allure_results_path` on a component for layouts such as Gradle's `build/allure-results` or Maven's `target/allure-results`. Configure the project's test adapter to write there—for example `pytest --alluredir=allure-results`, an Allure-enabled Java test task, or the selected Node test framework's Allure reporter. Missing required results fail the component job. The template deliberately does not modify dependency manifests or replace project-specific test commands.
 
 Repositories with `components: []` can still use the managed report workflow while retaining project-owned test orchestration. Configure the exact `allure_external_workflow_name` and `.github/workflows/...` path, a dedicated artifact-name prefix, and a minimum/maximum artifact count from 1 through 50. The source workflow must upload only Allure result bundles under that prefix; keep broader JUnit, logs, and build reports in separately named artifacts. Every selected bundle is subject to the same aggregate compressed/expanded limits and collision checks. Use `allure_categories_file` when the project owns an optional categories JSON file; the generated workflow verifies that the configured source workflow and categories file exist.

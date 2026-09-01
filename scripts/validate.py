@@ -2347,6 +2347,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
 
 run([sys.executable, "tests/test_composite_actions.py"])
+run([sys.executable, "tests/test_update_copier_fleet.py"])
+run([sys.executable, "tests/test_validate_helpers.py"])
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
 
 if not ARGS.static:

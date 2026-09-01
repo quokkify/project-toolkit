@@ -28,6 +28,11 @@ ANSWERS_FILE = ".copier-answers.yml"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
 PR_TITLE = "chore(template): update shared project template"
+PRIVATE_REPOSITORY_ERROR = (
+    "--public-only rejects non-public repositories; private consumers are not served by the "
+    "public fleet automation and update themselves with the self-service "
+    "'Update project template' workflow or a local CODEOWNER run"
+)
 RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
@@ -855,7 +860,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--public-only",
         action="store_true",
-        help="Limit organization discovery to the public fleet visible to repository-scoped Actions tokens.",
+        help="Serve only public repositories; organization discovery is filtered and an explicit --repo that is not public fails.",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
@@ -899,7 +904,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "view",
                         requested_name,
                         "--json",
-                        "nameWithOwner,defaultBranchRef,isArchived,isFork",
+                        "nameWithOwner,defaultBranchRef,isArchived,isFork,visibility",
                     ],
                     env=env,
                 )
@@ -909,6 +914,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     result = Result(requested_name, "excluded", "archived or fork")
                     results.append(result)
                     continue
+                if args.public_only:
+                    visibility = metadata.get("visibility")
+                    if not isinstance(visibility, str) or visibility.casefold() != "public":
+                        raise FleetUpdateError(PRIVATE_REPOSITORY_ERROR)
                 if (
                     not isinstance(full_name, str)
                     or not isinstance(default_ref, dict)

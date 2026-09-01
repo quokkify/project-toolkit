@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: Optional owner/repository to update instead of the whole organization.
+        description: Optional public owner/repository to update instead of the whole organization.
         type: string
         required: false
       template-ref:
@@ -21,8 +21,7 @@ on:
         default: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: copier-fleet-auto-update
@@ -31,10 +30,9 @@ concurrency:
 jobs:
   update:
     name: Update Copier fleet and create PRs
+    if: ${{ github.repository == 'quokkify/project-toolkit' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Check out project-toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,10 +48,15 @@ jobs:
           install-command: python -m pip install copier==9.17.2
 
       - name: Update Copier fleet
+        id: update
         env:
           REQUESTED_REPOSITORY: ${{ inputs.repository }}
           TEMPLATE_REF: ${{ inputs.template-ref }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          # Write mode needs a credential installed on public quokkify repositories only.
+          # Dry-run mode never writes and uses the repository-scoped Actions token.
+          GH_TOKEN: ${{ secrets.FLEET_UPDATE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           args=(
@@ -63,9 +66,13 @@ jobs:
             --exclude quokkify/project-toolkit
             --branch automation/copier-template-update
           )
-          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+          if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
           else
+            if [[ -z "${GH_TOKEN:-}" ]]; then
+              echo "::error::FLEET_UPDATE_TOKEN is required for write mode; it must be a credential scoped to public quokkify repositories only." >&2
+              exit 2
+            fi
             args+=(--write)
           fi
           if [[ -n "$REQUESTED_REPOSITORY" ]]; then
@@ -82,10 +89,14 @@ jobs:
           python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
           status=${PIPESTATUS[0]}
           set -e
-          cat "$markdown_report" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$markdown_report" ]]; then
+            cat "$markdown_report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '## Copier fleet update\n\nThe run failed before a report was written; see the job log.\n' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
-        id: update
 
       - name: Upload Copier fleet update report
         if: ${{ always() }}

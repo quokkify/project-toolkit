@@ -127,6 +127,14 @@ allure_pages_url:
 release_please:
   type: bool
   default: false
+release_mode:
+  type: str
+  help: "Release Please mode: single for one version, manifest for independently versioned components."
+  default: single
+  choices:
+    - single
+    - manifest
+  when: "{{ release_please }}"
 renovate:
   type: bool
   default: true

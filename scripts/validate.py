@@ -2423,6 +2423,69 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "an empty codeql_languages must still derive the matrix from components",
     )
 
+    # The reusable release workflow has always supported manifest mode; the template
+    # hardcoded single, which a repository releasing independently versioned components
+    # cannot express and must therefore diverge from the template forever.
+    manifest_release_data = tmp_path / "release-manifest.yml"
+    manifest_release_data.write_text(
+        yaml.safe_dump({"release_please": True, "release_mode": "manifest"})
+    )
+    manifest_release_dest = tmp_path / "release-manifest"
+    run(
+        [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "--data-file", str(manifest_release_data),
+            str(template_source), str(manifest_release_dest),
+        ]
+    )
+    manifest_release = (manifest_release_dest / ".github/workflows/release.yml").read_text()
+    for expected in (
+        "mode: manifest",
+        "config-file: .github/release-please/config.json",
+        "manifest-file: .github/release-please/manifest.json",
+    ):
+        check(
+            expected in manifest_release,
+            f"manifest release mode must emit {expected!r}",
+        )
+    run([actionlint, str(manifest_release_dest / ".github/workflows/release.yml")])
+
+    single_release_data = tmp_path / "release-single.yml"
+    single_release_data.write_text(yaml.safe_dump({"release_please": True}))
+    single_release_dest = tmp_path / "release-single"
+    run(
+        [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "--data-file", str(single_release_data),
+            str(template_source), str(single_release_dest),
+        ]
+    )
+    single_release = (single_release_dest / ".github/workflows/release.yml").read_text()
+    check("mode: single" in single_release, "the default release mode must stay single")
+    check(
+        "manifest-file:" not in single_release,
+        "single release mode must not emit manifest inputs",
+    )
+
+    invalid_release_data = tmp_path / "invalid-release-mode.yml"
+    invalid_release_data.write_text(
+        yaml.safe_dump({"release_please": True, "release_mode": "components"})
+    )
+    invalid_release_result = subprocess.run(
+        [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "--data-file", str(invalid_release_data),
+            str(template_source), str(tmp_path / "invalid-release-mode"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        invalid_release_result.returncode != 0,
+        "invalid release_mode accepted",
+    )
+
     invalid_language_values: tuple[tuple[str, object], ...] = (
         ("unsupported", ["actions", "cobol"]),
         ("duplicate", ["actions", "actions"]),

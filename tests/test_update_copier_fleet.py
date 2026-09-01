@@ -62,6 +62,56 @@ class DiscoveryTests(TestCase):
         self.assertEqual([repo.name_with_owner for repo in discovered], ["quokkify/public-example"])
 
 
+class ProjectOwnedToolkitRefTests(TestCase):
+    """The generated contract requires every toolkit reference to match toolkit_version."""
+
+    def write_workflows(self, root: Path) -> None:
+        workflows = root / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "ci.yml").write_text(
+            "jobs:\n"
+            "  build:\n"
+            "    uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.14.0\n"
+            "    steps:\n"
+            "      - uses: quokkify/project-toolkit/actions/setup-node@v2.14.0\n",
+            encoding="utf-8",
+        )
+        (workflows / "pinned.yml").write_text(
+            "jobs:\n"
+            "  build:\n"
+            "    uses: quokkify/project-toolkit/actions/setup-node@"
+            + "a" * 40
+            + " # v2.14.0\n",
+            encoding="utf-8",
+        )
+        (workflows / "foreign.yml").write_text(
+            "jobs:\n  build:\n    uses: other/repo/.github/workflows/ci.yml@v2.14.0\n",
+            encoding="utf-8",
+        )
+
+    def test_tag_references_move_to_the_new_template_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_workflows(root)
+            changed = fleet.bump_project_owned_toolkit_refs(root, "v2.19.0")
+            ci = (root / ".github/workflows/ci.yml").read_text()
+        self.assertEqual(changed, [".github/workflows/ci.yml"])
+        self.assertIn("node-ci.yml@v2.19.0", ci)
+        self.assertIn("setup-node@v2.19.0", ci)
+        self.assertNotIn("v2.14.0", ci)
+
+    def test_digest_pins_and_other_repositories_are_left_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_workflows(root)
+            fleet.bump_project_owned_toolkit_refs(root, "v2.19.0")
+            pinned = (root / ".github/workflows/pinned.yml").read_text()
+            foreign = (root / ".github/workflows/foreign.yml").read_text()
+        self.assertIn("a" * 40, pinned)
+        self.assertIn("# v2.14.0", pinned)
+        self.assertIn("other/repo/.github/workflows/ci.yml@v2.14.0", foreign)
+
+
 class AuthenticatedGitTests(TestCase):
     """git does not read GH_TOKEN; a hosted runner has no credential helper at all."""
 

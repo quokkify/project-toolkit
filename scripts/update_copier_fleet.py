@@ -706,6 +706,8 @@ def update_template(
     run(command, cwd=repository_path, env=env)
     restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
     canonicalize_answers_source(repository_path, template_source)
+    if template_ref and RELEASE_TAG_PATTERN.fullmatch(template_ref):
+        bump_project_owned_toolkit_refs(repository_path, template_ref)
     rejected = sorted(repository_path.rglob("*.rej"))
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
@@ -729,6 +731,34 @@ def authenticated_git() -> list[str]:
         "-c",
         "credential.helper=!gh auth git-credential",
     ]
+
+
+TOOLKIT_TAG_REFERENCE = re.compile(
+    r"(quokkify/project-toolkit/(?:\.github/workflows|actions)/[^@\s]+@)v\d+\.\d+\.\d+"
+)
+
+
+def bump_project_owned_toolkit_refs(repository_path: Path, template_ref: str) -> list[str]:
+    """Move toolkit tag references in project-owned workflows to the new template version.
+
+    Copier rewrites the workflows it owns, but a project-owned workflow such as ci.yml
+    also references this toolkit, and the generated template contract requires every such
+    reference to match the recorded toolkit_version. Leaving those behind fails the
+    consumer's own validation immediately after an otherwise correct update, so the bump
+    has to be part of the same commit.
+
+    Only exact vMAJOR.MINOR.PATCH tags are rewritten. A digest pin is a deliberate,
+    stricter choice by that project and is left alone.
+    """
+    changed: list[str] = []
+    workflows = repository_path / ".github" / "workflows"
+    for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
+        original = workflow.read_text(encoding="utf-8")
+        updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", original)
+        if updated != original:
+            workflow.write_text(updated, encoding="utf-8")
+            changed.append(workflow.relative_to(repository_path).as_posix())
+    return changed
 
 
 def push_automation_branch(

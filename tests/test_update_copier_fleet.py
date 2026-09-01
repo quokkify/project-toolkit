@@ -252,13 +252,51 @@ class TemplateInventoryTests(TestCase):
         self.assertEqual(inventory.commit, "v2.8.2")
         self.assertIsNone(inventory.target_commit)
         self.assertEqual(inventory.components, ("python:backend", "node:frontend"))
-        self.assertEqual(inventory.baseline, "3/3")
+        self.assertEqual(inventory.baseline, "2/2")
         self.assertEqual(inventory.missing_baseline, ())
         self.assertEqual(inventory.docker, "enabled")
+        self.assertEqual(inventory.codeql, "unknown")
         self.assertEqual(inventory.allure_report, "unknown")
         self.assertEqual(inventory.release_please, "enabled")
         self.assertEqual(inventory.renovate, "custom")
         self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_codeql_is_an_optional_output_rather_than_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            self.write_baseline(repository)
+
+            disabled = fleet.inventory_from_answers(
+                "components: []\ncodeql: false\n", repository
+            )
+
+            codeql = repository / fleet.FEATURE_PATHS["codeql"]
+            codeql.parent.mkdir(parents=True, exist_ok=True)
+            codeql.write_text("name: CodeQL\n", encoding="utf-8")
+            enabled = fleet.inventory_from_answers(
+                "components: []\ncodeql: true\n", repository
+            )
+            kept_after_opting_out = fleet.inventory_from_answers(
+                "components: []\ncodeql: false\n", repository
+            )
+
+            codeql.unlink()
+            missing = fleet.inventory_from_answers(
+                "components: []\ncodeql: true\n", repository
+            )
+
+        self.assertEqual(disabled.codeql, "disabled")
+        self.assertEqual(disabled.baseline, "2/2")
+        self.assertNotIn(fleet.FEATURE_PATHS["codeql"], disabled.missing_baseline)
+        self.assertFalse(fleet.inventory_has_mismatch(disabled))
+
+        self.assertEqual(enabled.codeql, "enabled")
+        self.assertFalse(fleet.inventory_has_mismatch(enabled))
+
+        self.assertEqual(kept_after_opting_out.codeql, "custom")
+
+        self.assertEqual(missing.codeql, "missing")
+        self.assertTrue(fleet.inventory_has_mismatch(missing))
 
     def test_distinguishes_missing_disabled_and_unknown_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -383,7 +421,7 @@ class TemplateInventoryTests(TestCase):
 
             inventory = fleet.inventory_from_answers(raw_answers, repository)
 
-        self.assertEqual(inventory.baseline, "0/3")
+        self.assertEqual(inventory.baseline, "0/2")
         self.assertEqual(inventory.release_please, "missing")
         self.assertEqual(inventory.renovate, "missing")
         self.assertEqual(set(inventory.missing_baseline), set(fleet.BASELINE_PATHS))
@@ -393,9 +431,10 @@ class TemplateInventoryTests(TestCase):
             commit="v2.8.2",
             target_commit="v2.9.0",
             components=("python:.",),
-            baseline="3/3",
+            baseline="2/2",
             missing_baseline=(),
             docker="disabled",
+            codeql="enabled",
             allure_report="enabled",
             release_please="enabled",
             renovate="missing",
@@ -416,7 +455,7 @@ class TemplateInventoryTests(TestCase):
         self.assertIn("renovate=missing", console)
         self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
         self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
-        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["configuration_mismatches"], 1)
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
         self.assertEqual(report["repositories"][0]["template"]["allure_report"], "enabled")
@@ -427,9 +466,10 @@ class TemplateInventoryTests(TestCase):
             commit="v2.8.2\r",
             target_commit=None,
             components=("python:C:\\repo\\|row\r\x1b\u0085\u009b",),
-            baseline="3/3",
+            baseline="2/2",
             missing_baseline=(),
             docker="disabled",
+            codeql="disabled",
             allure_report="disabled",
             release_please="disabled",
             renovate="enabled",
@@ -760,9 +800,10 @@ class CommandLineTests(TestCase):
             commit="v2.8.2",
             target_commit=None,
             components=("none",),
-            baseline="3/3",
+            baseline="2/2",
             missing_baseline=(),
             docker="disabled",
+            codeql="disabled",
             allure_report="disabled",
             release_please="disabled",
             renovate="enabled",

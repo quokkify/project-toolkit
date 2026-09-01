@@ -1967,6 +1967,50 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "renovate=false generated .github/renovate.json",
     )
 
+    no_codeql_data = tmp_path / "no-codeql.yml"
+    no_codeql_data.write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "fixture-no-codeql",
+                "toolkit_version": "v1.0.0",
+                "components": [],
+                "docker": False,
+                "codeql": False,
+                "release_please": False,
+                "renovate": False,
+            }
+        )
+    )
+    no_codeql_dest = tmp_path / "no-codeql"
+    run(
+        [
+            copier,
+            "copy",
+            "--trust",
+            "--defaults",
+            "--vcs-ref",
+            "HEAD",
+            "--data-file",
+            str(no_codeql_data),
+            str(template_source),
+            str(no_codeql_dest),
+        ]
+    )
+    check(
+        not (no_codeql_dest / ".github/workflows/codeql.yml").exists(),
+        "codeql=false generated .github/workflows/codeql.yml",
+    )
+    for workflow_name in ("validate.yml", "gitleaks.yml"):
+        check(
+            (no_codeql_dest / f".github/workflows/{workflow_name}").is_file(),
+            f"codeql=false dropped the {workflow_name} baseline workflow",
+        )
+    check(
+        'if answers.get("codeql") and not codeql_path.is_file():'
+        in (no_codeql_dest / ".github/workflows/validate.yml").read_text(),
+        "generated contract does not gate the CodeQL workflow on its answer",
+    )
+
     custom_all_data = tmp_path / "custom-renovate-all.yml"
     custom_all_data.write_text(
         yaml.safe_dump(

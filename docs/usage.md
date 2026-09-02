@@ -172,6 +172,10 @@ The bundled `github>quokkify/project-toolkit//renovate/default.json` preset rema
 The repository also manages versions that are easy to miss with Renovate's built-in managers:
 
 - `_min_copier_version` in the root `copier.yml` uses the PyPI `copier` datasource.
+- Every `copier==`/`PyYAML==` pin under `.github/workflows/` and in the project template's
+  workflow templates uses the same PyPI datasource, so a Copier bump lands in all of them at
+  once. `scripts/validate.py` rejects any fleet pin below `_min_copier_version`, so a partial
+  bump would block its own update PR; `tests/test_composite_actions.py` guards the coverage.
 - Toolkit release tags in Markdown and example YAML use the GitHub tags datasource.
 - The documented Compose health action release follows the same GitHub tag as the pinned action implementation.
 

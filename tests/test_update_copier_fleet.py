@@ -517,6 +517,166 @@ class TemplateUpdateTests(TestCase):
             "feature/allure",
         )
 
+    @mock.patch.object(fleet, "gh_json", return_value={"sha": "a" * 40})
+    def test_resolves_release_tag_to_its_commit(self, gh_json_mock: mock.Mock) -> None:
+        resolved = fleet.resolve_template_commit(
+            "quokkify/project-toolkit", "v2.19.2", env={}
+        )
+
+        self.assertEqual(resolved, "a" * 40)
+        gh_json_mock.assert_called_once_with(
+            [
+                "api",
+                "repos/quokkify/project-toolkit/commits/v2.19.2",
+                "--jq",
+                "{sha: .sha}",
+            ],
+            env={},
+        )
+
+    @mock.patch.object(fleet, "gh_json", return_value={"sha": "not-a-commit"})
+    def test_rejects_a_tag_that_does_not_resolve_to_a_commit(self, _: mock.Mock) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "did not resolve to a commit"):
+            fleet.resolve_template_commit("quokkify/project-toolkit", "v2.19.2", env={})
+
+
+class ProjectOwnedToolkitRefTests(TestCase):
+    """The consumer contract accepts a tag, or a digest whose comment names that tag."""
+
+    NEW_COMMIT = "b" * 40
+    OLD_COMMIT = "fd12c1b07b08c7f873942abd5e8fedbfa26b4583"
+
+    def workflows(self, root: Path) -> Path:
+        directory = root / ".github" / "workflows"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def test_rewrites_a_digest_pin_with_its_release_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "publish-maven-central.yml"
+            workflow.write_text(
+                "        uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                f"{self.OLD_COMMIT} # v2.19.1\n",
+                encoding="utf-8",
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(changed, [".github/workflows/publish-maven-central.yml"])
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                "        uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                f"{self.NEW_COMMIT} # v2.19.2\n",
+            )
+
+    def test_rewrites_a_digest_pin_that_renovate_moved_ahead_of_the_answers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            workflow.write_text(
+                "      uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@"
+                f"{self.OLD_COMMIT} # v2.20.0\n",
+                encoding="utf-8",
+            )
+
+            fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                "      uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@"
+                f"{self.NEW_COMMIT} # v2.19.2\n",
+            )
+
+    def test_still_rewrites_plain_tag_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yaml"
+            workflow.write_text(
+                "      uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.19.1\n",
+                encoding="utf-8",
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(changed, [".github/workflows/ci.yaml"])
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                "      uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.19.2\n",
+            )
+
+    def test_leaves_a_digest_pin_without_a_release_comment_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            original = (
+                "      uses: quokkify/project-toolkit/actions/setup-node@"
+                f"{self.OLD_COMMIT}\n"
+            )
+            workflow.write_text(original, encoding="utf-8")
+
+            changed = fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), original)
+
+    def test_leaves_a_foreign_action_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            original = (
+                "      uses: actions/checkout@"
+                f"{self.OLD_COMMIT} # v2.19.1\n"
+            )
+            workflow.write_text(original, encoding="utf-8")
+
+            changed = fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), original)
+
+    def test_is_idempotent_when_every_reference_already_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            original = (
+                "      uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                f"{self.NEW_COMMIT} # v2.19.2\n"
+            )
+            workflow.write_text(original, encoding="utf-8")
+
+            changed = fleet.bump_project_owned_toolkit_refs(
+                repository, "v2.19.2", resolve_commit=lambda: self.NEW_COMMIT
+            )
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), original)
+
+    def test_keeps_digest_pins_untouched_without_a_resolved_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            original = (
+                "      uses: quokkify/project-toolkit/actions/setup-python@"
+                f"{self.OLD_COMMIT} # v2.19.1\n"
+            )
+            workflow.write_text(original, encoding="utf-8")
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v2.19.2")
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), original)
+
 
 class TemplateInventoryTests(TestCase):
     def write_baseline(self, repository: Path) -> None:

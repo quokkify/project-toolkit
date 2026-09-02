@@ -858,16 +858,50 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(match.group("currentDigest"), "05778ce0c6cee483892e2cc80b841e031dc4c7d0")
         self.assertEqual(match.group("currentValue"), "v0.4.1")
 
-    def test_renovate_manages_copier_in_audit_workflow(self) -> None:
+    def test_renovate_manages_every_executable_copier_pin(self) -> None:
+        """Every file CI or a generated project actually installs Copier from must be
+        covered by the Renovate manager, otherwise a bump lands partially and the
+        `_min_copier_version` guard in scripts/validate.py blocks the update PR."""
         config = yaml.safe_load((ROOT / ".github/renovate.json").read_text())
         manager = next(
             item
             for item in config["customManagers"]
             if "Update pinned Python validation dependencies" in item.get("description", "")
         )
-        self.assertIn(
-            "/^\\.github/workflows/copier-fleet-update\\.ya?ml$/",
-            manager["managerFilePatterns"],
+
+        def as_regex(file_pattern: str) -> re.Pattern[str]:
+            """
+            Compile a slash-delimited regular expression pattern.
+
+            Parameters:
+                file_pattern (str): Regular expression enclosed by leading and trailing slashes.
+
+            Returns:
+                re.Pattern[str]: The compiled regular expression.
+            """
+            require_slashes = file_pattern.startswith("/") and file_pattern.endswith("/")
+            self.assertTrue(require_slashes, f"expected a regex pattern, got {file_pattern!r}")
+            return re.compile(file_pattern[1:-1])
+
+        patterns = [as_regex(item) for item in manager["managerFilePatterns"]]
+        pinned = sorted(
+            path.relative_to(ROOT).as_posix()
+            for directory in (".github/workflows", "templates")
+            for path in (ROOT / directory).rglob("*")
+            if path.is_file() and "copier==" in path.read_text(encoding="utf-8", errors="ignore")
+        )
+        self.assertTrue(pinned, "expected at least one executable Copier pin")
+        uncovered = [
+            path for path in pinned if not any(pattern.search(path) for pattern in patterns)
+        ]
+        self.assertEqual(uncovered, [], f"Copier pins not managed by Renovate: {uncovered}")
+
+    def test_renovate_copier_match_string_extracts_the_pin(self) -> None:
+        config = yaml.safe_load((ROOT / ".github/renovate.json").read_text())
+        manager = next(
+            item
+            for item in config["customManagers"]
+            if "Update pinned Python validation dependencies" in item.get("description", "")
         )
         pattern = (
             manager["matchStrings"][0]

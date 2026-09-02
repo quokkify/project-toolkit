@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.19.2](https://github.com/quokkify/project-toolkit/compare/v2.19.1...v2.19.2) (2026-09-02)
+
+
+### 🐛 Bug Fixes
+
+* **allure:** propagate current CLI and track Renovate updates ([#201](https://github.com/quokkify/project-toolkit/issues/201)) ([c33d542](https://github.com/quokkify/project-toolkit/commit/c33d54217b283c13fad4394e6befdf4e52da83d9))
+* **renovate:** manage every executable Copier pin ([#200](https://github.com/quokkify/project-toolkit/issues/200)) ([da44951](https://github.com/quokkify/project-toolkit/commit/da44951ed110c467b011435da6e90d6160e6d94a))
+
+
+### 📚 Documentation
+
+* use centralized architecture diagram ([#198](https://github.com/quokkify/project-toolkit/issues/198)) ([2d98168](https://github.com/quokkify/project-toolkit/commit/2d9816882af46068e5bd9b9e1b6191e6b4c4c1c1))
+
+
+### 🧹 Chores
+
+* **deps:** update copier to v9.18.1 ([#195](https://github.com/quokkify/project-toolkit/issues/195)) ([f6ec162](https://github.com/quokkify/project-toolkit/commit/f6ec162ecbc5be3239395a903afbb13d11a5ce70))
+* **deps:** update quokkify/project-toolkit to v2.19.1 ([#196](https://github.com/quokkify/project-toolkit/issues/196)) ([c735d8e](https://github.com/quokkify/project-toolkit/commit/c735d8eb2a3e6583f25204a55e359bc3d1e5d9ed))
+* **deps:** update renovate to v44.56.1 ([#197](https://github.com/quokkify/project-toolkit/issues/197)) ([9fe83cf](https://github.com/quokkify/project-toolkit/commit/9fe83cfbd658b1fa303059af24cb8407d72c8d7a))
+
 ## [2.19.1](https://github.com/quokkify/project-toolkit/compare/v2.19.0...v2.19.1) (2026-09-01)
 
 

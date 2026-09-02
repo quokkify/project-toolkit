@@ -1835,6 +1835,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 f"{scenario}: report config is not pinned to the downstream default-branch SHA",
             )
             extractor_text = allure_extractor_path.read_text()
+            external_allure = scenario == "allure-external"
+            expected_materialize_target = "source-artifacts" if external_allure else "results"
             preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
             check(
                 all(
@@ -1845,7 +1847,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "artifact_manifest" in report_text
                 and "${{ runner.temp }}/allure-archives" in report_text
                 and "${{ runner.temp }}/allure-expanded" in report_text
-                and "MATERIALIZE_ROOT: ${{ github.workspace }}/.allure-input/results" in report_text
+                and f"MATERIALIZE_ROOT: ${{{{ github.workspace }}}}/.allure-input/{expected_materialize_target}"
+                in report_text
                 and "python .github/allure/safe_extract.py" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
             )
@@ -1887,12 +1890,21 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     and "expectedArtifacts.map((name)" not in report_text,
                     "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
+                check(
+                    "source-artifacts-directory: .allure-input/source-artifacts" in report_text
+                    and "results-directory: .allure-input/results" in report_text,
+                    "allure-external: external results must be merged from a separate source directory",
+                )
             else:
                 for artifact_name in artifact_names:
                     check(
                         artifact_name in validate_text and artifact_name in report_text,
                         f"{scenario}: missing exact artifact contract for {artifact_name}",
                     )
+                check(
+                    "source-artifacts-directory" not in report_text,
+                    f"{scenario}: component results are already merged and need no source directory",
+                )
             if scenario == "allure-polyglot":
                 check(
                     'test-artifact-path: "reports/allure-results"' in validate_text

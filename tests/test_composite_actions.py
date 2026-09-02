@@ -794,7 +794,6 @@ class AllureReportActionTests(unittest.TestCase):
         )
         self.assertTrue(data["inputs"]["github-token"]["required"])
         self.assertEqual(data["inputs"]["publish-pages"]["default"], "false")
-
         self.assertEqual(data["inputs"]["pyramid-enabled"]["default"], "false")
         self.assertEqual(data["inputs"]["module-environment-label"]["default"], "module")
         self.assertEqual(data["inputs"]["source-artifacts-directory"]["default"], "auto")
@@ -1128,8 +1127,6 @@ const core = {
                     "",
                 )
             )
-
-
 
 class ReusableTestArtifactContractTests(unittest.TestCase):
     def test_language_workflows_share_opt_in_artifact_contract(self) -> None:

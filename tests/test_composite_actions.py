@@ -870,6 +870,15 @@ class AllureReportActionTests(unittest.TestCase):
         )
 
         def as_regex(file_pattern: str) -> re.Pattern[str]:
+            """
+            Compile a slash-delimited regular expression pattern.
+            
+            Parameters:
+                file_pattern (str): Regular expression enclosed by leading and trailing slashes.
+            
+            Returns:
+                re.Pattern[str]: The compiled regular expression.
+            """
             require_slashes = file_pattern.startswith("/") and file_pattern.endswith("/")
             self.assertTrue(require_slashes, f"expected a regex pattern, got {file_pattern!r}")
             return re.compile(file_pattern[1:-1])

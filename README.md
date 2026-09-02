@@ -4,7 +4,7 @@
 
 [![Copier fleet audit](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-update.yml/badge.svg)](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-update.yml)
 
-![project-toolkit architecture](docs/assets/project-toolkit-architecture.svg)
+![project-toolkit architecture](https://raw.githubusercontent.com/quokkify/.github/main/assets/diagrams/project-toolkit-architecture.svg)
 
 project-toolkit keeps CI implementation in one repository while letting each consuming project own its triggers, paths, permissions, and release policy. It deliberately avoids Git submodules: consumers upgrade through small, reviewable Renovate PRs and template updates.
 

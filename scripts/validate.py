@@ -50,6 +50,43 @@ def run(cmd: list[str], cwd: Path = ROOT, env: dict[str, str] | None = None) -> 
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+def release_fleet_follow_up_errors(job: object, rel: Path) -> list[str]:
+    """Validate the optional job that propagates a fresh tag to the Copier fleet.
+
+    Release Please tags with GITHUB_TOKEN, and GITHUB_TOKEN events never start a new
+    workflow run, so the fleet update has to be chained inside the release run. That
+    chaining must stay gated on an actual release, or every push to main would run the
+    write-capable fleet updater.
+    """
+    if job is None:
+        return []
+    errors: list[str] = []
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            errors.append(f"{rel}: fleet-update job {message}")
+
+    if not isinstance(job, dict):
+        return [f"{rel}: fleet-update job must be a mapping"]
+
+    require(
+        job.get("uses") == "./.github/workflows/copier-fleet-auto-update.yml",
+        "must use ./.github/workflows/copier-fleet-auto-update.yml",
+    )
+    require("steps" not in job and "runs-on" not in job, "must not define steps or runs-on")
+    require(job.get("needs") == "release", "must depend on the release job")
+    require(
+        "needs.release.outputs.releases-created == 'true'" in str(job.get("if", "")),
+        "must only run when Release Please tagged a release",
+    )
+    require(
+        job.get("with") == {"template-ref": "${{ needs.release.outputs.tag-name }}"},
+        "must pass exactly the tag Release Please created as template-ref",
+    )
+    require(job.get("secrets") == "inherit", "must inherit secrets for the write-mode token")
+    return errors
+
+
 def release_workflow_errors(path: Path) -> list[str]:
     """Validate the repository-level Release Please driver workflow contract."""
     errors: list[str] = []
@@ -96,17 +133,25 @@ def release_workflow_errors(path: Path) -> list[str]:
     jobs = workflow.get("jobs")
     require(isinstance(jobs, dict), "jobs block must be a mapping")
     require(
-        isinstance(jobs, dict) and set(jobs) == {"release"},
-        "must define only the release caller job",
+        isinstance(jobs, dict)
+        and "release" in jobs
+        and set(jobs) <= {"release", "fleet-update"},
+        "must define the release caller job and at most the fleet-update follow-up job",
     )
     caller_jobs = (
-        [job for job in jobs.values() if isinstance(job, dict) and "uses" in job]
+        [
+            job
+            for name, job in jobs.items()
+            if name == "release" and isinstance(job, dict) and "uses" in job
+        ]
         if isinstance(jobs, dict)
         else []
     )
     require(len(caller_jobs) == 1, "must define exactly one reusable workflow caller job")
     if not caller_jobs:
         return errors
+
+    errors.extend(release_fleet_follow_up_errors(jobs.get("fleet-update"), rel))
 
     job = caller_jobs[0]
     require(
@@ -1316,7 +1361,6 @@ check(
 )
 assert_shared_preset_covers_template_workflows()
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
-ERRORS.extend(copier_fleet_workflow_errors(ROOT / ".github/workflows/copier-fleet-update.yml"))
 ERRORS.extend(
     copier_fleet_auto_update_workflow_errors(
         ROOT / ".github/workflows/copier-fleet-auto-update.yml"

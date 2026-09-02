@@ -2,8 +2,29 @@ name: Auto-update Copier-managed repositories
 
 on:
   schedule:
-    # Run weekly on Monday at 4:17 AM UTC (after the daily audit)
+    # Monday 4:17 AM UTC: write-mode safety net for anything the release-triggered run missed.
     - cron: "17 4 * * 1"
+    # Every other day at 4:17 AM UTC: read-only drift audit. This replaces the separate audit
+    # workflow; the badge stays green while the public fleet matches the latest released template.
+    - cron: "17 4 * * 0,2-6"
+  # Called by release.yml right after Release Please tags a new toolkit version.
+  # A `release`/`push: tags` trigger cannot be used instead: Release Please tags
+  # with GITHUB_TOKEN, and GITHUB_TOKEN events never start a new workflow run.
+  workflow_call:
+    inputs:
+      repository:
+        description: Optional public owner/repository to update instead of the whole organization.
+        type: string
+        required: false
+      template-ref:
+        description: Optional project-toolkit ref; empty uses the latest released tag.
+        type: string
+        required: false
+      dry-run:
+        description: Run in dry-run mode (audit only, no PRs created).
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       repository:
@@ -52,7 +73,7 @@ jobs:
         env:
           REQUESTED_REPOSITORY: ${{ inputs.repository }}
           TEMPLATE_REF: ${{ inputs.template-ref }}
-          DRY_RUN: ${{ inputs.dry-run }}
+          DRY_RUN: ${{ inputs.dry-run || github.event.schedule == '17 4 * * 0,2-6' }}
           # Write mode needs a credential installed on public quokkify repositories only.
           # Dry-run mode never writes and uses the repository-scoped Actions token.
           GH_TOKEN: ${{ secrets.FLEET_UPDATE_TOKEN }}

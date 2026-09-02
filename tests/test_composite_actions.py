@@ -914,6 +914,38 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertEqual(match.group("depName"), "copier")
         self.assertEqual(match.group("currentValue"), "9.17.2")
 
+    def test_renovate_manages_exact_allure_cli_default(self) -> None:
+        config = yaml.safe_load((ROOT / ".github/renovate.json").read_text())
+        managers = [item for item in config["customManagers"] if item.get("depNameTemplate") == "allure"]
+        self.assertEqual(len(managers), 1)
+        manager = managers[0]
+        self.assertEqual(manager["datasourceTemplate"], "npm")
+        self.assertEqual(manager["managerFilePatterns"], ["/^actions/allure-report/action\\.yml$/"])
+        self.assertEqual(len(manager["matchStrings"]), 1)
+
+        pattern = manager["matchStrings"][0].replace("(?<currentValue>", "(?P<currentValue>")
+        matcher = re.compile(pattern, re.MULTILINE)
+        wrapper_default = action("allure-report")["inputs"]["allure-version"]["default"]
+        self.assertIsNotNone(re.fullmatch(r"\d+\.\d+\.\d+", wrapper_default))
+
+        def extract(text: str, path: str = "actions/allure-report/action.yml") -> str | None:
+            if not re.fullmatch(r"actions/allure-report/action\.yml", path):
+                return None
+            match = matcher.search(text)
+            return match.group("currentValue") if match else None
+
+        action_text = (ROOT / "actions/allure-report/action.yml").read_text()
+        self.assertEqual(extract(action_text), wrapper_default)
+        future_text = action_text.replace(
+            f'default: "{wrapper_default}"', 'default: "9.8.7"', 1
+        )
+        self.assertEqual(extract(future_text), "9.8.7")
+        self.assertIsNone(extract(action_text.replace(wrapper_default, "not-a-version", 1)))
+        self.assertIsNone(extract(action_text.replace("Exact Allure CLI version", "Other input", 1)))
+        self.assertIsNone(extract(action_text, "actions/other/action.yml"))
+        without_manager = [item for item in config["customManagers"] if item is not manager]
+        self.assertFalse([item for item in without_manager if item.get("depNameTemplate") == "allure"])
+
 
 class AllureTrustedCommentPropagationTests(unittest.TestCase):
     def test_generated_workflow_forwards_compact_comment_artifact_unchanged(self) -> None:
@@ -1095,7 +1127,6 @@ const core = {
                     "",
                 )
             )
-
 
 class ReusableTestArtifactContractTests(unittest.TestCase):
     def test_language_workflows_share_opt_in_artifact_contract(self) -> None:

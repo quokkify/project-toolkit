@@ -872,10 +872,10 @@ class AllureReportActionTests(unittest.TestCase):
         def as_regex(file_pattern: str) -> re.Pattern[str]:
             """
             Compile a slash-delimited regular expression pattern.
-            
+
             Parameters:
                 file_pattern (str): Regular expression enclosed by leading and trailing slashes.
-            
+
             Returns:
                 re.Pattern[str]: The compiled regular expression.
             """

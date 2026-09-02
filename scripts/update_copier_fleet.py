@@ -20,7 +20,7 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import yaml
 
@@ -36,6 +36,7 @@ PRIVATE_REPOSITORY_ERROR = (
 RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
+COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 class FleetUpdateError(RuntimeError):
@@ -188,6 +189,23 @@ def resolve_template_ref(
     if not isinstance(tag_name, str) or not RELEASE_TAG_PATTERN.fullmatch(tag_name):
         raise FleetUpdateError("latest template release must use an exact vMAJOR.MINOR.PATCH tag")
     return tag_name
+
+
+def resolve_template_commit(
+    template_repository: str,
+    template_ref: str,
+    *,
+    env: dict[str, str],
+) -> str:
+    """Resolve a template release tag to the commit a digest pin has to name."""
+    payload = gh_json(
+        ["api", f"repos/{template_repository}/commits/{template_ref}", "--jq", "{sha: .sha}"],
+        env=env,
+    )
+    sha = payload.get("sha") if isinstance(payload, dict) else None
+    if not isinstance(sha, str) or not COMMIT_SHA_PATTERN.fullmatch(sha):
+        raise FleetUpdateError(f"{template_repository}@{template_ref} did not resolve to a commit")
+    return sha
 
 
 def is_public(metadata: object) -> bool:
@@ -707,7 +725,13 @@ def update_template(
     restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
     canonicalize_answers_source(repository_path, template_source)
     if template_ref and RELEASE_TAG_PATTERN.fullmatch(template_ref):
-        bump_project_owned_toolkit_refs(repository_path, template_ref)
+        bump_project_owned_toolkit_refs(
+            repository_path,
+            template_ref,
+            resolve_commit=lambda: resolve_template_commit(
+                template_source, template_ref, env=env
+            ),
+        )
     rejected = sorted(repository_path.rglob("*.rej"))
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
@@ -733,13 +757,20 @@ def authenticated_git() -> list[str]:
     ]
 
 
-TOOLKIT_TAG_REFERENCE = re.compile(
-    r"(quokkify/project-toolkit/(?:\.github/workflows|actions)/[^@\s]+@)v\d+\.\d+\.\d+"
+TOOLKIT_REFERENCE_PREFIX = r"quokkify/project-toolkit/(?:\.github/workflows|actions)/[^@\s]+@"
+TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+")
+TOOLKIT_DIGEST_REFERENCE = re.compile(
+    rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
 )
 
 
-def bump_project_owned_toolkit_refs(repository_path: Path, template_ref: str) -> list[str]:
-    """Move toolkit tag references in project-owned workflows to the new template version.
+def bump_project_owned_toolkit_refs(
+    repository_path: Path,
+    template_ref: str,
+    *,
+    resolve_commit: Callable[[], str] | None = None,
+) -> list[str]:
+    """Move toolkit references in project-owned workflows to the new template version.
 
     Copier rewrites the workflows it owns, but a project-owned workflow such as ci.yml
     also references this toolkit, and the generated template contract requires every such
@@ -747,14 +778,29 @@ def bump_project_owned_toolkit_refs(repository_path: Path, template_ref: str) ->
     consumer's own validation immediately after an otherwise correct update, so the bump
     has to be part of the same commit.
 
-    Only exact vMAJOR.MINOR.PATCH tags are rewritten. A digest pin is a deliberate,
-    stricter choice by that project and is left alone.
+    Exact vMAJOR.MINOR.PATCH tags are rewritten to the new tag. A digest pin carrying a
+    release comment, which is what Renovate writes, is rewritten to the new tag's commit
+    together with its comment: the contract accepts a digest only while the comment still
+    names the recorded toolkit_version, so leaving the comment behind is the same failure
+    as leaving a stale tag behind, and neither this update nor the Renovate bump can pass
+    that check on its own. A digest pin without a release comment is left alone, since
+    nothing identifies which release it was meant to track.
+
+    ``resolve_commit`` runs at most once, and only when a digest pin is present, so a
+    fleet of tag-only consumers costs no extra API call.
     """
     changed: list[str] = []
+    commit: str | None = None
     workflows = repository_path / ".github" / "workflows"
     for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
         original = workflow.read_text(encoding="utf-8")
         updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", original)
+        if resolve_commit is not None and TOOLKIT_DIGEST_REFERENCE.search(updated):
+            if commit is None:
+                commit = resolve_commit()
+            updated = TOOLKIT_DIGEST_REFERENCE.sub(
+                rf"\g<1>{commit}\g<2>{template_ref}", updated
+            )
         if updated != original:
             workflow.write_text(updated, encoding="utf-8")
             changed.append(workflow.relative_to(repository_path).as_posix())

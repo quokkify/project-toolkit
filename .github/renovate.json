@@ -7,6 +7,17 @@
   "customManagers": [
     {
       "customType": "regex",
+      "description": "Update the Allure CLI version used by the local wrapper action.",
+      "managerFilePatterns": ["/^actions/allure-report/action\\.yml$/"],
+      "matchStrings": [
+        "allure-version:\\s+description:\\s+Exact Allure CLI version\\s+required:\\s+false\\s+default:\\s*[\\\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]?"
+      ],
+      "depNameTemplate": "allure",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
       "description": "Update the pinned Renovate config validator package.",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [

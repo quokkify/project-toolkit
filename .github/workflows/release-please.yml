@@ -27,6 +27,13 @@ on:
         description: Branch Release Please should target; empty uses repository default.
         type: string
         default: ""
+    outputs:
+      releases-created:
+        description: "true when this run tagged a release; empty or false otherwise."
+        value: ${{ jobs.single.outputs.releases-created || jobs.manifest.outputs.releases-created }}
+      tag-name:
+        description: Tag Release Please created, empty when no release was cut.
+        value: ${{ jobs.single.outputs.tag-name || jobs.manifest.outputs.tag-name }}
 
 permissions:
   contents: write
@@ -47,8 +54,12 @@ jobs:
     if: ${{ inputs.mode == 'single' }}
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      releases-created: ${{ steps.release.outputs.releases_created }}
+      tag-name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Run Release Please for one package
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           release-type: ${{ inputs.release-type }}
@@ -58,8 +69,14 @@ jobs:
     if: ${{ inputs.mode == 'manifest' }}
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      releases-created: ${{ steps.release.outputs.releases_created }}
+      # Manifest mode prefixes per-package outputs with the package path, so a
+      # root-only manifest exposes the tag as `.--tag_name`.
+      tag-name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
     steps:
       - name: Run Release Please in manifest mode
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: ${{ inputs.config-file }}

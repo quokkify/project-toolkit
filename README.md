@@ -2,7 +2,7 @@
 
 > Reusable GitHub Actions workflows and Copier templates for reliable, versioned CI in Python, Node.js, Java, Docker, and polyglot repositories.
 
-[![Copier fleet audit](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-update.yml/badge.svg)](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-update.yml)
+[![Copier fleet](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-auto-update.yml/badge.svg)](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-auto-update.yml)
 
 ![project-toolkit architecture](https://raw.githubusercontent.com/quokkify/.github/main/assets/diagrams/project-toolkit-architecture.svg)
 
@@ -28,7 +28,7 @@ Call supported workflows from a job with an exact release tag: `uses: quokkify/p
 | Trusted Allure publisher | [`allure-publisher.yml`](.github/workflows/allure-publisher.yml) | Yes | Validate completed PR-run artifacts, generate an Allure report, and optionally publish a safe comment and Pages preview. |
 | Runner detection | [`reusable-detect-runner.yml`](.github/workflows/reusable-detect-runner.yml) | Internal | Select a trusted self-hosted runner for this repository's own validation jobs; it is not a supported consumer API. |
 
-The daily [`Copier fleet audit`](.github/workflows/copier-fleet-update.yml) is repository automation, not a reusable workflow: it checks public Copier-managed consumers for template drift.
+The [`Auto-update Copier-managed repositories`](.github/workflows/copier-fleet-auto-update.yml) workflow is repository automation, not a reusable workflow: it audits public Copier-managed consumers for template drift on most days and opens template-update pull requests after every release, plus weekly as a safety net.
 
 ## Quick start
 

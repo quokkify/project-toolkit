@@ -40,7 +40,7 @@ jobs:
           python-version: "3.14"
           package-manager: pip
           cache-dependencies: "false"
-          install-command: python -m pip install copier==9.17.2
+          install-command: python -m pip install copier==9.18.1
 
       - name: Audit Copier fleet
         env:

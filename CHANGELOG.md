@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.20.0](https://github.com/quokkify/project-toolkit/compare/v2.19.2...v2.20.0) (2026-09-02)
+
+
+### ✨ Features
+
+* **ci:** propagate template releases to consumers automatically ([#202](https://github.com/quokkify/project-toolkit/issues/202)) ([a8b7156](https://github.com/quokkify/project-toolkit/commit/a8b71566ff701f7df149dd3a060e61aee015bef3))
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** bump digest-pinned toolkit refs with the template version ([#204](https://github.com/quokkify/project-toolkit/issues/204)) ([95c4bbd](https://github.com/quokkify/project-toolkit/commit/95c4bbd87cc7b8bcd80b47c1ad688cbb11180cec))
+
 ## [2.19.2](https://github.com/quokkify/project-toolkit/compare/v2.19.1...v2.19.2) (2026-09-02)
 
 

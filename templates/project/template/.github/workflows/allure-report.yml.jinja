@@ -167,14 +167,15 @@ jobs:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-archives
           OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-expanded
-          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/{% if components %}results{% else %}source-artifacts{% endif %}
         run: python .github/allure/safe_extract.py
       - name: Build Allure report without write privileges
         uses: quokkify/project-toolkit/actions/allure-report@{{ toolkit_version }}
         with:
           github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           results-directory: .allure-input/results
-          report-directory: allure-report
+{% if not components %}          source-artifacts-directory: .allure-input/source-artifacts
+{% endif %}          report-directory: allure-report
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}
 {% endif %}          source-run-id: {% raw %}${{ github.event.workflow_run.id }}{% endraw %}

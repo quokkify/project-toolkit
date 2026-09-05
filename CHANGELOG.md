@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.20.2](https://github.com/quokkify/project-toolkit/compare/v2.20.1...v2.20.2) (2026-09-05)
+
+
+### 🧹 Chores
+
+* **deps:** update quokkify/project-toolkit to v2.20.1 ([#210](https://github.com/quokkify/project-toolkit/issues/210)) ([911c0a4](https://github.com/quokkify/project-toolkit/commit/911c0a454187570761d5a3838be75fdf9a711d6e))
+* **deps:** update renovate to v44.56.3 ([#208](https://github.com/quokkify/project-toolkit/issues/208)) ([747b1cf](https://github.com/quokkify/project-toolkit/commit/747b1cfc0ba45650cd308ac3332e438f83a82d35))
+
 ## [2.20.1](https://github.com/quokkify/project-toolkit/compare/v2.20.0...v2.20.1) (2026-09-02)
 
 

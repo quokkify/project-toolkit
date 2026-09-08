@@ -66,6 +66,8 @@ jobs:
       releases-created: ${{ steps.release.outputs.releases_created }}
       tag-name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Run Release Please for one package
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -79,10 +81,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
+          ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, os, subprocess
+          import json, os, re, subprocess
           prs = json.loads(os.environ["RELEASE_PRS"])
           if len(prs) != 1:
               raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
@@ -92,12 +95,31 @@ jobs:
           if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
               raise SystemExit("release PR repository validation failed")
           subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
-          selected = [json.loads(subprocess.check_output(["gh", "pr", "view", str(pr["number"]), "--json", "body,title,number"], text=True)) for pr in prs]
+          lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
+          in_top = fenced = False
+          source_numbers = []
+          for line in lines:
+              if line.startswith("## "):
+                  if in_top:
+                      break
+                  in_top = True
+              elif in_top and line.startswith(("```", "~~~")):
+                  fenced = not fenced
+              elif in_top and not fenced:
+                  source_numbers.extend(re.findall(r"\(#(\d+)\)", line))
+          selected = []
+          for source_number in sorted(set(source_numbers), key=int):
+              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))
+              if source["state"] != "MERGED" or not source.get("mergedAt"):
+                  raise SystemExit(f"source PR {source_number} is not merged")
+              if any(source[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+                  raise SystemExit(f"source PR {source_number} repository validation failed")
+              selected.append(source)
           json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))
           open("/tmp/release-pr-number", "w", encoding="utf-8").write(number)
           PY
           gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
-          python scripts/enrich_release_notes.py --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json --release-body /tmp/release-body.md --rich-body /tmp/rich-body.md
+          python "${ENRICHMENT_SCRIPT}" --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json --release-body /tmp/release-body.md --rich-body /tmp/rich-body.md
           if ! git diff --quiet -- CHANGELOG.md; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -106,18 +128,6 @@ jobs:
             git push origin HEAD
           fi
           gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
-          python - <<'PY'
-          import json, os, re, subprocess
-          body = open("/tmp/release-body.md", encoding="utf-8").read()
-          changelog = open("CHANGELOG.md", encoding="utf-8").read()
-          match = re.search(r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->", changelog)
-          block = match.group(0) if match else ""
-          pattern = r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->"
-          body = re.sub(pattern, block, body) if re.search(pattern, body) else body.rstrip() + ("\n\n" + block if block else "") + "\n"
-          payload = json.dumps({"body": body})
-          number = open("/tmp/release-pr-number", encoding="utf-8").read().strip()
-          subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{os.environ['REPOSITORY']}/pulls/{number}", "--input", "-"], input=payload, text=True, check=True)
-          PY
           gh api -X PATCH "repos/${REPOSITORY}/pulls/$(cat /tmp/release-pr-number)" --input <(python -c 'import json; print(json.dumps({"body":open("/tmp/rich-body.md").read()}))')
 
   manifest:
@@ -128,6 +138,8 @@ jobs:
       releases-created: ${{ steps.release.outputs.releases_created }}
       tag-name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Run Release Please in manifest mode
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -141,10 +153,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
+          ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, os, subprocess
+          import json, os, re, subprocess
           prs = json.loads(os.environ["RELEASE_PRS"])
           if len(prs) != 1:
               raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
@@ -154,12 +167,31 @@ jobs:
           if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
               raise SystemExit("release PR repository validation failed")
           subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
-          selected = [json.loads(subprocess.check_output(["gh", "pr", "view", str(pr["number"]), "--json", "body,title,number"], text=True)) for pr in prs]
+          lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
+          in_top = fenced = False
+          source_numbers = []
+          for line in lines:
+              if line.startswith("## "):
+                  if in_top:
+                      break
+                  in_top = True
+              elif in_top and line.startswith(("```", "~~~")):
+                  fenced = not fenced
+              elif in_top and not fenced:
+                  source_numbers.extend(re.findall(r"\(#(\d+)\)", line))
+          selected = []
+          for source_number in sorted(set(source_numbers), key=int):
+              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))
+              if source["state"] != "MERGED" or not source.get("mergedAt"):
+                  raise SystemExit(f"source PR {source_number} is not merged")
+              if any(source[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+                  raise SystemExit(f"source PR {source_number} repository validation failed")
+              selected.append(source)
           json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))
           open("/tmp/release-pr-number", "w", encoding="utf-8").write(number)
           PY
           gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
-          python "${{ inputs.enrichment-script }}" --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json
+          python "${ENRICHMENT_SCRIPT}" --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json --release-body /tmp/release-body.md --rich-body /tmp/rich-body.md
           if ! git diff --quiet -- CHANGELOG.md; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -168,15 +200,4 @@ jobs:
             git push origin HEAD
           fi
           gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
-          python - <<'PY'
-          import json, os, re, subprocess
-          body = open("/tmp/release-body.md", encoding="utf-8").read()
-          changelog = open("CHANGELOG.md", encoding="utf-8").read()
-          match = re.search(r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->", changelog)
-          block = match.group(0) if match else ""
-          pattern = r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->"
-          body = re.sub(pattern, block, body) if re.search(pattern, body) else body.rstrip() + ("\n\n" + block if block else "") + "\n"
-          payload = json.dumps({"body": body})
-          number = open("/tmp/release-pr-number", encoding="utf-8").read().strip()
-          subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{os.environ['REPOSITORY']}/pulls/{number}", "--input", "-"], input=payload, text=True, check=True)
-          PY
+          gh api -X PATCH "repos/${REPOSITORY}/pulls/$(cat /tmp/release-pr-number)" --input <(python -c 'import json; print(json.dumps({"body":open("/tmp/rich-body.md").read()}))')

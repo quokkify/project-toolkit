@@ -8,7 +8,18 @@ END="<!-- project-toolkit:rich-block:end -->"
 MARKER="<!-- project-toolkit:rich-release-notes pr={number} -->"
 def sections(body):
     found={}; current=None
+    fence=None
     for line in body.replace("\r\n","\n").replace("\r","\n").splitlines():
+        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
+        if fm:
+            marker=fm.group(1)
+            if fence is None: fence=marker[0]
+            elif marker[0] == fence: fence=None
+            if current: found[current].append(line)
+            continue
+        if fence is not None:
+            if current: found[current].append(line)
+            continue
         m=re.match(r"^##[ \t]+([^#].*?)[ \t]*$",line)
         if m:
             key=m.group(1).strip().casefold(); current=key if key in RICH_HEADINGS and key not in found else None
@@ -16,9 +27,17 @@ def sections(body):
         elif current: found[current].append(line)
     return {k:"\n".join(v).strip() for k,v in found.items() if re.sub(r"<!--[\s\S]*?-->","","\n".join(v)).strip()}
 def enrich(changelog, prs):
-    headings=list(re.finditer(r"^##[ \t]+.*$",changelog,re.M))
+    headings=[]; offset=0; fence=None
+    for line in changelog.splitlines(True):
+        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
+        if fm:
+            marker=fm.group(1)
+            if fence is None: fence=marker[0]
+            elif marker[0] == fence: fence=None
+        elif fence is None and re.match(r"^##[ \t]+.*$",line): headings.append(offset)
+        offset += len(line)
     if not headings: return changelog
-    start=headings[0].start(); end=headings[1].start() if len(headings)>1 else len(changelog)
+    start=headings[0]; end=headings[1] if len(headings)>1 else len(changelog)
     top=changelog[start:end]; old=set(re.findall(r"project-toolkit:rich-release-notes pr=(\d+)",changelog[end:]))
     top=re.sub(r"\n?"+re.escape(START)+r"[\s\S]*?"+re.escape(END)+r"\n?","",top)
     entries=[]
@@ -34,6 +53,23 @@ def enrich(changelog, prs):
     pos=top.find("\n"); pos=len(top) if pos<0 else pos
     top=top[:pos].rstrip()+"\n\n"+START+"\n"+"\n".join(lines).rstrip()+"\n"+END+"\n\n"+top[pos:].lstrip("\n")
     return changelog[:start]+top+changelog[end:]
+def enrich_body(body, rich):
+    block=START+"\n"+rich+"\n"+END if rich else ""
+    pattern=re.escape(START)+r"[\s\S]*?"+re.escape(END)
+    if re.search(pattern,body): return re.sub(pattern,block,body)
+    return body.rstrip()+("\n\n"+block if block else "")+"\n"
 if __name__ == "__main__":
-    p=argparse.ArgumentParser(); p.add_argument("--changelog",type=Path,required=True); p.add_argument("--pull-requests",type=Path,required=True); a=p.parse_args()
-    a.changelog.write_text(enrich(a.changelog.read_text(encoding="utf-8"),json.loads(a.pull_requests.read_text(encoding="utf-8"))),encoding="utf-8",newline="\n")
+    p=argparse.ArgumentParser(); p.add_argument("--changelog",type=Path,required=True); p.add_argument("--pull-requests",type=Path,required=True); p.add_argument("--release-body",type=Path); p.add_argument("--rich-body",type=Path); a=p.parse_args()
+    updated=enrich(a.changelog.read_text(encoding="utf-8"),json.loads(a.pull_requests.read_text(encoding="utf-8")))
+    a.changelog.write_text(updated,encoding="utf-8",newline="\n")
+    if a.release_body and a.rich_body:
+        prs=json.loads(a.pull_requests.read_text(encoding="utf-8")); entries=[]
+        for pr in prs:
+            body=sections(str(pr.get("body",""))); n=str(pr.get("number","")).strip()
+            if n.isdigit() and body: entries.append((int(n),n,pr,body))
+        out=[]
+        for _,n,pr,body in sorted(entries):
+            out += [MARKER.format(number=n),"#### "+str(pr.get("title","")).strip()]
+            for key,heading in RICH_HEADINGS.items():
+                if key in body: out += ["### "+heading,body[key],""]
+        a.rich_body.write_text(enrich_body(a.release_body.read_text(encoding="utf-8"),"\n".join(out).rstrip()),encoding="utf-8",newline="\n")

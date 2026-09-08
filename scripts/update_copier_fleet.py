@@ -694,12 +694,43 @@ def restore_answers_format_if_semantically_equal(
         )
 
 
+def seed_single_release_manifest(
+    repository_path: Path,
+    repository: Repository,
+    *,
+    env: dict[str, str],
+) -> None:
+    """Seed the root manifest from an existing stable release, never 0.1.0."""
+    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
+    manifest = repository_path / ".github/release-please/manifest.json"
+    if answers.get("release_please") is not True or manifest.exists():
+        return
+    if not (repository_path / ".github/workflows/release.yml").is_file():
+        return
+    releases = gh_json(
+        ["release", "list", "--repo", repository.name_with_owner,
+         "--exclude-drafts", "--exclude-pre-releases", "--limit", "2",
+         "--json", "tagName,isLatest"], env=env
+    )
+    stable = [
+        item for item in releases
+        if isinstance(item, dict) and isinstance(item.get("tagName"), str)
+        and item.get("isLatest") is True
+        and RELEASE_TAG_PATTERN.fullmatch(item["tagName"])
+    ]
+    if len(stable) != 1:
+        raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous or missing")
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({".": stable[0]["tagName"][1:]}, indent=2) + "\n", encoding="utf-8")
+
+
 def update_template(
     repository_path: Path,
     *,
     template_source: str,
     template_ref: str | None,
     env: dict[str, str],
+    repository: Repository | None = None,
 ) -> list[str]:
     answers_path = repository_path / ANSWERS_FILE
     if answers_path.is_symlink():
@@ -707,6 +738,8 @@ def update_template(
     if not answers_path.is_file():
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
+    if repository is not None:
+        seed_single_release_manifest(repository_path, repository, env=env)
 
     command = [
         "copier",
@@ -932,6 +965,7 @@ def process_repository(
             template_source=expected_template,
             template_ref=template_ref,
             env=env,
+            repository=repository,
         )
         updated_answers_path = destination / ANSWERS_FILE
         if is_regular_file(updated_answers_path, repository_root=destination):

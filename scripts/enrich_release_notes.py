@@ -29,7 +29,22 @@ def extract_rich_sections(body: str) -> dict[str, str]:
     result: dict[str, str] = {}
     current: str | None = None
     lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    fence: str | None = None
     for line in lines:
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = marker[0]
+            elif marker[0] == fence:
+                fence = None
+            if current is not None:
+                result[current] += line + "\n"
+            continue
+        if fence is not None:
+            if current is not None:
+                result[current] += line + "\n"
+            continue
         match = re.match(r"^##[ \t]+([^#].*?)[ \t]*$", line)
         if match:
             heading = match.group(1).strip().casefold()
@@ -43,8 +58,23 @@ def extract_rich_sections(body: str) -> dict[str, str]:
 
 
 def _version_ranges(changelog: str) -> list[tuple[int, int]]:
-    matches = list(re.finditer(r"^##[ \t]+.*$", changelog, re.MULTILINE))
-    return [(m.start(), matches[i + 1].start() if i + 1 < len(matches) else len(changelog)) for i, m in enumerate(matches)]
+    lines = changelog.splitlines(keepends=True)
+    offsets: list[int] = []
+    offset = 0
+    fence: str | None = None
+    for line in lines:
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = marker[0]
+            elif marker[0] == fence:
+                fence = None
+        elif fence is None and re.match(r"^##[ \t]+.*$", line):
+            offsets.append(offset)
+        offset += len(line)
+    matches = offsets
+    return [(start, matches[i + 1] if i + 1 < len(matches) else len(changelog)) for i, start in enumerate(matches)]
 
 
 def _rich_numbers(text: str) -> set[str]:
@@ -101,7 +131,7 @@ def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str
 def enrich_release_body(body: str, rich_markdown: str) -> str:
     """Replace this tool's body block while preserving all Release Please text."""
     block = f"{BLOCK_START}\n{rich_markdown}\n{BLOCK_END}" if rich_markdown else ""
-    pattern = rf"{re.escape(BLOCK_START)}[\\s\\S]*?{re.escape(BLOCK_END)}"
+    pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
     if re.search(pattern, body):
         return re.sub(pattern, block, body)
     return body.rstrip() + ("\n\n" + block if block else "") + "\n"

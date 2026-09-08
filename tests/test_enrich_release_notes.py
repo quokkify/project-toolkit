@@ -50,3 +50,17 @@ class RichNotesTests(TestCase):
             output = notes.enrich_changelog(changelog.read_text(), [{"number": 1, "body": "## Highlight\nHello"}])
             changelog.write_text(output, encoding="utf-8")
             self.assertIn("### Highlights", changelog.read_text())
+
+    def test_headings_inside_fences_are_not_sections_or_versions(self):
+        body = "## Usage example\n```java\n## Migration\n```\nAfter\n"
+        self.assertIn("```java\n## Migration\n```\nAfter", notes.extract_rich_sections(body)["usage example"])
+        self.assertNotIn("migration", notes.extract_rich_sections(body))
+        changelog = "## 1.0.0\n```md\n## fake\n```\n### Features\n- x\n## 0.9.0\n"
+        self.assertEqual(len(notes._version_ranges(changelog)), 2)
+
+    def test_release_body_block_is_replaced_once(self):
+        body = "## Generated\n" + notes.BLOCK_START + "\nold\n" + notes.BLOCK_END + "\nFooter\n"
+        updated = notes.enrich_release_body(body, "new\n```md\n## nested\n```")
+        self.assertEqual(updated.count(notes.BLOCK_START), 1)
+        self.assertIn("new", updated)
+        self.assertNotIn("old", updated)

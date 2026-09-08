@@ -1,0 +1,52 @@
+import importlib.util
+import tempfile
+from pathlib import Path
+from unittest import TestCase
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("enrich_release_notes", ROOT / "scripts/enrich_release_notes.py")
+assert spec and spec.loader
+notes = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(notes)
+
+
+class RichNotesTests(TestCase):
+    def test_extracts_sections_and_preserves_java_fence(self):
+        body = "## Description\r\ninternal\r\n## Usage example\r\n```java\r\nVerifier.verify();\r\n```\r\n## Migration\r\n<!-- guidance -->\r\n"
+        sections = notes.extract_rich_sections(body)
+        self.assertIn("```java\nVerifier.verify();\n```", sections["usage example"])
+        self.assertNotIn("migration", sections)
+
+    def test_comments_and_unknown_or_duplicate_headings_are_ignored(self):
+        body = "## Highlight\n<!-- only guidance -->\n## Highlight\nsecond\n## Other\nno\n"
+        self.assertEqual(notes.extract_rich_sections(body), {})
+
+    def test_enrichment_is_sorted_and_idempotent(self):
+        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
+        prs = [
+            {"number": 12, "title": "Second", "body": "## Migration\nUpgrade now."},
+            {"number": 4, "title": "First", "body": "## Highlight\nImportant."},
+            {"number": 99, "title": "Empty", "body": "## Usage example\n<!-- optional -->"},
+        ]
+        first = notes.enrich_changelog(changelog, prs)
+        self.assertLess(first.index("#### First"), first.index("#### Second"))
+        self.assertEqual(notes.enrich_changelog(first, prs), first)
+        self.assertEqual(first.count("rich-release-notes"), 2)
+
+    def test_shell_looking_text_is_data(self):
+        changelog = "## 1.0.0\n"
+        body = "## Release notes\n${{ github.token }}\n$(touch /tmp/pwned)\n"
+        output = notes.enrich_changelog(changelog, [{"number": 7, "body": body}])
+        self.assertIn("${{ github.token }}", output)
+        self.assertIn("$(touch /tmp/pwned)", output)
+
+    def test_cli_writes_generated_markdown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            changelog = root / "CHANGELOG.md"
+            prs = root / "prs.json"
+            changelog.write_text("## 1.0.0\n", encoding="utf-8")
+            prs.write_text('[{"number": 1, "body": "## Highlight\\nHello"}]', encoding="utf-8")
+            output = notes.enrich_changelog(changelog.read_text(), [{"number": 1, "body": "## Highlight\nHello"}])
+            changelog.write_text(output, encoding="utf-8")
+            self.assertIn("### Highlights", changelog.read_text())

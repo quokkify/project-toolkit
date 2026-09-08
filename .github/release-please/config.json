@@ -26,29 +26,22 @@
           "section": "📚 Documentation"
         },
         {
-          "type": "ci",
-          "section": "⚙️ CI"
-        },
-        {
-          "type": "build",
-          "section": "🛠  Build System"
-        },
-        {
           "type": "perf",
-          "section": "🚀 Performance Improvements"
+          "section": "🚀 Performance"
         },
         {
           "type": "refactor",
-          "section": "♻️ Code Refactoring"
+          "section": "♻️ Refactoring"
         },
         {
-          "type": "test",
-          "section": "🧪 Tests"
+          "type": "revert",
+          "section": "↩️ Reverts"
         },
-        {
-          "type": "chore",
-          "section": "🧹 Chores"
-        }
+        {"type": "build", "section": "🛠 Build System", "hidden": true},
+        {"type": "ci", "section": "⚙️ CI", "hidden": true},
+        {"type": "test", "section": "🧪 Tests", "hidden": true},
+        {"type": "chore", "section": "🧹 Chores", "hidden": true},
+        {"type": "style", "section": "🎨 Style", "hidden": true}
       ]
     }
   }

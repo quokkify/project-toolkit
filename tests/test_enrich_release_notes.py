@@ -13,7 +13,10 @@ spec.loader.exec_module(notes)
 class RichNotesTests(TestCase):
     def test_standard_release_please_links_are_supported_by_workflow_contract(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
-        self.assertIn(r"\[#(\d+)\]\([^)]*\)", workflow)
+        self.assertIn(r"\[#(\d+)\]\(https://github\.com/", workflow)
+        self.assertIn('"gh", "api", f"repos/{repo}/pulls/{number}"', workflow)
+        self.assertNotIn('"--json", "headRepository,baseRepository"', workflow)
+        self.assertIn('"--json", "body,title,number,state,mergedAt,headRepository"', workflow)
 
     def test_extracts_sections_and_preserves_java_fence(self):
         body = "## Description\r\ninternal\r\n## Usage example\r\n```java\r\nVerifier.verify();\r\n```\r\n## Migration\r\n<!-- guidance -->\r\n"
@@ -68,6 +71,18 @@ class RichNotesTests(TestCase):
         self.assertEqual(updated.count(notes.BLOCK_START), 1)
         self.assertIn("new", updated)
         self.assertNotIn("old", updated)
+
+    def test_release_body_block_is_before_release_please_footer(self):
+        body = "## Generated notes\n\n---\nThis PR was generated with Release Please.\n"
+        updated = notes.enrich_release_body(body, "### Highlights\nNew")
+        self.assertLess(updated.index(notes.BLOCK_START), updated.index("\n---\n"))
+        self.assertIn("This PR was generated", updated)
+
+    def test_duplicate_source_records_render_once(self):
+        changelog = "## 1.0.0\n"
+        prs = [{"number": 7, "body": "## Highlight\nOne"}] * 2
+        output = notes.enrich_changelog(changelog, prs)
+        self.assertEqual(output.count("rich-release-notes pr=7"), 1)
 
     def test_empty_sources_remove_existing_block(self):
         changelog = "## 1.0.0\n\n" + notes.BLOCK_START + "\nold\n" + notes.BLOCK_END + "\n\n### Features\n- x\n"

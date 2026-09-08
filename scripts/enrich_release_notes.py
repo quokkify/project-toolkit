@@ -113,10 +113,12 @@ def _remove_legacy_block(top: str) -> str:
 
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
     entries: list[tuple[int, str, dict[str, str]]] = []
+    seen: set[str] = set()
     for pr in prs:
         number = str(pr.get("number", "")).strip()
-        if not number.isdigit() or number in excluded:
+        if not number.isdigit() or number in excluded or number in seen:
             continue
+        seen.add(number)
         sections = extract_rich_sections(str(pr.get("body", "")))
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
@@ -171,7 +173,12 @@ def enrich_release_body(body: str, rich_markdown: str) -> str:
     pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
     if re.search(pattern, body):
         return re.sub(pattern, block, body)
-    return body.rstrip() + ("\n\n" + block if block else "") + "\n"
+    if not block:
+        return body.rstrip() + "\n"
+    delimiter = re.search(r"\n---\n", body)
+    if delimiter:
+        return body[:delimiter.start()] + "\n\n" + block + body[delimiter.start():]
+    return body.rstrip() + "\n\n" + block + "\n"
 
 
 def main() -> None:

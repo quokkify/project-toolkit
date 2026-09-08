@@ -96,9 +96,9 @@ jobs:
           if len(prs) != 1:
               raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
           number = str(prs[0]["number"])
-          details = json.loads(subprocess.check_output(["gh", "pr", "view", number, "--json", "headRepository,baseRepository"], text=True))
           repo = os.environ["REPOSITORY"]
-          if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+          details = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{number}", "--jq", "{headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name}"], text=True))
+          if any(details.get(key) != repo for key in ("headRepository", "baseRepository")):
               raise SystemExit("release PR repository validation failed")
           subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
           lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
@@ -125,18 +125,14 @@ jobs:
                       break
                   in_top = True
               elif in_top and not in_rich_block and fence is None:
-                  source_numbers.extend(
-                      number
-                      for match in re.findall(r"(?:\(#(\d+)\)|\[#(\d+)\]\([^)]*\))", line)
-                      for number in match
-                      if number
-                  )
+                  source_numbers.extend(re.findall(r"\[#(\d+)\]\(https://github\.com/[^/]+/[^/]+/pull/\1(?:[?#][^)]*)?\)", line))
           selected = []
           for source_number in sorted(set(source_numbers), key=int):
-              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))
+              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository"], text=True))
+              source_repositories = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{source_number}", "--jq", "{headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name}"], text=True))
               if source["state"] != "MERGED" or not source.get("mergedAt"):
                   raise SystemExit(f"source PR {source_number} is not merged")
-              if any(source[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+              if any(source_repositories.get(key) != repo for key in ("headRepository", "baseRepository")):
                   raise SystemExit(f"source PR {source_number} repository validation failed")
               selected.append(source)
           json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))
@@ -186,9 +182,9 @@ jobs:
           if len(prs) != 1:
               raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
           number = str(prs[0]["number"])
-          details = json.loads(subprocess.check_output(["gh", "pr", "view", number, "--json", "headRepository,baseRepository"], text=True))
           repo = os.environ["REPOSITORY"]
-          if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+          details = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{number}", "--jq", "{headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name}"], text=True))
+          if any(details.get(key) != repo for key in ("headRepository", "baseRepository")):
               raise SystemExit("release PR repository validation failed")
           subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
           lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
@@ -215,18 +211,14 @@ jobs:
                       break
                   in_top = True
               elif in_top and not in_rich_block and fence is None:
-                  source_numbers.extend(
-                      number
-                      for match in re.findall(r"(?:\(#(\d+)\)|\[#(\d+)\]\([^)]*\))", line)
-                      for number in match
-                      if number
-                  )
+                  source_numbers.extend(re.findall(r"\[#(\d+)\]\(https://github\.com/[^/]+/[^/]+/pull/\1(?:[?#][^)]*)?\)", line))
           selected = []
           for source_number in sorted(set(source_numbers), key=int):
-              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))
+              source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository"], text=True))
+              source_repositories = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{source_number}", "--jq", "{headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name}"], text=True))
               if source["state"] != "MERGED" or not source.get("mergedAt"):
                   raise SystemExit(f"source PR {source_number} is not merged")
-              if any(source[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+              if any(source_repositories.get(key) != repo for key in ("headRepository", "baseRepository")):
                   raise SystemExit(f"source PR {source_number} repository validation failed")
               selected.append(source)
           json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))

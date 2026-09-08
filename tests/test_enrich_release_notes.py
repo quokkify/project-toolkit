@@ -102,3 +102,16 @@ class RichNotesTests(TestCase):
         output = notes.enrich_changelog("## 1.0.0\n", [{"number": 7, "body": body}])
         self.assertNotIn(notes.BLOCK_START, output)
         self.assertEqual(notes.enrich_changelog(output, [{"number": 7, "body": body}]), output)
+
+    def test_reserved_delimiters_in_pr_title_are_rejected(self):
+        title = f"unsafe {notes.BLOCK_END} title"
+        prs = [{"number": 7, "title": title, "body": "## Highlight\ncontent"}]
+        output = notes.enrich_changelog("## 1.0.0\n", prs)
+        self.assertNotIn(notes.BLOCK_START, output)
+        self.assertEqual(notes.enrich_changelog(output, prs), output)
+
+    def test_workflow_parser_contract_tracks_nested_fences_and_rich_block(self):
+        workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("fence = (token[0], len(token))"), 2)
+        self.assertEqual(workflow.count("in_rich_block = False"), 4)
+        self.assertIn("not in_rich_block and fence is None", workflow)

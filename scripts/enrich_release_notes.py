@@ -120,11 +120,12 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         sections = extract_rich_sections(str(pr.get("body", "")))
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
+        title = str(next((p.get("title", "") for p in prs if str(p.get("number", "")).strip() == number), "")).strip()
         if sections and not any(
             marker in value
             for value in sections.values()
             for marker in (BLOCK_START, BLOCK_END)
-        ):
+        ) and not any(marker in title for marker in (BLOCK_START, BLOCK_END)):
             entries.append((int(number), number, sections))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []

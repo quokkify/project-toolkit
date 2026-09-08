@@ -63,7 +63,8 @@ def enrich(changelog, prs):
     entries=[]
     for pr in prs:
         n=str(pr.get("number","")).strip(); body=sections(str(pr.get("body","")))
-        if n.isdigit() and n not in old and body and not any(x in value for value in body.values() for x in (START,END)): entries.append((int(n),n,pr,body))
+        title=str(pr.get("title","")).strip()
+        if n.isdigit() and n not in old and body and not any(x in value for value in body.values() for x in (START,END)) and not any(x in title for x in (START,END)): entries.append((int(n),n,pr,body))
     lines=[]
     for _,n,pr,body in sorted(entries):
         lines += [MARKER.format(number=n)] + (["#### "+str(pr.get("title","")).strip()] if str(pr.get("title","")).strip() else [])
@@ -87,10 +88,12 @@ if __name__ == "__main__":
         entries=[]
         for pr in prs:
             body=sections(str(pr.get("body",""))); n=str(pr.get("number","")).strip()
-            if n.isdigit() and body and not any(x in value for value in body.values() for x in (START,END)): entries.append((int(n),n,pr,body))
+            title=str(pr.get("title","")).strip()
+            if n.isdigit() and body and not any(x in value for value in body.values() for x in (START,END)) and not any(x in title for x in (START,END)): entries.append((int(n),n,pr,body))
         out=[]
         for _,n,pr,body in sorted(entries):
-            out += [MARKER.format(number=n),"#### "+str(pr.get("title","")).strip()]
+            title=str(pr.get("title","")).strip()
+            out += [MARKER.format(number=n)] + (["#### "+title] if title else [])
             for key,heading in RICH_HEADINGS.items():
                 if key in body: out += ["### "+heading,body[key],""]
         a.rich_body.write_text(enrich_body(a.release_body.read_text(encoding="utf-8"),"\n".join(out).rstrip()),encoding="utf-8",newline="\n")

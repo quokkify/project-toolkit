@@ -739,7 +739,7 @@ def seed_single_release_manifest(
         # repositories that publish artifacts elsewhere).  Fall back to the
         # repository's exact SemVer tags, and never accept a template default.
         tags = gh_json_lines(
-            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--jq", ".[].name"],
+            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--jq", "@json"],
             env=env,
         )
         candidates = sorted(

@@ -63,6 +63,15 @@ class DiscoveryTests(TestCase):
 
 
 class SingleManifestSeedingTests(TestCase):
+    def test_tag_fallback_requests_json_lines(self) -> None:
+        with mock.patch.object(fleet, "run") as run_mock:
+            run_mock.return_value = type("Result", (), {"stdout": '"v1.2.3"\n', "stderr": "", "returncode": 0})()
+            self.assertEqual(
+                fleet.gh_json_lines(["api", "repos/x/tags", "--paginate", "--jq", "@json"], env={}),
+                ["v1.2.3"],
+            )
+            self.assertIn("@json", run_mock.call_args.args[0])
+
     def test_seed_uses_highest_exact_semver_tag_when_releases_are_absent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

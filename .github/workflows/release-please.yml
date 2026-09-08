@@ -31,6 +31,10 @@ on:
         description: Enrich the generated release PR from its optional PR-body sections.
         type: boolean
         default: false
+      enrichment-script:
+        description: Repository-relative enrichment script path.
+        type: string
+        default: scripts/enrich_release_notes.py
     outputs:
       releases-created:
         description: "true when this run tagged a release; empty or false otherwise."
@@ -101,6 +105,19 @@ jobs:
             git commit -m "chore(release): enrich release notes"
             git push origin HEAD
           fi
+          gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
+          python - <<'PY'
+          import json, os, re, subprocess
+          body = open("/tmp/release-body.md", encoding="utf-8").read()
+          changelog = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->", changelog)
+          block = match.group(0) if match else ""
+          pattern = r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->"
+          body = re.sub(pattern, block, body) if re.search(pattern, body) else body.rstrip() + ("\n\n" + block if block else "") + "\n"
+          payload = json.dumps({"body": body})
+          number = open("/tmp/release-pr-number", encoding="utf-8").read().strip()
+          subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{os.environ['REPOSITORY']}/pulls/{number}", "--input", "-"], input=payload, text=True, check=True)
+          PY
           gh api -X PATCH "repos/${REPOSITORY}/pulls/$(cat /tmp/release-pr-number)" --input <(python -c 'import json; print(json.dumps({"body":open("/tmp/rich-body.md").read()}))')
 
   manifest:
@@ -142,7 +159,7 @@ jobs:
           open("/tmp/release-pr-number", "w", encoding="utf-8").write(number)
           PY
           gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
-          python .github/scripts/enrich_release_notes.py --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json
+          python "${{ inputs.enrichment-script }}" --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json
           if ! git diff --quiet -- CHANGELOG.md; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -150,3 +167,16 @@ jobs:
             git commit -m "chore(release): enrich release notes"
             git push origin HEAD
           fi
+          gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
+          python - <<'PY'
+          import json, os, re, subprocess
+          body = open("/tmp/release-body.md", encoding="utf-8").read()
+          changelog = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->", changelog)
+          block = match.group(0) if match else ""
+          pattern = r"<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->"
+          body = re.sub(pattern, block, body) if re.search(pattern, body) else body.rstrip() + ("\n\n" + block if block else "") + "\n"
+          payload = json.dumps({"body": body})
+          number = open("/tmp/release-pr-number", encoding="utf-8").read().strip()
+          subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{os.environ['REPOSITORY']}/pulls/{number}", "--input", "-"], input=payload, text=True, check=True)
+          PY

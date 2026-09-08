@@ -1,7 +1,12 @@
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from unittest import TestCase
+from typing import Any, Callable, cast
+from unittest import TestCase, mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("enrich_release_notes", ROOT / "scripts/enrich_release_notes.py")
@@ -11,12 +16,13 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
-    def test_standard_release_please_links_are_supported_by_workflow_contract(self):
+    def test_workflow_delegates_source_discovery_to_the_helper(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
-        self.assertIn(r"\[#(\d+)\]\(https://github\.com/", workflow)
-        self.assertIn('"gh", "api", f"repos/{repo}/pulls/{number}"', workflow)
-        self.assertNotIn('"--json", "headRepository,baseRepository"', workflow)
-        self.assertIn('"--json", "body,title,number,state,mergedAt,headRepository"', workflow)
+        self.assertIn("--prepare", workflow)
+        self.assertIn("--release-prs", workflow)
+        self.assertIn("--repository", workflow)
+        self.assertNotIn("gh pr view", workflow)
+        self.assertNotIn("headRepository,baseRepository", workflow)
 
     def test_extracts_sections_and_preserves_java_fence(self):
         body = "## Description\r\ninternal\r\n## Usage example\r\n```java\r\nVerifier.verify();\r\n```\r\n## Migration\r\n<!-- guidance -->\r\n"
@@ -78,6 +84,19 @@ class RichNotesTests(TestCase):
         self.assertLess(updated.index(notes.BLOCK_START), updated.index("\n---\n"))
         self.assertIn("This PR was generated", updated)
 
+    def test_empty_rich_content_removes_stale_release_body_block(self):
+        body = (
+            ":robot: header\n---\nnotes\n\n"
+            + notes.BLOCK_START
+            + "\nstale\n"
+            + notes.BLOCK_END
+            + "\n---\nThis PR was generated with Release Please.\n"
+        )
+        updated = notes.enrich_release_body(body, "")
+        self.assertNotIn("stale", updated)
+        self.assertNotIn(notes.BLOCK_START, updated)
+        self.assertEqual(notes.enrich_release_body(updated, ""), updated)
+
     def test_duplicate_source_records_render_once(self):
         changelog = "## 1.0.0\n"
         prs = [{"number": 7, "body": "## Highlight\nOne"}] * 2
@@ -101,8 +120,7 @@ class RichNotesTests(TestCase):
 
     def test_legacy_marker_cleanup_in_generated_helper_matches_root(self):
         template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
-        self.assertIn("def _remove_legacy", template)
-        self.assertIn("if not had_block: top=_remove_legacy(top)", template)
+        self.assertEqual(template, (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
 
     def test_nested_fences_require_matching_outer_length(self):
         body = "## Usage example\n````markdown\n```java\n## Migration\n```\n````\n## Migration\nApply it.\n"
@@ -125,8 +143,290 @@ class RichNotesTests(TestCase):
         self.assertNotIn(notes.BLOCK_START, output)
         self.assertEqual(notes.enrich_changelog(output, prs), output)
 
+    def test_legacy_marker_injection_in_title_or_body_is_rejected(self):
+        injected = "<!-- project-toolkit:rich-release-notes pr=999 -->"
+        for pr in (
+            {"number": 7, "title": injected, "body": "## Highlight\ncontent"},
+            {"number": 7, "title": "safe", "body": f"## Highlight\n{injected}"},
+        ):
+            with self.subTest(pr=pr):
+                output = notes.enrich_changelog("## 1.0.0\n", [pr])
+                self.assertNotIn(notes.BLOCK_START, output)
+
     def test_workflow_parser_contract_tracks_nested_fences_and_rich_block(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
-        self.assertEqual(workflow.count("fence = (token[0], len(token))"), 2)
-        self.assertEqual(workflow.count("in_rich_block = False"), 4)
-        self.assertIn("not in_rich_block and fence is None", workflow)
+        self.assertNotIn("python - <<'PY'", workflow)
+        self.assertNotIn("baseRepository", workflow)
+        self.assertNotIn("--slurp", workflow)
+        self.assertEqual(workflow.count("uses: actions/checkout@"), 3)
+        self.assertEqual(workflow.count("name: Prepare enriched release notes"), 1)
+        self.assertIn("ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}", workflow)
+        self.assertIn('python "$ENRICHMENT_SCRIPT" "${arguments[@]}"', workflow)
+
+    def test_standard_attribution_rejects_a_second_pr_like_title_link(self):
+        commit = "a" * 40
+        changelog = (
+            "## 1.2.3\n\n### Features\n"
+            "* title [#99](https://github.com/acme/widget/pull/99) "
+            "([#7](https://github.com/acme/widget/issues/7)) "
+            f"([abcdef0](https://github.com/acme/widget/commit/{commit}))\n"
+        )
+        self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [7])
+
+    def test_source_discovery_ignores_fences_machine_blocks_and_older_versions(self):
+        commit = "b" * 40
+        canonical = (
+            "* valid ([#8](https://github.com/acme/widget/pull/8)) "
+            f"([abcdef1](https://github.com/acme/widget/commit/{commit}))\n"
+        )
+        changelog = (
+            "## 2.0.0\n````md\n```java\n## fake\n```\n````\n"
+            + notes.BLOCK_START
+            + "\n"
+            + canonical.replace("#8", "#9").replace("/8", "/9")
+            + notes.BLOCK_END
+            + "\n"
+            + canonical
+            + "## 1.0.0\n"
+            + canonical.replace("#8", "#10").replace("/8", "/10")
+        )
+        self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [8])
+
+    def test_manifest_discovers_package_local_and_root_relative_changelogs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.json"
+            manifest = root / "manifest.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "changelog-path": "CHANGELOG.md",
+                        "packages": {
+                            "backend": {},
+                            "frontend": {"changelog-path": "docs/NEWS.md"},
+                            "worker": {"changelog-path": "/WORKER.md"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manifest.write_text(
+                json.dumps({"backend": "1.0.0", "frontend": "2.0.0", "worker": "3.0.0"}),
+                encoding="utf-8",
+            )
+            paths = notes.discover_changelog_paths(
+                mode="manifest",
+                package_path=".",
+                config_file=config,
+                manifest_file=manifest,
+                config_backed_single=False,
+            )
+        self.assertEqual(
+            [path.as_posix() for path in paths],
+            ["WORKER.md", "backend/CHANGELOG.md", "frontend/docs/NEWS.md"],
+        )
+
+    def test_legacy_single_path_does_not_require_config(self):
+        paths = notes.discover_changelog_paths(
+            mode="single",
+            package_path="package",
+            config_file=Path("missing-config.json"),
+            manifest_file=Path("missing-manifest.json"),
+            config_backed_single=False,
+        )
+        self.assertEqual(paths, [Path("package/CHANGELOG.md")])
+
+    def test_generated_helper_is_the_same_behavioral_contract(self):
+        generated = ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja"
+        self.assertEqual(generated.read_bytes(), (ROOT / "scripts/enrich_release_notes.py").read_bytes())
+        compile(generated.read_text(encoding="utf-8"), str(generated), "exec")
+
+    def test_generated_release_body_placement_and_rerun_match_root(self):
+        namespace: dict[str, Any] = {"__name__": "generated_helper"}
+        generated = ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja"
+        exec(compile(generated.read_text(encoding="utf-8"), str(generated), "exec"), namespace)
+        body = ":robot: header\n---\nnotes\n---\nThis PR was generated with Release Please.\n"
+        enrich_body = cast(Callable[[str, str], str], namespace["enrich_release_body"])
+        first = enrich_body(body, "### Highlights\nNew")
+        second = enrich_body(first, "### Highlights\nNew")
+        self.assertEqual(first, second)
+        self.assertLess(first.index(notes.BLOCK_START), first.rindex("\n---\n"))
+        self.assertTrue(first.startswith(":robot: header\n---\nnotes"))
+        self.assertTrue(first.endswith("This PR was generated with Release Please.\n"))
+
+    def test_prepare_fails_closed_for_zero_or_multiple_release_prs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release_prs = root / "prs.json"
+            for payload in ([], [{"number": 1}, {"number": 2}]):
+                release_prs.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(notes.EnrichmentError, "exactly one"):
+                    notes.prepare_release_enrichment(
+                        repository="acme/widget",
+                        release_prs_file=release_prs,
+                        mode="single",
+                        package_path=".",
+                        config_file=root / "config.json",
+                        manifest_file=root / "manifest.json",
+                        config_backed_single=False,
+                        output_directory=root / "output",
+                    )
+
+    def test_prepare_rejects_unmerged_or_cross_repository_source_pr(self):
+        release = {
+            "number": 50,
+            "body": "notes",
+            "head": {"repo": {"full_name": "acme/widget"}},
+            "base": {"repo": {"full_name": "acme/widget"}},
+        }
+        source = {
+            "number": 7,
+            "state": "open",
+            "merged_at": None,
+            "title": "source",
+            "body": "## Highlight\nnew",
+            "head": {"repo": {"full_name": "acme/widget"}},
+            "base": {"repo": {"full_name": "acme/widget"}},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text(self._changelog(7), encoding="utf-8")
+            (root / "prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+            with (
+                mock.patch.object(notes, "_run_gh"),
+                mock.patch.object(notes, "_gh_json", side_effect=[release, source]),
+            ):
+                previous = Path.cwd()
+                os.chdir(root)
+                try:
+                    with self.assertRaisesRegex(notes.EnrichmentError, "not merged"):
+                        notes.prepare_release_enrichment(
+                            repository="acme/widget",
+                            release_prs_file=root / "prs.json",
+                            mode="single",
+                            package_path=".",
+                            config_file=root / "config.json",
+                            manifest_file=root / "manifest.json",
+                            config_backed_single=False,
+                            output_directory=root / "output",
+                        )
+                finally:
+                    os.chdir(previous)
+
+    @staticmethod
+    def _changelog(number: int) -> str:
+        commit = (hex(number)[2:] or "a") * 40
+        commit = commit[:40].ljust(40, "a")
+        return (
+            f"## 1.0.{number}\n\n### Features\n* change "
+            f"([#{number}](https://github.com/acme/widget/issues/{number})) "
+            f"([abcdef0](https://github.com/acme/widget/commit/{commit}))\n"
+        )
+
+    def test_end_to_end_manifest_cli_uses_gh_245_shapes_and_places_body(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for package in ("backend", "frontend", "worker"):
+                (root / package).mkdir()
+            for number, package in enumerate(("backend", "frontend", "worker"), 1):
+                (root / package / "CHANGELOG.md").write_text(
+                    self._changelog(number), encoding="utf-8"
+                )
+            (root / "config.json").write_text(
+                json.dumps({"packages": {name: {} for name in ("backend", "frontend", "worker")}}),
+                encoding="utf-8",
+            )
+            (root / "manifest.json").write_text(
+                json.dumps({name: "1.0.0" for name in ("backend", "frontend", "worker")}),
+                encoding="utf-8",
+            )
+            (root / "release-prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+            fake_data = {
+                "50": self._pull_payload(50, body=":robot: header\n---\nGenerated notes\n---\nThis PR was generated with Release Please.\n"),
+                "1": self._pull_payload(1, body="## Highlight\nBackend"),
+                "2": self._pull_payload(2, body="## Usage example\n```js\nrun();\n```"),
+                "3": self._pull_payload(3, body="## Migration\nUpgrade worker"),
+            }
+            data_path = root / "gh-data.json"
+            data_path.write_text(json.dumps(fake_data), encoding="utf-8")
+            log_path = root / "gh-log.jsonl"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_gh = bin_dir / "gh"
+            fake_gh.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "args=sys.argv[1:]\n"
+                "with open(os.environ['FAKE_GH_LOG'],'a') as log: log.write(json.dumps(args)+'\\n')\n"
+                "if args[:1]==['api'] and '/pulls/' in args[1]:\n"
+                " print(json.dumps(json.load(open(os.environ['FAKE_GH_DATA']))[args[1].rsplit('/',1)[1]]))\n"
+                "elif args[:2]==['pr','checkout']: pass\n"
+                "else: print('unsupported fake gh command',file=sys.stderr); sys.exit(2)\n",
+                encoding="utf-8",
+            )
+            fake_gh.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bin_dir}:{env['PATH']}",
+                    "FAKE_GH_DATA": str(data_path),
+                    "FAKE_GH_LOG": str(log_path),
+                }
+            )
+            command = [
+                sys.executable,
+                str(ROOT / "scripts/enrich_release_notes.py"),
+                "--prepare",
+                "--repository",
+                "acme/widget",
+                "--release-prs",
+                "release-prs.json",
+                "--mode",
+                "manifest",
+                "--config-file",
+                "config.json",
+                "--manifest-file",
+                "manifest.json",
+                "--output-directory",
+                "output",
+            ]
+            first = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            snapshot = {
+                path: (root / path).read_text(encoding="utf-8")
+                for path in ("backend/CHANGELOG.md", "frontend/CHANGELOG.md", "worker/CHANGELOG.md")
+            }
+            second = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(
+                snapshot,
+                {path: (root / path).read_text(encoding="utf-8") for path in snapshot},
+            )
+            metadata = json.loads((root / "output/metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["source_prs"], [1, 2, 3])
+            self.assertEqual(metadata["rendered_prs"], [1, 2, 3])
+            for number, path in enumerate(snapshot, 1):
+                self.assertIn(f"rich-release-notes pr={number}", snapshot[path])
+                self.assertEqual(snapshot[path].count("rich-release-notes"), 1)
+            release_body = json.loads(
+                (root / "output/release-body.json").read_text(encoding="utf-8")
+            )["body"]
+            self.assertLess(release_body.index(notes.BLOCK_START), release_body.rindex("\n---\n"))
+            self.assertIn("Backend", release_body)
+            self.assertIn("```js\nrun();\n```", release_body)
+            calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertIn(["pr", "checkout", "50", "--repo", "acme/widget", "--force"], calls)
+            self.assertTrue(all("--slurp" not in call for call in calls))
+            self.assertTrue(all("--json" not in call for call in calls))
+
+    @staticmethod
+    def _pull_payload(number: int, *, body: str) -> dict[str, object]:
+        return {
+            "number": number,
+            "state": "closed",
+            "merged_at": "2026-01-01T00:00:00Z" if number != 50 else None,
+            "title": f"PR {number}",
+            "body": body,
+            "head": {"repo": {"full_name": "acme/widget"}},
+            "base": {"repo": {"full_name": "acme/widget"}},
+        }

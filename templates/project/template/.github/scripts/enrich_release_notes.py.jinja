@@ -1,100 +1,485 @@
-"""Release Please rich-note enrichment used by generated consumers."""
+"""Deterministically enrich Release Please output from selected PR bodies."""
 from __future__ import annotations
-import argparse, json, re
+
+import argparse
+import json
+import re
+import subprocess
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-RICH_HEADINGS={"release notes":"Release notes","highlight":"Highlights","usage example":"Usage Examples","migration":"Migration","breaking change":"Breaking Changes"}
-START="<!-- project-toolkit:rich-block:start -->"
-END="<!-- project-toolkit:rich-block:end -->"
-MARKER="<!-- project-toolkit:rich-release-notes pr={number} -->"
-def sections(body):
-    found={}; current=None; fence=None
-    for line in body.replace("\r\n","\n").replace("\r","\n").splitlines():
-        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
-        if fm:
-            marker=fm.group(1)
-            if fence is None: fence=(marker[0],len(marker))
-            elif marker[0] == fence[0] and len(marker) >= fence[1]: fence=None
-            if current: found[current].append(line)
+from typing import Any
+
+RICH_HEADINGS = {
+    "release notes": "Release notes",
+    "highlight": "Highlights",
+    "usage example": "Usage Examples",
+    "migration": "Migration",
+    "breaking change": "Breaking Changes",
+}
+MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
+MARKER_PREFIX = "<!-- project-toolkit:rich-release-notes "
+BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
+BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
+REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+SAFE_PATH_PATTERN = re.compile(r"[A-Za-z0-9._/-]+")
+
+
+class EnrichmentError(RuntimeError):
+    """Raised when release metadata is unsafe or ambiguous."""
+
+
+def _without_comments(lines: Iterable[str]) -> str:
+    text = "\n".join(lines).strip()
+    return re.sub(r"<!--[\s\S]*?-->", "", text).strip()
+
+
+def extract_rich_sections(body: str) -> dict[str, str]:
+    """Extract supported level-2 sections, retaining Markdown and fences."""
+    result: dict[str, str] = {}
+    current: str | None = None
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    fence: tuple[str, int] | None = None
+    for line in lines:
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
+            if current is not None:
+                result[current] += line + "\n"
             continue
         if fence is not None:
-            if current: found[current].append(line)
+            if current is not None:
+                result[current] += line + "\n"
             continue
-        m=re.match(r"^##[ \t]+([^#].*?)[ \t]*$",line)
-        if m:
-            key=m.group(1).strip().casefold(); current=key if key in RICH_HEADINGS and key not in found else None
-            if current: found[current]=[]
-        elif current: found[current].append(line)
-    return {k:"\n".join(v).strip() for k,v in found.items() if re.sub(r"<!--[\s\S]*?-->","","\n".join(v)).strip()}
-def _remove_legacy(top):
-    output=[]; removing=False; fence=None
-    rich_titles={value.casefold() for value in RICH_HEADINGS.values()}
-    for line in top.splitlines(True):
-        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
-        if fm:
-            token=fm.group(1)
-            if fence is None: fence=(token[0],len(token))
-            elif token[0] == fence[0] and len(token) >= fence[1]: fence=None
-            if not removing: output.append(line)
+        match = re.match(r"^##[ \t]+([^#].*?)[ \t]*$", line)
+        if match:
+            heading = match.group(1).strip().casefold()
+            current = heading if heading in RICH_HEADINGS and heading not in result else None
+            if current is not None:
+                result[current] = ""
             continue
-        if fence is None and re.match(r"^<!-- project-toolkit:rich-release-notes pr=\d+ -->\s*$",line):
-            removing=True; continue
-        if removing and fence is None:
-            heading=re.match(r"^###\s+(.+?)\s*$",line)
-            if (heading and heading.group(1).strip().casefold() not in rich_titles) or re.match(r"^##[ \t]+",line):
-                removing=False
-        if not removing: output.append(line)
-    return "".join(output)
-def enrich(changelog, prs):
-    headings=[]; offset=0; fence=None
-    for line in changelog.splitlines(True):
-        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
-        if fm:
-            marker=fm.group(1)
-            if fence is None: fence=(marker[0],len(marker))
-            elif marker[0] == fence[0] and len(marker) >= fence[1]: fence=None
-        elif fence is None and re.match(r"^##[ \t]+.*$",line): headings.append(offset)
+        if current is not None:
+            result[current] += line + "\n"
+    return {key: value.strip() for key, value in result.items() if _without_comments(value.splitlines())}
+
+
+def _version_ranges(changelog: str) -> list[tuple[int, int]]:
+    lines = changelog.splitlines(keepends=True)
+    offsets: list[int] = []
+    offset = 0
+    fence: tuple[str, int] | None = None
+    for line in lines:
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
+        elif fence is None and re.match(r"^##[ \t]+.*$", line):
+            offsets.append(offset)
         offset += len(line)
-    if not headings: return changelog
-    start=headings[0]; end=headings[1] if len(headings)>1 else len(changelog)
-    top=changelog[start:end]; old=set(re.findall(r"project-toolkit:rich-release-notes pr=(\d+)",changelog[end:]))
-    had_block=START in top
-    top=re.sub(r"\n?"+re.escape(START)+r"[\s\S]*?"+re.escape(END)+r"\n?","",top)
-    if not had_block: top=_remove_legacy(top)
-    entries=[]; seen=set()
+    matches = offsets
+    return [(start, matches[i + 1] if i + 1 < len(matches) else len(changelog)) for i, start in enumerate(matches)]
+
+
+def _rich_numbers(text: str) -> set[str]:
+    return set(re.findall(r"project-toolkit:rich-release-notes pr=([0-9]+)", text))
+
+
+def _remove_legacy_block(top: str) -> str:
+    """Remove marker-only notes without treating fenced headings as boundaries."""
+    output: list[str] = []
+    removing = False
+    fence: tuple[str, int] | None = None
+    for line in top.splitlines(keepends=True):
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            token = fence_match.group(1)
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                fence = None
+            if not removing:
+                output.append(line)
+            continue
+        if fence is None and re.match(r"^<!-- project-toolkit:rich-release-notes pr=\d+ -->\s*$", line):
+            removing = True
+            continue
+        if removing and fence is None:
+            heading = re.match(r"^###\s+(.+?)\s*$", line)
+            if heading and heading.group(1).strip().casefold() not in {value.casefold() for value in RICH_HEADINGS.values()}:
+                removing = False
+            elif re.match(r"^##[ \t]+", line):
+                removing = False
+        if not removing:
+            output.append(line)
+    return "".join(output)
+
+
+def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
+    entries: list[tuple[int, str, dict[str, str]]] = []
+    seen: set[str] = set()
     for pr in prs:
-        n=str(pr.get("number","")).strip(); body=sections(str(pr.get("body","")))
-        title=str(pr.get("title","")).strip()
-        if n.isdigit() and n not in old and n not in seen and body and not any(x in value for value in body.values() for x in (START,END)) and not any(x in title for x in (START,END)):
-            seen.add(n); entries.append((int(n),n,pr,body))
-    lines=[]
-    for _,n,pr,body in sorted(entries):
-        lines += [MARKER.format(number=n)] + (["#### "+str(pr.get("title","")).strip()] if str(pr.get("title","")).strip() else [])
-        for key,heading in RICH_HEADINGS.items():
-            if key in body: lines += ["### "+heading,body[key],""]
-    if not lines: return changelog[:start]+top+changelog[end:]
-    pos=top.find("\n"); pos=len(top) if pos<0 else pos
-    top=top[:pos].rstrip()+"\n\n"+START+"\n"+"\n".join(lines).rstrip()+"\n"+END+"\n\n"+top[pos:].lstrip("\n")
-    return changelog[:start]+top+changelog[end:]
-def enrich_body(body, rich):
-    block=START+"\n"+rich+"\n"+END if rich else ""
-    pattern=re.escape(START)+r"[\s\S]*?"+re.escape(END)
-    if re.search(pattern,body): return re.sub(pattern,block,body)
-    return body.rstrip()+("\n\n"+block if block else "")+"\n"
+        number = str(pr.get("number", "")).strip()
+        if not number.isdigit() or number in excluded or number in seen:
+            continue
+        seen.add(number)
+        sections = extract_rich_sections(str(pr.get("body", "")))
+        # PR bodies are untrusted; reserved delimiters must not be able to
+        # terminate or forge the machine-owned block on a later rerun.
+        title = str(pr.get("title", "")).strip()
+        reserved = (BLOCK_START, BLOCK_END, MARKER_PREFIX)
+        if sections and not any(
+            marker in value
+            for value in sections.values()
+            for marker in reserved
+        ) and not any(marker in title for marker in reserved):
+            entries.append((int(number), title, sections))
+    entries.sort(key=lambda item: item[0])
+    blocks: list[str] = []
+    for number_value, title, sections in entries:
+        number = str(number_value)
+        blocks.append(MARKER.format(number=number))
+        if title:
+            blocks.append(f"#### {title}")
+        for key, heading in RICH_HEADINGS.items():
+            if key in sections:
+                blocks.extend((f"### {heading}", sections[key], ""))
+    return "\n".join(blocks).rstrip()
+
+
+def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str:
+    """Rebuild only the top-version rich block; older releases are immutable."""
+    prs = list(prs)
+    ranges = _version_ranges(changelog)
+    if not ranges:
+        return changelog
+    start, end = ranges[0]
+    top = changelog[start:end]
+    older_numbers = _rich_numbers(changelog[end:])
+    had_block = BLOCK_START in top
+    top = re.sub(r"\n?<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->\n?", "", top)
+    # Compatibility with the original marker-only implementation.
+    if not had_block:
+        top = _remove_legacy_block(top)
+    payload = _render_entries(prs, older_numbers)
+    if payload:
+        heading_end = top.find("\n")
+        if heading_end < 0:
+            heading_end = len(top)
+        prefix = top[:heading_end].rstrip()
+        suffix = top[heading_end:].lstrip("\n")
+        top = prefix + "\n\n" + BLOCK_START + "\n" + payload + "\n" + BLOCK_END + "\n\n" + suffix
+    return changelog[:start] + top + changelog[end:]
+
+
+def enrich_release_body(body: str, rich_markdown: str) -> str:
+    """Replace this tool's body block while preserving all Release Please text."""
+    block = f"{BLOCK_START}\n{rich_markdown}\n{BLOCK_END}" if rich_markdown else ""
+    pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
+    if re.search(pattern, body):
+        return re.sub(pattern, block, body)
+    if not block:
+        return body.rstrip() + "\n"
+    delimiters = list(re.finditer(r"\n---\n", body))
+    if delimiters:
+        footer_delimiter = delimiters[-1]
+        return body[:footer_delimiter.start()] + "\n\n" + block + body[footer_delimiter.start():]
+    return body.rstrip() + "\n\n" + block + "\n"
+
+
+def _safe_relative_path(value: str, *, label: str) -> Path:
+    """Return a repository-relative path that cannot escape the checkout."""
+    if not value or not SAFE_PATH_PATTERN.fullmatch(value):
+        raise EnrichmentError(f"{label} must be a safe repository-relative path")
+    path = Path(value)
+    if path.is_absolute() or any(part in {"", ".."} for part in path.parts):
+        raise EnrichmentError(f"{label} must be a safe repository-relative path")
+    return path
+
+
+def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    """Load a JSON object or fail with release-specific context."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EnrichmentError(f"cannot read {label}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise EnrichmentError(f"{label} must contain a JSON object")
+    return payload
+
+
+def discover_changelog_paths(
+    *,
+    mode: str,
+    package_path: str,
+    config_file: Path,
+    manifest_file: Path,
+    config_backed_single: bool,
+) -> list[Path]:
+    """Derive the changelogs Release Please updates from its actual inputs."""
+    if mode == "single" and not config_backed_single:
+        root = _safe_relative_path(package_path, label="package path")
+        return [Path("CHANGELOG.md") if root == Path(".") else root / "CHANGELOG.md"]
+    if mode not in {"single", "manifest"}:
+        raise EnrichmentError("mode must be single or manifest")
+
+    config = _load_json_object(config_file, label="Release Please config")
+    manifest = _load_json_object(manifest_file, label="Release Please manifest")
+    packages = config.get("packages")
+    if not isinstance(packages, dict) or not packages or not manifest:
+        raise EnrichmentError("Release Please config and manifest must define packages")
+
+    paths: set[Path] = set()
+    for package in manifest:
+        package_config = packages.get(package)
+        if not isinstance(package, str) or not isinstance(package_config, dict):
+            raise EnrichmentError(f"manifest package {package!r} is missing from config")
+        if package_config.get("skip-changelog", config.get("skip-changelog", False)) is True:
+            continue
+        raw_changelog = package_config.get(
+            "changelog-path", config.get("changelog-path", "CHANGELOG.md")
+        )
+        if not isinstance(raw_changelog, str):
+            raise EnrichmentError(f"package {package!r} has an invalid changelog-path")
+        root_relative = raw_changelog.startswith("/")
+        changelog = _safe_relative_path(raw_changelog.lstrip("/"), label="changelog-path")
+        package_root = _safe_relative_path(package, label="manifest package")
+        if package_root != Path(".") and not root_relative:
+            changelog = package_root / changelog
+        paths.add(changelog)
+    if not paths:
+        raise EnrichmentError("Release Please configuration does not produce a changelog")
+    return sorted(paths, key=lambda path: path.as_posix())
+
+
+def source_pr_numbers(changelog: str, repository: str) -> list[int]:
+    """Read only canonical Release Please PR attribution from the top version."""
+    ranges = _version_ranges(changelog)
+    if not ranges:
+        raise EnrichmentError("changelog has no Release Please version section")
+    start, end = ranges[0]
+    top = changelog[start:end]
+    escaped_repository = re.escape(repository)
+    attribution = re.compile(
+        rf"\(\[#(?P<number>[0-9]+)\]\(https://github\.com/{escaped_repository}/"
+        rf"(?:issues|pull)/(?P=number)\)\)\s+"
+        rf"\(\[[0-9a-f]{{7,40}}\]\(https://github\.com/{escaped_repository}/"
+        rf"commit/[0-9a-f]{{40}}\)\)\s*$"
+    )
+    numbers: set[int] = set()
+    fence: tuple[str, int] | None = None
+    in_rich_block = False
+    for line in top.splitlines():
+        if line.strip() == BLOCK_START:
+            in_rich_block = True
+            continue
+        if line.strip() == BLOCK_END:
+            in_rich_block = False
+            continue
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            token = fence_match.group(1)
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                fence = None
+            continue
+        if fence is None and not in_rich_block:
+            match = attribution.search(line)
+            if match:
+                numbers.add(int(match.group("number")))
+    if in_rich_block or fence is not None:
+        raise EnrichmentError("top changelog version contains an unterminated machine block or fence")
+    return sorted(numbers)
+
+
+def _run_gh(arguments: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run GitHub CLI without a shell, preserving its real response contract."""
+    completed = subprocess.run(
+        ["gh", *arguments], text=True, capture_output=True, check=False
+    )
+    if check and completed.returncode:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise EnrichmentError(f"gh {' '.join(arguments)} failed: {detail}")
+    return completed
+
+
+def _gh_json(arguments: list[str]) -> Any:
+    """Run a GitHub CLI command whose stdout is one JSON document."""
+    completed = _run_gh(arguments)
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise EnrichmentError(f"gh {' '.join(arguments)} returned invalid JSON") from exc
+
+
+def _validated_pull_request(payload: Any, repository: str, *, label: str) -> dict[str, Any]:
+    """Validate a merged/same-repository source or same-repository release PR."""
+    if not isinstance(payload, dict):
+        raise EnrichmentError(f"{label} response must be a JSON object")
+    head = payload.get("head")
+    base = payload.get("base")
+    head_repo = head.get("repo") if isinstance(head, dict) else None
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    if not (
+        isinstance(head_repo, dict)
+        and isinstance(base_repo, dict)
+        and head_repo.get("full_name") == repository
+        and base_repo.get("full_name") == repository
+    ):
+        raise EnrichmentError(f"{label} repository validation failed")
+    return payload
+
+
+def prepare_release_enrichment(
+    *,
+    repository: str,
+    release_prs_file: Path,
+    mode: str,
+    package_path: str,
+    config_file: Path,
+    manifest_file: Path,
+    config_backed_single: bool,
+    output_directory: Path,
+) -> dict[str, Any]:
+    """Check out one release PR, enrich its changelogs, and stage API payloads."""
+    if not REPOSITORY_PATTERN.fullmatch(repository):
+        raise EnrichmentError("repository must be exactly owner/name")
+    try:
+        release_prs = json.loads(release_prs_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EnrichmentError(f"cannot read Release Please PR output: {exc}") from exc
+    if not isinstance(release_prs, list) or len(release_prs) != 1:
+        count = len(release_prs) if isinstance(release_prs, list) else "non-list"
+        raise EnrichmentError(f"expected exactly one release PR, got {count}")
+    release_number = release_prs[0].get("number") if isinstance(release_prs[0], dict) else None
+    if not isinstance(release_number, int) or release_number <= 0:
+        raise EnrichmentError("Release Please PR output has no valid number")
+
+    release = _validated_pull_request(
+        _gh_json(["api", f"repos/{repository}/pulls/{release_number}"]),
+        repository,
+        label=f"release PR {release_number}",
+    )
+    _run_gh(["pr", "checkout", str(release_number), "--repo", repository, "--force"])
+
+    changelog_paths = discover_changelog_paths(
+        mode=mode,
+        package_path=package_path,
+        config_file=config_file,
+        manifest_file=manifest_file,
+        config_backed_single=config_backed_single,
+    )
+    numbers_by_path: dict[Path, list[int]] = {}
+    all_numbers: set[int] = set()
+    for changelog_path in changelog_paths:
+        try:
+            changelog = changelog_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise EnrichmentError(f"cannot read generated changelog {changelog_path}: {exc}") from exc
+        numbers = source_pr_numbers(changelog, repository)
+        numbers_by_path[changelog_path] = numbers
+        all_numbers.update(numbers)
+
+    source_prs: dict[int, dict[str, Any]] = {}
+    for number in sorted(all_numbers):
+        source = _validated_pull_request(
+            _gh_json(["api", f"repos/{repository}/pulls/{number}"]),
+            repository,
+            label=f"source PR {number}",
+        )
+        if source.get("state") != "closed" or not source.get("merged_at"):
+            raise EnrichmentError(f"source PR {number} is not merged")
+        if source.get("number") != number:
+            raise EnrichmentError(f"source PR {number} response number does not match")
+        source_prs[number] = {
+            "number": number,
+            "title": str(source.get("title", "")),
+            "body": str(source.get("body") or ""),
+        }
+
+    rendered_numbers: set[int] = set()
+    for changelog_path in changelog_paths:
+        original = changelog_path.read_text(encoding="utf-8")
+        selected = [source_prs[number] for number in numbers_by_path[changelog_path]]
+        updated = enrich_changelog(original, selected)
+        changelog_path.write_text(updated, encoding="utf-8", newline="\n")
+        top = _version_ranges(updated)
+        if top:
+            rendered_numbers.update(
+                int(number) for number in _rich_numbers(updated[top[0][0] : top[0][1]])
+            )
+
+    rich_markdown = _render_entries(
+        [source_prs[number] for number in sorted(rendered_numbers)], set()
+    )
+    release_body = str(release.get("body") or "")
+    updated_body = enrich_release_body(release_body, rich_markdown)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    (output_directory / "changelog-paths.txt").write_text(
+        "".join(f"{path.as_posix()}\n" for path in changelog_paths), encoding="utf-8"
+    )
+    (output_directory / "release-body.json").write_text(
+        json.dumps({"body": updated_body}) + "\n", encoding="utf-8"
+    )
+    metadata = {
+        "release_pr": release_number,
+        "changelogs": [path.as_posix() for path in changelog_paths],
+        "source_prs": sorted(all_numbers),
+        "rendered_prs": sorted(rendered_numbers),
+    }
+    (output_directory / "metadata.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return metadata
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prepare", action="store_true", help="discover and enrich one Release Please PR")
+    parser.add_argument("--repository")
+    parser.add_argument("--release-prs", type=Path)
+    parser.add_argument("--mode", default="single")
+    parser.add_argument("--path", default=".")
+    parser.add_argument("--config-file", type=Path, default=Path(".github/release-please/config.json"))
+    parser.add_argument("--manifest-file", type=Path, default=Path(".github/release-please/manifest.json"))
+    parser.add_argument("--config-backed-single", action="store_true")
+    parser.add_argument("--output-directory", type=Path)
+    parser.add_argument("--changelog", type=Path)
+    parser.add_argument("--pull-requests", type=Path, help="JSON array selected by Release Please")
+    parser.add_argument("--release-body", type=Path)
+    parser.add_argument("--rich-body", type=Path)
+    args = parser.parse_args()
+    if args.prepare:
+        if not args.repository or not args.release_prs or not args.output_directory:
+            parser.error("--prepare requires --repository, --release-prs, and --output-directory")
+        prepare_release_enrichment(
+            repository=args.repository,
+            release_prs_file=args.release_prs,
+            mode=args.mode,
+            package_path=args.path,
+            config_file=args.config_file,
+            manifest_file=args.manifest_file,
+            config_backed_single=args.config_backed_single,
+            output_directory=args.output_directory,
+        )
+        return
+    if not args.changelog or not args.pull_requests:
+        parser.error("legacy mode requires --changelog and --pull-requests")
+    prs = json.loads(args.pull_requests.read_text(encoding="utf-8"))
+    original = args.changelog.read_text(encoding="utf-8")
+    updated = enrich_changelog(original, prs)
+    args.changelog.write_text(updated, encoding="utf-8", newline="\n")
+    if args.release_body and args.rich_body:
+        top = _version_ranges(updated)
+        rich = _render_entries(prs, _rich_numbers(updated[top[0][1]:]) if top else set())
+        args.rich_body.write_text(enrich_release_body(args.release_body.read_text(encoding="utf-8"), rich), encoding="utf-8", newline="\n")
+
+
 if __name__ == "__main__":
-    p=argparse.ArgumentParser(); p.add_argument("--changelog",type=Path,required=True); p.add_argument("--pull-requests",type=Path,required=True); p.add_argument("--release-body",type=Path); p.add_argument("--rich-body",type=Path); a=p.parse_args()
-    prs=json.loads(a.pull_requests.read_text(encoding="utf-8"))
-    updated=enrich(a.changelog.read_text(encoding="utf-8"),prs)
-    a.changelog.write_text(updated,encoding="utf-8",newline="\n")
-    if a.release_body and a.rich_body:
-        entries=[]
-        for pr in prs:
-            body=sections(str(pr.get("body",""))); n=str(pr.get("number","")).strip()
-            title=str(pr.get("title","")).strip()
-            if n.isdigit() and body and not any(x in value for value in body.values() for x in (START,END)) and not any(x in title for x in (START,END)): entries.append((int(n),n,pr,body))
-        out=[]
-        for _,n,pr,body in sorted(entries):
-            title=str(pr.get("title","")).strip()
-            out += [MARKER.format(number=n)] + (["#### "+title] if title else [])
-            for key,heading in RICH_HEADINGS.items():
-                if key in body: out += ["### "+heading,body[key],""]
-        a.rich_body.write_text(enrich_body(a.release_body.read_text(encoding="utf-8"),"\n".join(out).rstrip()),encoding="utf-8",newline="\n")
+    main()

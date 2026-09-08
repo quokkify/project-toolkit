@@ -715,7 +715,12 @@ def seed_single_release_manifest(
     """Seed the root manifest from an existing stable release, never 0.1.0."""
     answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
     manifest = repository_path / ".github/release-please/manifest.json"
-    if answers.get("release_please") is not True or manifest.exists():
+    release_mode = answers.get("release_mode", "single")
+    if (
+        answers.get("release_please") is not True
+        or release_mode != "single"
+        or manifest.exists()
+    ):
         return
     if not (repository_path / ".github/workflows/release.yml").is_file():
         return

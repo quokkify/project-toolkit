@@ -1,0 +1,39 @@
+"""Release Please rich-note enrichment used by generated consumers."""
+from __future__ import annotations
+import argparse, json, re
+from pathlib import Path
+RICH_HEADINGS={"release notes":"Release notes","highlight":"Highlights","usage example":"Usage Examples","migration":"Migration","breaking change":"Breaking Changes"}
+START="<!-- project-toolkit:rich-block:start -->"
+END="<!-- project-toolkit:rich-block:end -->"
+MARKER="<!-- project-toolkit:rich-release-notes pr={number} -->"
+def sections(body):
+    found={}; current=None
+    for line in body.replace("\r\n","\n").replace("\r","\n").splitlines():
+        m=re.match(r"^##[ \t]+([^#].*?)[ \t]*$",line)
+        if m:
+            key=m.group(1).strip().casefold(); current=key if key in RICH_HEADINGS and key not in found else None
+            if current: found[current]=[]
+        elif current: found[current].append(line)
+    return {k:"\n".join(v).strip() for k,v in found.items() if re.sub(r"<!--[\s\S]*?-->","","\n".join(v)).strip()}
+def enrich(changelog, prs):
+    headings=list(re.finditer(r"^##[ \t]+.*$",changelog,re.M))
+    if not headings: return changelog
+    start=headings[0].start(); end=headings[1].start() if len(headings)>1 else len(changelog)
+    top=changelog[start:end]; old=set(re.findall(r"project-toolkit:rich-release-notes pr=(\d+)",changelog[end:]))
+    top=re.sub(r"\n?"+re.escape(START)+r"[\s\S]*?"+re.escape(END)+r"\n?","",top)
+    entries=[]
+    for pr in prs:
+        n=str(pr.get("number","")).strip(); body=sections(str(pr.get("body","")))
+        if n.isdigit() and n not in old and body: entries.append((int(n),n,pr,body))
+    lines=[]
+    for _,n,pr,body in sorted(entries):
+        lines += [MARKER.format(number=n)] + (["#### "+str(pr.get("title","")).strip()] if str(pr.get("title","")).strip() else [])
+        for key,heading in RICH_HEADINGS.items():
+            if key in body: lines += ["### "+heading,body[key],""]
+    if not lines: return changelog
+    pos=top.find("\n"); pos=len(top) if pos<0 else pos
+    top=top[:pos].rstrip()+"\n\n"+START+"\n"+"\n".join(lines).rstrip()+"\n"+END+"\n\n"+top[pos:].lstrip("\n")
+    return changelog[:start]+top+changelog[end:]
+if __name__ == "__main__":
+    p=argparse.ArgumentParser(); p.add_argument("--changelog",type=Path,required=True); p.add_argument("--pull-requests",type=Path,required=True); a=p.parse_args()
+    a.changelog.write_text(enrich(a.changelog.read_text(encoding="utf-8"),json.loads(a.pull_requests.read_text(encoding="utf-8"))),encoding="utf-8",newline="\n")

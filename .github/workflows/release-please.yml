@@ -27,6 +27,10 @@ on:
         description: Branch Release Please should target; empty uses repository default.
         type: string
         default: ""
+      enrich-release-notes:
+        description: Enrich the generated release PR from its optional PR-body sections.
+        type: boolean
+        default: false
     outputs:
       releases-created:
         description: "true when this run tagged a release; empty or false otherwise."
@@ -48,8 +52,8 @@ jobs:
       - name: Validate mode
         env:
           MODE: ${{ inputs.mode }}
-        run: |
-          [[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }
+        run: '[[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }'
+
   single:
     if: ${{ inputs.mode == 'single' }}
     needs: validate
@@ -65,14 +69,46 @@ jobs:
           release-type: ${{ inputs.release-type }}
           path: ${{ inputs.path }}
           target-branch: ${{ inputs.target-branch }}
+      - name: Enrich release PR
+        if: ${{ inputs.enrich-release-notes && steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess
+          prs = json.loads(os.environ["RELEASE_PRS"])
+          if len(prs) != 1:
+              raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
+          number = str(prs[0]["number"])
+          details = json.loads(subprocess.check_output(["gh", "pr", "view", number, "--json", "headRepository,baseRepository"], text=True))
+          repo = os.environ["REPOSITORY"]
+          if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+              raise SystemExit("release PR repository validation failed")
+          subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
+          selected = [json.loads(subprocess.check_output(["gh", "pr", "view", str(pr["number"]), "--json", "body,title,number"], text=True)) for pr in prs]
+          json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))
+          open("/tmp/release-pr-number", "w", encoding="utf-8").write(number)
+          PY
+          gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
+          python scripts/enrich_release_notes.py --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json --release-body /tmp/release-body.md --rich-body /tmp/rich-body.md
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add CHANGELOG.md
+            git commit -m "chore(release): enrich release notes"
+            git push origin HEAD
+          fi
+          gh api -X PATCH "repos/${REPOSITORY}/pulls/$(cat /tmp/release-pr-number)" --input <(python -c 'import json; print(json.dumps({"body":open("/tmp/rich-body.md").read()}))')
+
   manifest:
     if: ${{ inputs.mode == 'manifest' }}
     needs: validate
     runs-on: ubuntu-latest
     outputs:
       releases-created: ${{ steps.release.outputs.releases_created }}
-      # Manifest mode prefixes per-package outputs with the package path, so a
-      # root-only manifest exposes the tag as `.--tag_name`.
       tag-name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
     steps:
       - name: Run Release Please in manifest mode
@@ -82,3 +118,35 @@ jobs:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           target-branch: ${{ inputs.target-branch }}
+      - name: Enrich release PR
+        if: ${{ inputs.enrich-release-notes && steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess
+          prs = json.loads(os.environ["RELEASE_PRS"])
+          if len(prs) != 1:
+              raise SystemExit(f"expected exactly one release PR, got {len(prs)}")
+          number = str(prs[0]["number"])
+          details = json.loads(subprocess.check_output(["gh", "pr", "view", number, "--json", "headRepository,baseRepository"], text=True))
+          repo = os.environ["REPOSITORY"]
+          if any(details[key]["nameWithOwner"] != repo for key in ("headRepository", "baseRepository")):
+              raise SystemExit("release PR repository validation failed")
+          subprocess.run(["gh", "pr", "checkout", number, "--force"], check=True)
+          selected = [json.loads(subprocess.check_output(["gh", "pr", "view", str(pr["number"]), "--json", "body,title,number"], text=True)) for pr in prs]
+          json.dump(selected, open("/tmp/release-prs.json", "w", encoding="utf-8"))
+          open("/tmp/release-pr-number", "w", encoding="utf-8").write(number)
+          PY
+          gh pr view "$(cat /tmp/release-pr-number)" --json body --jq .body > /tmp/release-body.md
+          python .github/scripts/enrich_release_notes.py --changelog CHANGELOG.md --pull-requests /tmp/release-prs.json
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add CHANGELOG.md
+            git commit -m "chore(release): enrich release notes"
+            git push origin HEAD
+          fi

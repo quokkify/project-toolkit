@@ -1,9 +1,4 @@
-"""Enrich Release Please Markdown from optional pull-request body sections.
-
-This module deliberately has no GitHub or shell integration. The release workflow
-can feed it the PRs Release Please selected, keeping selection/versioning owned by
-Release Please while making the Markdown transformation deterministic and testable.
-"""
+"""Deterministically enrich Release Please output from selected PR bodies."""
 from __future__ import annotations
 
 import argparse
@@ -20,24 +15,17 @@ RICH_HEADINGS = {
     "breaking change": "Breaking Changes",
 }
 MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
-_VERSION = re.compile(r"^##(?:\s+|\s*\[)(.+?)(?:\]|\s*)$", re.IGNORECASE)
+BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
+BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
 
 
 def _without_comments(lines: Iterable[str]) -> str:
     text = "\n".join(lines).strip()
-    # Comments are authoring guidance, not release content. Do not remove code
-    # fences or HTML which may be intentional content in an example.
-    text = re.sub(r"<!--[\s\S]*?-->", "", text)
-    return text.strip()
+    return re.sub(r"<!--[\s\S]*?-->", "", text).strip()
 
 
 def extract_rich_sections(body: str) -> dict[str, str]:
-    """Extract supported level-2 sections from a PR body.
-
-    Only exact ``## Heading`` lines are recognized. Unknown headings terminate a
-    section, duplicate supported headings are ignored after the first, and all
-    source lines are retained (including CRLF-normalized fence content).
-    """
+    """Extract supported level-2 sections, retaining Markdown and fences."""
     result: dict[str, str] = {}
     current: str | None = None
     lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -54,56 +42,86 @@ def extract_rich_sections(body: str) -> dict[str, str]:
     return {key: value.strip() for key, value in result.items() if _without_comments(value.splitlines())}
 
 
-def _existing_pr_numbers(changelog: str) -> set[str]:
-    return set(re.findall(r"project-toolkit:rich-release-notes pr=([0-9]+)", changelog))
+def _version_ranges(changelog: str) -> list[tuple[int, int]]:
+    matches = list(re.finditer(r"^##[ \t]+.*$", changelog, re.MULTILINE))
+    return [(m.start(), matches[i + 1].start() if i + 1 < len(matches) else len(changelog)) for i, m in enumerate(matches)]
 
 
-def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str:
-    """Insert rich content for selected PRs, once, immediately under the version.
+def _rich_numbers(text: str) -> set[str]:
+    return set(re.findall(r"project-toolkit:rich-release-notes pr=([0-9]+)", text))
 
-    ``prs`` must already be the current Release Please range. The function does
-    not query GitHub and therefore cannot accidentally include unrelated or old
-    PRs. Entries are ordered by numeric PR number and stable section order.
-    """
-    prs = list(prs)
-    existing = _existing_pr_numbers(changelog)
-    titles = {str(pr.get("number", "")): str(pr.get("title", "")).strip() for pr in prs}
+
+def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
     entries: list[tuple[int, str, dict[str, str]]] = []
     for pr in prs:
         number = str(pr.get("number", "")).strip()
-        if not number.isdigit() or number in existing:
+        if not number.isdigit() or number in excluded:
             continue
         sections = extract_rich_sections(str(pr.get("body", "")))
         if sections:
             entries.append((int(number), number, sections))
-    if not entries:
-        return changelog
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
     for _, number, sections in entries:
         blocks.append(MARKER.format(number=number))
-        title = titles.get(number, "")
+        title = str(next((p.get("title", "") for p in prs if str(p.get("number", "")).strip() == number), "")).strip()
         if title:
             blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():
             if key in sections:
                 blocks.extend((f"### {heading}", sections[key], ""))
-    payload = "\n".join(blocks).rstrip() + "\n\n"
-    version_match = re.search(r"^## .*$", changelog, re.MULTILINE)
-    if not version_match:
-        return changelog.rstrip() + "\n\n" + payload
-    end = version_match.end()
-    return changelog[:end] + "\n\n" + payload + changelog[end + 1 :]
+    return "\n".join(blocks).rstrip()
+
+
+def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str:
+    """Rebuild only the top-version rich block; older releases are immutable."""
+    prs = list(prs)
+    ranges = _version_ranges(changelog)
+    if not ranges:
+        return changelog
+    start, end = ranges[0]
+    top = changelog[start:end]
+    older_numbers = _rich_numbers(changelog[end:])
+    had_block = BLOCK_START in top
+    top = re.sub(r"\n?<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->\n?", "", top)
+    # Compatibility with the original marker-only implementation.
+    if not had_block:
+        top = re.sub(r"\n?<!-- project-toolkit:rich-release-notes pr=\d+ -->[\s\S]*?(?=\n(?:### |## )|\Z)", "\n", top)
+    payload = _render_entries(prs, older_numbers)
+    if payload:
+        heading_end = top.find("\n")
+        if heading_end < 0:
+            heading_end = len(top)
+        prefix = top[:heading_end].rstrip()
+        suffix = top[heading_end:].lstrip("\n")
+        top = prefix + "\n\n" + BLOCK_START + "\n" + payload + "\n" + BLOCK_END + "\n\n" + suffix
+    return changelog[:start] + top + changelog[end:]
+
+
+def enrich_release_body(body: str, rich_markdown: str) -> str:
+    """Replace this tool's body block while preserving all Release Please text."""
+    block = f"{BLOCK_START}\n{rich_markdown}\n{BLOCK_END}" if rich_markdown else ""
+    pattern = rf"{re.escape(BLOCK_START)}[\\s\\S]*?{re.escape(BLOCK_END)}"
+    if re.search(pattern, body):
+        return re.sub(pattern, block, body)
+    return body.rstrip() + ("\n\n" + block if block else "") + "\n"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--changelog", type=Path, required=True)
-    parser.add_argument("--pull-requests", type=Path, required=True, help="JSON array of selected Release Please PRs")
+    parser.add_argument("--pull-requests", type=Path, required=True, help="JSON array selected by Release Please")
+    parser.add_argument("--release-body", type=Path)
+    parser.add_argument("--rich-body", type=Path)
     args = parser.parse_args()
     prs = json.loads(args.pull_requests.read_text(encoding="utf-8"))
-    updated = enrich_changelog(args.changelog.read_text(encoding="utf-8"), prs)
+    original = args.changelog.read_text(encoding="utf-8")
+    updated = enrich_changelog(original, prs)
     args.changelog.write_text(updated, encoding="utf-8", newline="\n")
+    if args.release_body and args.rich_body:
+        top = _version_ranges(updated)
+        rich = _render_entries(prs, _rich_numbers(updated[top[0][1]:]) if top else set())
+        args.rich_body.write_text(enrich_release_body(args.release_body.read_text(encoding="utf-8"), rich), encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

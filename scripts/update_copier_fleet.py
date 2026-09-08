@@ -718,10 +718,33 @@ def seed_single_release_manifest(
         and item.get("isLatest") is True
         and RELEASE_TAG_PATTERN.fullmatch(item["tagName"])
     ]
-    if len(stable) != 1:
-        raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous or missing")
+    if len(stable) > 1:
+        raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous")
+    if len(stable) == 1:
+        tag_name = stable[0]["tagName"]
+    else:
+        # GitHub Releases can be absent for a valid stable tag (for example
+        # repositories that publish artifacts elsewhere).  Fall back to the
+        # repository's exact SemVer tags, and never accept a template default.
+        tags = gh_json(
+            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--slurp", "--jq", "[.[].name]"],
+            env=env,
+        )
+        if not isinstance(tags, list):
+            tags = []
+        candidates = sorted(
+            {
+                tag for tag in tags
+                if isinstance(tag, str) and RELEASE_TAG_PATTERN.fullmatch(tag)
+            },
+            key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
+            reverse=True,
+        )
+        if not candidates:
+            raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous or missing")
+        tag_name = candidates[0]
     manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(json.dumps({".": stable[0]["tagName"][1:]}, indent=2) + "\n", encoding="utf-8")
+    manifest.write_text(json.dumps({".": tag_name[1:]}, indent=2) + "\n", encoding="utf-8")
 
 
 def update_template(

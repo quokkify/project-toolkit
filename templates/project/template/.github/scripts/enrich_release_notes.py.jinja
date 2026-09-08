@@ -7,8 +7,7 @@ START="<!-- project-toolkit:rich-block:start -->"
 END="<!-- project-toolkit:rich-block:end -->"
 MARKER="<!-- project-toolkit:rich-release-notes pr={number} -->"
 def sections(body):
-    found={}; current=None
-    fence=None
+    found={}; current=None; fence=None
     for line in body.replace("\r\n","\n").replace("\r","\n").splitlines():
         fm=re.match(r"^\s*(`{3,}|~{3,})",line)
         if fm:
@@ -26,6 +25,25 @@ def sections(body):
             if current: found[current]=[]
         elif current: found[current].append(line)
     return {k:"\n".join(v).strip() for k,v in found.items() if re.sub(r"<!--[\s\S]*?-->","","\n".join(v)).strip()}
+def _remove_legacy(top):
+    output=[]; removing=False; fence=None
+    rich_titles={value.casefold() for value in RICH_HEADINGS.values()}
+    for line in top.splitlines(True):
+        fm=re.match(r"^\s*(`{3,}|~{3,})",line)
+        if fm:
+            token=fm.group(1)[0]
+            if fence is None: fence=token
+            elif token == fence: fence=None
+            if not removing: output.append(line)
+            continue
+        if fence is None and re.match(r"^<!-- project-toolkit:rich-release-notes pr=\d+ -->\s*$",line):
+            removing=True; continue
+        if removing and fence is None:
+            heading=re.match(r"^###\s+(.+?)\s*$",line)
+            if (heading and heading.group(1).strip().casefold() not in rich_titles) or re.match(r"^##[ \t]+",line):
+                removing=False
+        if not removing: output.append(line)
+    return "".join(output)
 def enrich(changelog, prs):
     headings=[]; offset=0; fence=None
     for line in changelog.splitlines(True):
@@ -39,7 +57,9 @@ def enrich(changelog, prs):
     if not headings: return changelog
     start=headings[0]; end=headings[1] if len(headings)>1 else len(changelog)
     top=changelog[start:end]; old=set(re.findall(r"project-toolkit:rich-release-notes pr=(\d+)",changelog[end:]))
+    had_block=START in top
     top=re.sub(r"\n?"+re.escape(START)+r"[\s\S]*?"+re.escape(END)+r"\n?","",top)
+    if not had_block: top=_remove_legacy(top)
     entries=[]
     for pr in prs:
         n=str(pr.get("number","")).strip(); body=sections(str(pr.get("body","")))
@@ -60,10 +80,11 @@ def enrich_body(body, rich):
     return body.rstrip()+("\n\n"+block if block else "")+"\n"
 if __name__ == "__main__":
     p=argparse.ArgumentParser(); p.add_argument("--changelog",type=Path,required=True); p.add_argument("--pull-requests",type=Path,required=True); p.add_argument("--release-body",type=Path); p.add_argument("--rich-body",type=Path); a=p.parse_args()
-    updated=enrich(a.changelog.read_text(encoding="utf-8"),json.loads(a.pull_requests.read_text(encoding="utf-8")))
+    prs=json.loads(a.pull_requests.read_text(encoding="utf-8"))
+    updated=enrich(a.changelog.read_text(encoding="utf-8"),prs)
     a.changelog.write_text(updated,encoding="utf-8",newline="\n")
     if a.release_body and a.rich_body:
-        prs=json.loads(a.pull_requests.read_text(encoding="utf-8")); entries=[]
+        entries=[]
         for pr in prs:
             body=sections(str(pr.get("body",""))); n=str(pr.get("number","")).strip()
             if n.isdigit() and body: entries.append((int(n),n,pr,body))

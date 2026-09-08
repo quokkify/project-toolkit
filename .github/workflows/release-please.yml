@@ -105,14 +105,19 @@ jobs:
           in_top = fenced = False
           source_numbers = []
           for line in lines:
-              if not fenced and line.startswith("## "):
+              if line.startswith(("```", "~~~")):
+                  fenced = not fenced
+              elif not fenced and line.startswith("## "):
                   if in_top:
                       break
                   in_top = True
-              elif in_top and line.startswith(("```", "~~~")):
-                  fenced = not fenced
               elif in_top and not fenced:
-                  source_numbers.extend(re.findall(r"\(#(\d+)\)", line))
+                  source_numbers.extend(
+                      number
+                      for match in re.findall(r"(?:\(#(\d+)\)|\[#(\d+)\]\([^)]*\))", line)
+                      for number in match
+                      if number
+                  )
           selected = []
           for source_number in sorted(set(source_numbers), key=int):
               source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))
@@ -177,14 +182,19 @@ jobs:
           in_top = fenced = False
           source_numbers = []
           for line in lines:
-              if not fenced and line.startswith("## "):
+              if line.startswith(("```", "~~~")):
+                  fenced = not fenced
+              elif not fenced and line.startswith("## "):
                   if in_top:
                       break
                   in_top = True
-              elif in_top and line.startswith(("```", "~~~")):
-                  fenced = not fenced
               elif in_top and not fenced:
-                  source_numbers.extend(re.findall(r"\(#(\d+)\)", line))
+                  source_numbers.extend(
+                      number
+                      for match in re.findall(r"(?:\(#(\d+)\)|\[#(\d+)\]\([^)]*\))", line)
+                      for number in match
+                      if number
+                  )
           selected = []
           for source_number in sorted(set(source_numbers), key=int):
               source = json.loads(subprocess.check_output(["gh", "pr", "view", source_number, "--json", "body,title,number,state,mergedAt,headRepository,baseRepository"], text=True))

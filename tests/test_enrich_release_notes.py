@@ -11,6 +11,10 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
+    def test_standard_release_please_links_are_supported_by_workflow_contract(self):
+        workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
+        self.assertIn(r"\[#(\d+)\]\([^)]*\)", workflow)
+
     def test_extracts_sections_and_preserves_java_fence(self):
         body = "## Description\r\ninternal\r\n## Usage example\r\n```java\r\nVerifier.verify();\r\n```\r\n## Migration\r\n<!-- guidance -->\r\n"
         sections = notes.extract_rich_sections(body)
@@ -79,3 +83,8 @@ class RichNotesTests(TestCase):
         updated = notes.enrich_changelog(changelog, [])
         self.assertNotIn("old", updated)
         self.assertIn("### Features", updated)
+
+    def test_legacy_marker_cleanup_in_generated_helper_matches_root(self):
+        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
+        self.assertIn("def _remove_legacy", template)
+        self.assertIn("if not had_block: top=_remove_legacy(top)", template)

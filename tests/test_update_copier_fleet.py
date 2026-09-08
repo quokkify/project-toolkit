@@ -62,6 +62,33 @@ class DiscoveryTests(TestCase):
         self.assertEqual([repo.name_with_owner for repo in discovered], ["quokkify/public-example"])
 
 
+class SingleManifestSeedingTests(TestCase):
+    def test_seed_uses_highest_exact_semver_tag_when_releases_are_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text("release_please: true\n", encoding="utf-8")
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n", encoding="utf-8")
+            repository = fleet.Repository("quokkify/example", "main")
+            with mock.patch.object(fleet, "gh_json", side_effect=[[], ["v1.2.3", "v1.10.0", "not-a-version"]]):
+                fleet.seed_single_release_manifest(root, repository, env={})
+            self.assertEqual(
+                json.loads((root / ".github/release-please/manifest.json").read_text()),
+                {".": "1.10.0"},
+            )
+
+    def test_seed_fails_closed_on_ambiguous_stable_releases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text("release_please: true\n", encoding="utf-8")
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n", encoding="utf-8")
+            releases = [{"tagName": "v1.0.0", "isLatest": True}, {"tagName": "v2.0.0", "isLatest": True}]
+            with mock.patch.object(fleet, "gh_json", return_value=releases):
+                with self.assertRaisesRegex(fleet.FleetUpdateError, "ambiguous"):
+                    fleet.seed_single_release_manifest(root, fleet.Repository("quokkify/example", "main"), env={})
+
+
 class ProjectOwnedToolkitRefTests(TestCase):
     """The generated contract requires every toolkit reference to match toolkit_version."""
 

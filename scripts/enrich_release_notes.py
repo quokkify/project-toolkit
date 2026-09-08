@@ -81,6 +81,36 @@ def _rich_numbers(text: str) -> set[str]:
     return set(re.findall(r"project-toolkit:rich-release-notes pr=([0-9]+)", text))
 
 
+def _remove_legacy_block(top: str) -> str:
+    """Remove marker-only notes without treating fenced headings as boundaries."""
+    output: list[str] = []
+    removing = False
+    fence: str | None = None
+    for line in top.splitlines(keepends=True):
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            token = fence_match.group(1)[0]
+            if fence is None:
+                fence = token
+            elif token == fence:
+                fence = None
+            if not removing:
+                output.append(line)
+            continue
+        if fence is None and re.match(r"^<!-- project-toolkit:rich-release-notes pr=\d+ -->\s*$", line):
+            removing = True
+            continue
+        if removing and fence is None:
+            heading = re.match(r"^###\s+(.+?)\s*$", line)
+            if heading and heading.group(1).strip().casefold() not in {value.casefold() for value in RICH_HEADINGS.values()}:
+                removing = False
+            elif re.match(r"^##[ \t]+", line):
+                removing = False
+        if not removing:
+            output.append(line)
+    return "".join(output)
+
+
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
     entries: list[tuple[int, str, dict[str, str]]] = []
     for pr in prs:
@@ -116,7 +146,7 @@ def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str
     top = re.sub(r"\n?<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->\n?", "", top)
     # Compatibility with the original marker-only implementation.
     if not had_block:
-        top = re.sub(r"\n?<!-- project-toolkit:rich-release-notes pr=\d+ -->[\s\S]*?(?=\n(?:### |## )|\Z)", "\n", top)
+        top = _remove_legacy_block(top)
     payload = _render_entries(prs, older_numbers)
     if payload:
         heading_end = top.find("\n")

@@ -49,7 +49,7 @@ def enrich(changelog, prs):
         lines += [MARKER.format(number=n)] + (["#### "+str(pr.get("title","")).strip()] if str(pr.get("title","")).strip() else [])
         for key,heading in RICH_HEADINGS.items():
             if key in body: lines += ["### "+heading,body[key],""]
-    if not lines: return changelog
+    if not lines: return changelog[:start]+top+changelog[end:]
     pos=top.find("\n"); pos=len(top) if pos<0 else pos
     top=top[:pos].rstrip()+"\n\n"+START+"\n"+"\n".join(lines).rstrip()+"\n"+END+"\n\n"+top[pos:].lstrip("\n")
     return changelog[:start]+top+changelog[end:]

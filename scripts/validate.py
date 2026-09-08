@@ -2547,8 +2547,13 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     single_release = (single_release_dest / ".github/workflows/release.yml").read_text()
     check("mode: single" in single_release, "the default release mode must stay single")
     check(
-        "manifest-file:" not in single_release,
-        "single release mode must not emit manifest inputs",
+        "config-file: .github/release-please/config.json" in single_release
+        and "manifest-file: .github/release-please/manifest.json" in single_release,
+        "single release mode must use the config-backed root manifest",
+    )
+    check(
+        "config-backed-single: true" in single_release,
+        "single release mode must opt into config-backed workflow inputs",
     )
 
     invalid_release_data = tmp_path / "invalid-release-mode.yml"

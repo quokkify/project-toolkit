@@ -64,3 +64,18 @@ class RichNotesTests(TestCase):
         self.assertEqual(updated.count(notes.BLOCK_START), 1)
         self.assertIn("new", updated)
         self.assertNotIn("old", updated)
+
+    def test_empty_sources_remove_existing_block(self):
+        changelog = "## 1.0.0\n\n" + notes.BLOCK_START + "\nold\n" + notes.BLOCK_END + "\n\n### Features\n- x\n"
+        updated = notes.enrich_changelog(changelog, [])
+        self.assertNotIn(notes.BLOCK_START, updated)
+        self.assertIn("### Features", updated)
+
+    def test_legacy_marker_cleanup_preserves_fenced_headings(self):
+        changelog = (
+            "## 1.0.0\n\n<!-- project-toolkit:rich-release-notes pr=1 -->\n"
+            "### Highlights\nold\n```md\n### Keep this\n```\n### Features\n- normal\n"
+        )
+        updated = notes.enrich_changelog(changelog, [])
+        self.assertNotIn("old", updated)
+        self.assertIn("### Features", updated)

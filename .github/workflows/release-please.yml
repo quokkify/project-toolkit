@@ -23,6 +23,10 @@ on:
         description: Release Please manifest path.
         type: string
         default: .github/release-please/manifest.json
+      config-backed-single:
+        description: Use root config/manifest for generated single-package consumers.
+        type: boolean
+        default: false
       target-branch:
         description: Branch Release Please should target; empty uses repository default.
         type: string
@@ -72,8 +76,10 @@ jobs:
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          release-type: ${{ inputs.release-type }}
-          path: ${{ inputs.path }}
+          release-type: ${{ inputs.config-backed-single && '' || inputs.release-type }}
+          path: ${{ inputs.config-backed-single && '' || inputs.path }}
+          config-file: ${{ inputs.config-backed-single && inputs.config-file || '' }}
+          manifest-file: ${{ inputs.config-backed-single && inputs.manifest-file || '' }}
           target-branch: ${{ inputs.target-branch }}
       - name: Enrich release PR
         if: ${{ inputs.enrich-release-notes && steps.release.outputs.prs_created == 'true' }}
@@ -99,7 +105,7 @@ jobs:
           in_top = fenced = False
           source_numbers = []
           for line in lines:
-              if line.startswith("## "):
+              if not fenced and line.startswith("## "):
                   if in_top:
                       break
                   in_top = True
@@ -171,7 +177,7 @@ jobs:
           in_top = fenced = False
           source_numbers = []
           for line in lines:
-              if line.startswith("## "):
+              if not fenced and line.startswith("## "):
                   if in_top:
                       break
                   in_top = True

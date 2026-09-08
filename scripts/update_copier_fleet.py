@@ -172,6 +172,18 @@ def gh_json(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
 
 
+def gh_json_lines(arguments: Sequence[str], *, env: dict[str, str]) -> list[Any]:
+    """Read one JSON value per line, including paginated gh API output."""
+    completed = run(["gh", *arguments], env=env)
+    values: list[Any] = []
+    for line in completed.stdout.splitlines():
+        try:
+            values.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
+    return values
+
+
 def resolve_template_ref(
     template_repository: str,
     requested_ref: str | None,
@@ -726,12 +738,10 @@ def seed_single_release_manifest(
         # GitHub Releases can be absent for a valid stable tag (for example
         # repositories that publish artifacts elsewhere).  Fall back to the
         # repository's exact SemVer tags, and never accept a template default.
-        tags = gh_json(
-            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--slurp", "--jq", "[.[].name]"],
+        tags = gh_json_lines(
+            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--jq", ".[].name"],
             env=env,
         )
-        if not isinstance(tags, list):
-            tags = []
         candidates = sorted(
             {
                 tag for tag in tags

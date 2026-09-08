@@ -70,7 +70,9 @@ class SingleManifestSeedingTests(TestCase):
             (root / ".github/workflows").mkdir(parents=True)
             (root / ".github/workflows/release.yml").write_text("name: release\n", encoding="utf-8")
             repository = fleet.Repository("quokkify/example", "main")
-            with mock.patch.object(fleet, "gh_json", side_effect=[[], ["v1.2.3", "v1.10.0", "not-a-version"]]):
+            with mock.patch.object(fleet, "gh_json", return_value=[]), mock.patch.object(
+                fleet, "gh_json_lines", return_value=["v1.2.3", "v1.10.0", "not-a-version"]
+            ):
                 fleet.seed_single_release_manifest(root, repository, env={})
             self.assertEqual(
                 json.loads((root / ".github/release-please/manifest.json").read_text()),

@@ -29,14 +29,14 @@ def extract_rich_sections(body: str) -> dict[str, str]:
     result: dict[str, str] = {}
     current: str | None = None
     lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for line in lines:
         fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
         if fence_match:
             marker = fence_match.group(1)
             if fence is None:
-                fence = marker[0]
-            elif marker[0] == fence:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
                 fence = None
             if current is not None:
                 result[current] += line + "\n"
@@ -61,14 +61,14 @@ def _version_ranges(changelog: str) -> list[tuple[int, int]]:
     lines = changelog.splitlines(keepends=True)
     offsets: list[int] = []
     offset = 0
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for line in lines:
         fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
         if fence_match:
             marker = fence_match.group(1)
             if fence is None:
-                fence = marker[0]
-            elif marker[0] == fence:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
                 fence = None
         elif fence is None and re.match(r"^##[ \t]+.*$", line):
             offsets.append(offset)
@@ -85,14 +85,14 @@ def _remove_legacy_block(top: str) -> str:
     """Remove marker-only notes without treating fenced headings as boundaries."""
     output: list[str] = []
     removing = False
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for line in top.splitlines(keepends=True):
         fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
         if fence_match:
-            token = fence_match.group(1)[0]
+            token = fence_match.group(1)
             if fence is None:
-                fence = token
-            elif token == fence:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
                 fence = None
             if not removing:
                 output.append(line)
@@ -118,7 +118,13 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         if not number.isdigit() or number in excluded:
             continue
         sections = extract_rich_sections(str(pr.get("body", "")))
-        if sections:
+        # PR bodies are untrusted; reserved delimiters must not be able to
+        # terminate or forge the machine-owned block on a later rerun.
+        if sections and not any(
+            marker in value
+            for value in sections.values()
+            for marker in (BLOCK_START, BLOCK_END)
+        ):
             entries.append((int(number), number, sections))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []

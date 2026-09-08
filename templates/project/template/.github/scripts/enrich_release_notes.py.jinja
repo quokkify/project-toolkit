@@ -12,8 +12,8 @@ def sections(body):
         fm=re.match(r"^\s*(`{3,}|~{3,})",line)
         if fm:
             marker=fm.group(1)
-            if fence is None: fence=marker[0]
-            elif marker[0] == fence: fence=None
+            if fence is None: fence=(marker[0],len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]: fence=None
             if current: found[current].append(line)
             continue
         if fence is not None:
@@ -31,9 +31,9 @@ def _remove_legacy(top):
     for line in top.splitlines(True):
         fm=re.match(r"^\s*(`{3,}|~{3,})",line)
         if fm:
-            token=fm.group(1)[0]
-            if fence is None: fence=token
-            elif token == fence: fence=None
+            token=fm.group(1)
+            if fence is None: fence=(token[0],len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]: fence=None
             if not removing: output.append(line)
             continue
         if fence is None and re.match(r"^<!-- project-toolkit:rich-release-notes pr=\d+ -->\s*$",line):
@@ -50,8 +50,8 @@ def enrich(changelog, prs):
         fm=re.match(r"^\s*(`{3,}|~{3,})",line)
         if fm:
             marker=fm.group(1)
-            if fence is None: fence=marker[0]
-            elif marker[0] == fence: fence=None
+            if fence is None: fence=(marker[0],len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]: fence=None
         elif fence is None and re.match(r"^##[ \t]+.*$",line): headings.append(offset)
         offset += len(line)
     if not headings: return changelog
@@ -63,7 +63,7 @@ def enrich(changelog, prs):
     entries=[]
     for pr in prs:
         n=str(pr.get("number","")).strip(); body=sections(str(pr.get("body","")))
-        if n.isdigit() and n not in old and body: entries.append((int(n),n,pr,body))
+        if n.isdigit() and n not in old and body and not any(x in value for value in body.values() for x in (START,END)): entries.append((int(n),n,pr,body))
     lines=[]
     for _,n,pr,body in sorted(entries):
         lines += [MARKER.format(number=n)] + (["#### "+str(pr.get("title","")).strip()] if str(pr.get("title","")).strip() else [])
@@ -87,7 +87,7 @@ if __name__ == "__main__":
         entries=[]
         for pr in prs:
             body=sections(str(pr.get("body",""))); n=str(pr.get("number","")).strip()
-            if n.isdigit() and body: entries.append((int(n),n,pr,body))
+            if n.isdigit() and body and not any(x in value for value in body.values() for x in (START,END)): entries.append((int(n),n,pr,body))
         out=[]
         for _,n,pr,body in sorted(entries):
             out += [MARKER.format(number=n),"#### "+str(pr.get("title","")).strip()]

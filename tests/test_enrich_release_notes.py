@@ -88,3 +88,17 @@ class RichNotesTests(TestCase):
         template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         self.assertIn("def _remove_legacy", template)
         self.assertIn("if not had_block: top=_remove_legacy(top)", template)
+
+    def test_nested_fences_require_matching_outer_length(self):
+        body = "## Usage example\n````markdown\n```java\n## Migration\n```\n````\n## Migration\nApply it.\n"
+        sections = notes.extract_rich_sections(body)
+        self.assertIn("usage example", sections)
+        self.assertIn("migration", sections)
+        changelog = "## 1.0.0\n````md\n## fake\n```\n````\n## 0.9.0\n"
+        self.assertEqual(len(notes._version_ranges(changelog)), 2)
+
+    def test_reserved_delimiters_in_pr_body_are_rejected(self):
+        body = f"## Highlight\nattacker {notes.BLOCK_END} tail"
+        output = notes.enrich_changelog("## 1.0.0\n", [{"number": 7, "body": body}])
+        self.assertNotIn(notes.BLOCK_START, output)
+        self.assertEqual(notes.enrich_changelog(output, [{"number": 7, "body": body}]), output)

@@ -84,6 +84,31 @@ class RichNotesTests(TestCase):
         self.assertLess(updated.index(notes.BLOCK_START), updated.index("\n---\n"))
         self.assertIn("This PR was generated", updated)
 
+    def test_release_body_without_rich_content_is_byte_preserving(self):
+        body = "## 1.0.0\n\n---\nfooter\n\n"
+        self.assertEqual(notes.enrich_release_body(body, ""), body)
+
+    def test_component_blocks_are_inside_release_please_details(self):
+        body = (
+            ":robot: header\n---\n\n\n"
+            "<details><summary>backend: 1.2.3</summary>\n\n## 1.2.3\n\n</details>\n\n"
+            "<details><summary>frontend: 4.5.6</summary>\n\n## 4.5.6\n\n</details>\n\n"
+            "---\nfooter"
+        )
+        updated = notes.enrich_component_release_body(
+            body, {"backend": "Backend rich", "frontend": "Frontend rich"}
+        )
+        self.assertEqual(updated.count(notes.BLOCK_START), 2)
+        self.assertLess(updated.index("Backend rich"), updated.index("</details>"))
+        frontend_start = updated.index("<details><summary>frontend")
+        self.assertLess(updated.index("Frontend rich", frontend_start), updated.index("</details>", frontend_start))
+        self.assertEqual(
+            notes.enrich_component_release_body(
+                updated, {"backend": "Backend rich", "frontend": "Frontend rich"}
+            ),
+            updated,
+        )
+
     def test_empty_rich_content_removes_stale_release_body_block(self):
         body = (
             ":robot: header\n---\nnotes\n\n"
@@ -153,6 +178,16 @@ class RichNotesTests(TestCase):
                 output = notes.enrich_changelog("## 1.0.0\n", [pr])
                 self.assertNotIn(notes.BLOCK_START, output)
 
+    def test_plain_marker_lookalike_in_rich_text_is_rejected(self):
+        pr = {
+            "number": 7,
+            "title": "safe",
+            "body": "## Highlight\nproject-toolkit:rich-release-notes pr=999",
+        }
+        output = notes.enrich_changelog("## 1.0.0\n", [pr])
+        self.assertNotIn(notes.BLOCK_START, output)
+        self.assertEqual(notes._rich_numbers(output), set())
+
     def test_workflow_parser_contract_tracks_nested_fences_and_rich_block(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
         self.assertNotIn("python - <<'PY'", workflow)
@@ -202,9 +237,9 @@ class RichNotesTests(TestCase):
                     {
                         "changelog-path": "CHANGELOG.md",
                         "packages": {
-                            "backend": {},
-                            "frontend": {"changelog-path": "docs/NEWS.md"},
-                            "worker": {"changelog-path": "/WORKER.md"},
+                            "backend": {"package-name": "backend"},
+                            "frontend": {"package-name": "frontend", "changelog-path": "docs/NEWS.md"},
+                            "worker": {"package-name": "worker", "changelog-path": "/WORKER.md"},
                         },
                     }
                 ),
@@ -333,7 +368,14 @@ class RichNotesTests(TestCase):
                     self._changelog(number), encoding="utf-8"
                 )
             (root / "config.json").write_text(
-                json.dumps({"packages": {name: {} for name in ("backend", "frontend", "worker")}}),
+                json.dumps(
+                    {
+                        "packages": {
+                            name: {"package-name": name}
+                            for name in ("backend", "frontend", "worker")
+                        }
+                    }
+                ),
                 encoding="utf-8",
             )
             (root / "manifest.json").write_text(
@@ -342,7 +384,16 @@ class RichNotesTests(TestCase):
             )
             (root / "release-prs.json").write_text('[{"number": 50}]', encoding="utf-8")
             fake_data = {
-                "50": self._pull_payload(50, body=":robot: header\n---\nGenerated notes\n---\nThis PR was generated with Release Please.\n"),
+                "50": self._pull_payload(
+                    50,
+                    body=(
+                        ":robot: header\n---\n\n\n"
+                        "<details><summary>backend: 1.0.1</summary>\n\n## 1.0.1\n\n</details>\n\n"
+                        "<details><summary>frontend: 1.0.2</summary>\n\n## 1.0.2\n\n</details>\n\n"
+                        "<details><summary>worker: 1.0.3</summary>\n\n## 1.0.3\n\n</details>\n\n"
+                        "---\nThis PR was generated with Release Please.\n"
+                    ),
+                ),
                 "1": self._pull_payload(1, body="## Highlight\nBackend"),
                 "2": self._pull_payload(2, body="## Usage example\n```js\nrun();\n```"),
                 "3": self._pull_payload(3, body="## Migration\nUpgrade worker"),
@@ -411,9 +462,17 @@ class RichNotesTests(TestCase):
             release_body = json.loads(
                 (root / "output/release-body.json").read_text(encoding="utf-8")
             )["body"]
-            self.assertLess(release_body.index(notes.BLOCK_START), release_body.rindex("\n---\n"))
-            self.assertIn("Backend", release_body)
-            self.assertIn("```js\nrun();\n```", release_body)
+            self.assertEqual(release_body.count(notes.BLOCK_START), 3)
+            backend_end = release_body.index("</details>")
+            frontend_start = release_body.index("<details><summary>frontend")
+            frontend_end = release_body.index("</details>", frontend_start)
+            worker_start = release_body.index("<details><summary>worker")
+            worker_end = release_body.index("</details>", worker_start)
+            self.assertLess(release_body.index("Backend"), backend_end)
+            self.assertLess(release_body.index("```js\nrun();\n```"), frontend_end)
+            self.assertGreater(release_body.index("```js\nrun();\n```"), frontend_start)
+            self.assertLess(release_body.index("Upgrade worker"), worker_end)
+            self.assertGreater(release_body.index("Upgrade worker"), worker_start)
             calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
             self.assertIn(["pr", "checkout", "50", "--repo", "acme/widget", "--force"], calls)
             self.assertTrue(all("--slurp" not in call for call in calls))

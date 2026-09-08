@@ -722,8 +722,6 @@ def seed_single_release_manifest(
         or manifest.exists()
     ):
         return
-    if not (repository_path / ".github/workflows/release.yml").is_file():
-        return
     releases = gh_json(
         ["release", "list", "--repo", repository.name_with_owner,
          "--exclude-drafts", "--exclude-pre-releases", "--limit", "2",

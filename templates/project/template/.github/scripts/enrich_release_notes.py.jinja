@@ -18,6 +18,7 @@ RICH_HEADINGS = {
 }
 MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
 MARKER_PREFIX = "<!-- project-toolkit:rich-release-notes "
+MARKER_PATTERN = re.compile(r"^<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->$")
 BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
 BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -87,7 +88,23 @@ def _version_ranges(changelog: str) -> list[tuple[int, int]]:
 
 
 def _rich_numbers(text: str) -> set[str]:
-    return set(re.findall(r"project-toolkit:rich-release-notes pr=([0-9]+)", text))
+    """Read only canonical machine marker lines outside fenced Markdown."""
+    numbers: set[str] = set()
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines():
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match:
+            token = fence_match.group(1)
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                fence = None
+            continue
+        if fence is None:
+            marker = MARKER_PATTERN.fullmatch(line.strip())
+            if marker:
+                numbers.add(marker.group(1))
+    return numbers
 
 
 def _remove_legacy_block(top: str) -> str:
@@ -132,12 +149,21 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
         title = str(pr.get("title", "")).strip()
-        reserved = (BLOCK_START, BLOCK_END, MARKER_PREFIX)
+        reserved = (
+            BLOCK_START.casefold(),
+            BLOCK_END.casefold(),
+            "project-toolkit:rich-release-notes",
+            "<details",
+            "</details",
+            "<summary",
+            "</summary",
+        )
+        untrusted = [title.casefold(), *(value.casefold() for value in sections.values())]
         if sections and not any(
             marker in value
-            for value in sections.values()
+            for value in untrusted
             for marker in reserved
-        ) and not any(marker in title for marker in reserved):
+        ):
             entries.append((int(number), title, sections))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
@@ -184,12 +210,60 @@ def enrich_release_body(body: str, rich_markdown: str) -> str:
     if re.search(pattern, body):
         return re.sub(pattern, block, body)
     if not block:
-        return body.rstrip() + "\n"
+        return body
     delimiters = list(re.finditer(r"\n---\n", body))
     if delimiters:
         footer_delimiter = delimiters[-1]
         return body[:footer_delimiter.start()] + "\n\n" + block + body[footer_delimiter.start():]
     return body.rstrip() + "\n\n" + block + "\n"
+
+
+def enrich_component_release_body(body: str, rich_by_component: Mapping[str, str]) -> str:
+    """Rebuild rich blocks inside Release Please multi-component details."""
+    detail_pattern = re.compile(
+        r"(?ms)^<details><summary>(?P<component>.+?): (?P<version>[0-9]+\.[0-9]+\.[0-9]+[^<]*)</summary>\n"
+        r"(?P<notes>.*?)^</details>[ \t]*$"
+    )
+    matches = list(detail_pattern.finditer(body))
+    if not matches:
+        if rich_by_component:
+            raise EnrichmentError("multi-component release body has no canonical component details")
+        return enrich_release_body(body, "")
+
+    found: set[str] = set()
+    updated = body
+    for match in reversed(matches):
+        component = match.group("component")
+        if component in found:
+            raise EnrichmentError(f"release body contains duplicate component {component!r}")
+        found.add(component)
+        notes = match.group("notes")
+        rich = rich_by_component.get(component, "")
+        block = f"{BLOCK_START}\n{rich}\n{BLOCK_END}" if rich else ""
+        block_pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
+        if re.search(block_pattern, notes):
+            new_notes = re.sub(block_pattern, block, notes)
+        elif block:
+            separator = "" if notes.endswith("\n\n") else ("\n" if notes.endswith("\n") else "\n\n")
+            new_notes = notes + separator + block + "\n"
+        else:
+            new_notes = notes
+        updated = updated[: match.start("notes")] + new_notes + updated[match.end("notes") :]
+
+    missing = sorted(component for component, rich in rich_by_component.items() if rich and component not in found)
+    if missing:
+        raise EnrichmentError(
+            "release body is missing configured component details: " + ", ".join(missing)
+        )
+
+    detail_ranges = [(match.start(), match.end()) for match in detail_pattern.finditer(updated)]
+    block_pattern = re.compile(
+        rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
+    )
+    for match in reversed(list(block_pattern.finditer(updated))):
+        if not any(start <= match.start() and match.end() <= end for start, end in detail_ranges):
+            updated = updated[: match.start()] + updated[match.end() :]
+    return updated
 
 
 def _safe_relative_path(value: str, *, label: str) -> Path:
@@ -213,18 +287,18 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
-def discover_changelog_paths(
+def discover_release_targets(
     *,
     mode: str,
     package_path: str,
     config_file: Path,
     manifest_file: Path,
     config_backed_single: bool,
-) -> list[Path]:
-    """Derive the changelogs Release Please updates from its actual inputs."""
+) -> list[tuple[str | None, Path]]:
+    """Derive component/changelog pairs from Release Please's actual inputs."""
     if mode == "single" and not config_backed_single:
         root = _safe_relative_path(package_path, label="package path")
-        return [Path("CHANGELOG.md") if root == Path(".") else root / "CHANGELOG.md"]
+        return [(None, Path("CHANGELOG.md") if root == Path(".") else root / "CHANGELOG.md")]
     if mode not in {"single", "manifest"}:
         raise EnrichmentError("mode must be single or manifest")
 
@@ -234,7 +308,8 @@ def discover_changelog_paths(
     if not isinstance(packages, dict) or not packages or not manifest:
         raise EnrichmentError("Release Please config and manifest must define packages")
 
-    paths: set[Path] = set()
+    targets: list[tuple[str | None, Path]] = []
+    multi_component = mode == "manifest" and len(manifest) > 1
     for package in manifest:
         package_config = packages.get(package)
         if not isinstance(package, str) or not isinstance(package_config, dict):
@@ -251,10 +326,45 @@ def discover_changelog_paths(
         package_root = _safe_relative_path(package, label="manifest package")
         if package_root != Path(".") and not root_relative:
             changelog = package_root / changelog
-        paths.add(changelog)
-    if not paths:
+        component: str | None = None
+        if multi_component:
+            raw_component = package_config.get("package-name")
+            if not isinstance(raw_component, str) or not raw_component.strip():
+                raise EnrichmentError(
+                    f"manifest package {package!r} needs package-name for release-body enrichment"
+                )
+            component = raw_component.strip()
+        targets.append((component, changelog))
+    if not targets:
         raise EnrichmentError("Release Please configuration does not produce a changelog")
-    return sorted(paths, key=lambda path: path.as_posix())
+    components = [component for component, _ in targets if component is not None]
+    if len(components) != len(set(components)):
+        raise EnrichmentError("Release Please package-name values must be unique")
+    return sorted(targets, key=lambda target: ((target[0] or ""), target[1].as_posix()))
+
+
+def discover_changelog_paths(
+    *,
+    mode: str,
+    package_path: str,
+    config_file: Path,
+    manifest_file: Path,
+    config_backed_single: bool,
+) -> list[Path]:
+    """Return the unique changelogs updated by Release Please."""
+    return sorted(
+        {
+            path
+            for _, path in discover_release_targets(
+                mode=mode,
+                package_path=package_path,
+                config_file=config_file,
+                manifest_file=manifest_file,
+                config_backed_single=config_backed_single,
+            )
+        },
+        key=lambda path: path.as_posix(),
+    )
 
 
 def source_pr_numbers(changelog: str, repository: str) -> list[int]:
@@ -368,12 +478,15 @@ def prepare_release_enrichment(
     )
     _run_gh(["pr", "checkout", str(release_number), "--repo", repository, "--force"])
 
-    changelog_paths = discover_changelog_paths(
+    release_targets = discover_release_targets(
         mode=mode,
         package_path=package_path,
         config_file=config_file,
         manifest_file=manifest_file,
         config_backed_single=config_backed_single,
+    )
+    changelog_paths = sorted(
+        {path for _, path in release_targets}, key=lambda path: path.as_posix()
     )
     numbers_by_path: dict[Path, list[int]] = {}
     all_numbers: set[int] = set()
@@ -415,11 +528,37 @@ def prepare_release_enrichment(
                 int(number) for number in _rich_numbers(updated[top[0][0] : top[0][1]])
             )
 
-    rich_markdown = _render_entries(
-        [source_prs[number] for number in sorted(rendered_numbers)], set()
-    )
     release_body = str(release.get("body") or "")
-    updated_body = enrich_release_body(release_body, rich_markdown)
+    if mode == "manifest" and len(release_targets) > 1:
+        rich_by_component: dict[str, str] = {}
+        for component, path in release_targets:
+            if component is None:
+                raise EnrichmentError("multi-component release target has no component")
+            changelog = path.read_text(encoding="utf-8")
+            ranges = _version_ranges(changelog)
+            path_numbers = sorted(
+                int(number)
+                for number in _rich_numbers(
+                    changelog[ranges[0][0] : ranges[0][1]] if ranges else ""
+                )
+            )
+            missing = [number for number in path_numbers if number not in source_prs]
+            if missing:
+                raise EnrichmentError(
+                    f"generated rich markers reference unknown source PRs: {missing}"
+                )
+            rich_by_component[component] = _render_entries(
+                [source_prs[number] for number in path_numbers], set()
+            )
+        updated_body = enrich_component_release_body(release_body, rich_by_component)
+    else:
+        missing = [number for number in rendered_numbers if number not in source_prs]
+        if missing:
+            raise EnrichmentError(f"generated rich markers reference unknown source PRs: {missing}")
+        rich_markdown = _render_entries(
+            [source_prs[number] for number in sorted(rendered_numbers)], set()
+        )
+        updated_body = enrich_release_body(release_body, rich_markdown)
     output_directory.mkdir(parents=True, exist_ok=True)
     (output_directory / "changelog-paths.txt").write_text(
         "".join(f"{path.as_posix()}\n" for path in changelog_paths), encoding="utf-8"

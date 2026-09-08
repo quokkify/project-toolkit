@@ -102,6 +102,26 @@ class SingleManifestSeedingTests(TestCase):
             )
             tags_mock.assert_not_called()
 
+    def test_seed_repairs_a_released_single_consumer_with_missing_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text(
+                "release_please: true\nrelease_mode: single\n", encoding="utf-8"
+            )
+            with mock.patch.object(
+                fleet,
+                "gh_json",
+                return_value=[{"tagName": "v4.5.6", "isLatest": True}],
+            ), mock.patch.object(fleet, "gh_json_lines") as tags_mock:
+                fleet.seed_single_release_manifest(
+                    root, fleet.Repository("quokkify/example", "main"), env={}
+                )
+            self.assertEqual(
+                json.loads((root / ".github/release-please/manifest.json").read_text()),
+                {".": "4.5.6"},
+            )
+            tags_mock.assert_not_called()
+
     def test_seed_uses_highest_exact_semver_tag_when_releases_are_absent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

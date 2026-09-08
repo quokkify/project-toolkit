@@ -168,6 +168,7 @@ def release_workflow_errors(path: Path) -> list[str]:
             "mode": "manifest",
             "config-file": ".github/release-please/config.json",
             "manifest-file": ".github/release-please/manifest.json",
+            "enrich-release-notes": True,
         },
         "caller job must pass manifest mode and current config/manifest paths",
     )

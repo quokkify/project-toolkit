@@ -107,8 +107,8 @@ jobs:
   enrich:
     if: >-
       ${{ always() && inputs.enrich-release-notes &&
-          ((needs.single.result == 'success' && needs.single.outputs.prs-created == 'true') ||
-           (needs.manifest.result == 'success' && needs.manifest.outputs.prs-created == 'true')) }}
+          ((needs.single.result == 'success' && needs.single.outputs.release-prs != '') ||
+           (needs.manifest.result == 'success' && needs.manifest.outputs.release-prs != '')) }}
     needs: [single, manifest]
     runs-on: ubuntu-latest
     steps:

@@ -15,6 +15,7 @@ RICH_HEADINGS = {
     "usage example": "Usage Examples",
     "migration": "Migration",
     "breaking change": "Breaking Changes",
+    "dependencies": "📦 Dependencies",
 }
 MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
 MARKER_PREFIX = "<!-- project-toolkit:rich-release-notes "
@@ -146,6 +147,10 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             continue
         seen.add(number)
         sections = extract_rich_sections(str(pr.get("body", "")))
+        if not sections and pr.get("legacy_dependency") is True:
+            title = str(pr.get("title", "")).strip()
+            if title:
+                sections = {"dependencies": title}
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
         title = str(pr.get("title", "")).strip()
@@ -176,6 +181,38 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             if key in sections:
                 blocks.extend((f"### {heading}", sections[key], ""))
     return "\n".join(blocks).rstrip()
+
+
+LEGACY_DEPENDENCY_COMMIT = re.compile(
+    r"^chore\(deps\):.*?\(#(?P<number>[0-9]+)\)\s*$"
+)
+VERSION_HEADING = re.compile(r"^##[ \t]+(?P<version>[0-9]+\.[0-9]+\.[0-9]+)")
+
+
+def legacy_dependency_pr_numbers(changelog: str) -> list[int]:
+    """Find pre-native dependency PRs since the previous generated release."""
+    versions = [
+        match.group("version")
+        for match in (VERSION_HEADING.match(line) for line in changelog.splitlines())
+        if match
+    ]
+    if len(versions) < 2:
+        return []
+    completed = _run_git(["log", f"v{versions[1]}..HEAD", "--format=%s"])
+    numbers = {
+        int(match.group("number"))
+        for line in completed.stdout.splitlines()
+        if (match := LEGACY_DEPENDENCY_COMMIT.fullmatch(line.strip()))
+    }
+    return sorted(numbers)
+
+
+def _run_git(arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run git without a shell; missing historical tags are non-fatal."""
+    completed = subprocess.run(["git", *arguments], text=True, capture_output=True, check=False)
+    if completed.returncode:
+        return subprocess.CompletedProcess(completed.args, 0, "", completed.stderr)
+    return completed
 
 
 def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str:
@@ -489,6 +526,8 @@ def prepare_release_enrichment(
         {path for _, path in release_targets}, key=lambda path: path.as_posix()
     )
     numbers_by_path: dict[Path, list[int]] = {}
+    legacy_by_path: dict[Path, set[int]] = {}
+    legacy_numbers: set[int] = set()
     all_numbers: set[int] = set()
     for changelog_path in changelog_paths:
         try:
@@ -497,7 +536,11 @@ def prepare_release_enrichment(
             raise EnrichmentError(f"cannot read generated changelog {changelog_path}: {exc}") from exc
         numbers = source_pr_numbers(changelog, repository)
         numbers_by_path[changelog_path] = numbers
+        legacy = set(legacy_dependency_pr_numbers(changelog)) - set(numbers)
+        legacy_by_path[changelog_path] = legacy
+        legacy_numbers.update(legacy)
         all_numbers.update(numbers)
+        all_numbers.update(legacy)
 
     source_prs: dict[int, dict[str, Any]] = {}
     for number in sorted(all_numbers):
@@ -514,12 +557,18 @@ def prepare_release_enrichment(
             "number": number,
             "title": str(source.get("title", "")),
             "body": str(source.get("body") or ""),
+            "legacy_dependency": number in legacy_numbers,
         }
 
     rendered_numbers: set[int] = set()
     for changelog_path in changelog_paths:
         original = changelog_path.read_text(encoding="utf-8")
-        selected = [source_prs[number] for number in numbers_by_path[changelog_path]]
+        selected = [
+            {**source_prs[number], "legacy_dependency": number in legacy_by_path[changelog_path]}
+            for number in sorted(
+                set(numbers_by_path[changelog_path]) | legacy_by_path[changelog_path]
+            )
+        ]
         updated = enrich_changelog(original, selected)
         changelog_path.write_text(updated, encoding="utf-8", newline="\n")
         top = _version_ranges(updated)

@@ -18,3 +18,8 @@ Commit sections. The optional PR template sections (`Release notes`, `Highlight`
 they do not replace `feat`/`fix` commits or the `BREAKING CHANGE:` versioning
 signal. Leave them empty for ordinary changes. Usage examples may contain fenced
 Markdown, including language identifiers.
+
+Dependency release notes use Renovate's native `deps(deps)` Conventional Commit
+type. Release Please 17.6.0 matches changelog sections by commit type, so the
+legacy `chore(deps)` spelling remains intentionally hidden along with unrelated
+`chore` commits; this producer contract is the supported replacement.

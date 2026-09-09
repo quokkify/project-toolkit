@@ -16,6 +16,19 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
+    def test_dependency_chores_are_kept_and_other_chores_hidden(self):
+        changelog = (
+            "## 2.1.0\n\n"
+            "### 📦 Dependencies\n\n"
+            "* **deps:** update alpha\n"
+            "* internal cleanup\n\n"
+            "### ✨ Features\n\n* feature\n"
+        )
+        normalized = notes._normalize_dependency_changelog(changelog)
+        self.assertIn("update alpha", normalized)
+        self.assertNotIn("internal cleanup", normalized)
+        self.assertIn("* feature", normalized)
+
     def test_workflow_delegates_source_discovery_to_the_helper(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
         self.assertIn("--prepare", workflow)

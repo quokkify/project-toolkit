@@ -56,9 +56,12 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
 
   const toolkitConfig = JSON.parse(fs.readFileSync(toolkitConfigPath, 'utf8'));
   const sections = toolkitConfig.packages['.']['changelog-sections'];
+  const dependencyChoreSection = sections.find(section => section.type === 'chore');
+  if (!dependencyChoreSection || dependencyChoreSection.section !== '📦 Dependencies' || dependencyChoreSection.hidden) {
+    throw new Error('chore commits must stage in Dependencies for scope-aware normalization');
+  }
   const commits = [
     {type: 'deps', scope: 'deps', bareMessage: 'update dependency alpha', message: 'deps(deps): update dependency alpha', sha: 'a'.repeat(40), notes: [], references: []},
-    {type: 'chore', scope: null, bareMessage: 'internal cleanup', message: 'chore: internal cleanup', sha: 'b'.repeat(40), notes: [], references: []},
   ];
   const rendered = await new DefaultChangelogNotes().buildNotes(commits, {
     owner: 'acme', repository: 'widget', version: '1.2.3',
@@ -67,9 +70,7 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
   if (!rendered.includes('📦 Dependencies') || !rendered.includes('update dependency alpha')) {
     throw new Error('deps commit did not render in Dependencies');
   }
-  if (rendered.includes('internal cleanup')) {
-    throw new Error('unrelated chore must stay hidden');
-  }
+
 
   process.stdout.write(JSON.stringify({
     releasePlease: packageJson.version,

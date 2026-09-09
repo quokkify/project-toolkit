@@ -122,6 +122,40 @@ class RichNotesTests(TestCase):
         self.assertNotIn(notes.BLOCK_START, updated)
         self.assertEqual(notes.enrich_release_body(updated, ""), updated)
 
+    def test_dependency_entries_share_one_heading_in_both_outputs(self):
+        prs = [
+            {
+                "number": number,
+                "title": f"chore(deps): update package {number}",
+                "body": "",
+            }
+            for number in range(219, 225)
+        ]
+        changelog = notes.enrich_changelog("## 1.0.0\n", prs)
+        body = notes.enrich_release_body("## 1.0.0\n\n---\nfooter\n", notes._render_entries(prs, set()))
+        for output in (changelog, body):
+            self.assertEqual(output.count(notes.DEPENDENCIES_HEADING), 1)
+            for number in range(219, 225):
+                self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
+                self.assertEqual(output.count(f"chore(deps): update package {number}"), 1)
+
+    def test_dependency_heading_is_deduplicated_and_bare_chore_is_hidden(self):
+        prs = [
+            {"number": 1, "title": "chore(deps): update one", "body": ""},
+            {"number": 2, "title": "deps(deps): update two", "body": ""},
+            {"number": 3, "title": "chore: internal maintenance", "body": ""},
+            {
+                "number": 4,
+                "title": "chore(deps): rich update",
+                "body": "## Release notes\n### 📦 Dependencies\nlinked heading\n",
+            },
+        ]
+        output = notes._render_entries(prs, set())
+        self.assertEqual(output.count(notes.DEPENDENCIES_HEADING), 1)
+        self.assertIn("linked heading", output)
+        self.assertNotIn("chore: internal maintenance", output)
+        self.assertEqual(output.count("rich-release-notes pr=4"), 1)
+
     def test_duplicate_source_records_render_once(self):
         changelog = "## 1.0.0\n"
         prs = [{"number": 7, "body": "## Highlight\nOne"}] * 2

@@ -23,6 +23,9 @@ BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
 BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 SAFE_PATH_PATTERN = re.compile(r"[A-Za-z0-9._/-]+")
+DEPENDENCY_TITLE_PATTERN = re.compile(r"^(?:chore|deps)\(deps\):\s+", re.IGNORECASE)
+BARE_CHORE_TITLE_PATTERN = re.compile(r"^chore:\s+", re.IGNORECASE)
+DEPENDENCIES_HEADING = "### 📦 Dependencies"
 
 
 class EnrichmentError(RuntimeError):
@@ -159,7 +162,13 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             "</summary",
         )
         untrusted = [title.casefold(), *(value.casefold() for value in sections.values())]
-        if sections and not any(
+        is_dependency = bool(DEPENDENCY_TITLE_PATTERN.match(title))
+        # Native dependency PRs do not have a rich section in their body, but
+        # their title is still useful context in the enriched block.  Ordinary
+        # bare chore PRs, on the other hand, must not create a synthetic note.
+        if not sections and BARE_CHORE_TITLE_PATTERN.match(title):
+            continue
+        if (sections or is_dependency) and not any(
             marker in value
             for value in untrusted
             for marker in reserved
@@ -167,14 +176,24 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             entries.append((int(number), title, sections))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
+    dependency_heading_written = False
     for number_value, title, sections in entries:
         number = str(number_value)
+        if DEPENDENCY_TITLE_PATTERN.match(title) and not dependency_heading_written:
+            blocks.append(DEPENDENCIES_HEADING)
+            dependency_heading_written = True
         blocks.append(MARKER.format(number=number))
         if title:
             blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():
             if key in sections:
-                blocks.extend((f"### {heading}", sections[key], ""))
+                content = re.sub(
+                    rf"^\s*{re.escape(DEPENDENCIES_HEADING)}\s*$\n?",
+                    "",
+                    sections[key],
+                    flags=re.MULTILINE,
+                ).strip()
+                blocks.extend((f"### {heading}", content, ""))
     return "\n".join(blocks).rstrip()
 
 

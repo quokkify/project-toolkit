@@ -14,3 +14,11 @@ git diff --check
 ```
 
 New third-party Actions must be pinned to a full commit SHA and covered by Renovate. Add a composite action only with evidence of repeated step-level logic. Do not create or move release tags from feature work.
+
+Optional release context
+
+The centrally managed PR template includes optional `Release notes`, `Highlight`,
+`Usage example`, `Migration`, and `Breaking change` sections. They are ignored
+when empty. Use `Highlight` sparingly, keep examples runnable, and preserve
+fenced code blocks. The `Breaking change` section explains user impact; the
+Conventional Commit `BREAKING CHANGE:` footer remains the versioning signal.

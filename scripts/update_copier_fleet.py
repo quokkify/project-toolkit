@@ -172,6 +172,18 @@ def gh_json(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
 
 
+def gh_json_lines(arguments: Sequence[str], *, env: dict[str, str]) -> list[Any]:
+    """Read one JSON value per line, including paginated gh API output."""
+    completed = run(["gh", *arguments], env=env)
+    values: list[Any] = []
+    for line in completed.stdout.splitlines():
+        try:
+            values.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
+    return values
+
+
 def resolve_template_ref(
     template_repository: str,
     requested_ref: str | None,
@@ -694,12 +706,67 @@ def restore_answers_format_if_semantically_equal(
         )
 
 
+def seed_single_release_manifest(
+    repository_path: Path,
+    repository: Repository,
+    *,
+    env: dict[str, str],
+) -> None:
+    """Seed the root manifest from an existing stable release, never 0.1.0."""
+    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
+    manifest = repository_path / ".github/release-please/manifest.json"
+    release_mode = answers.get("release_mode", "single")
+    if (
+        answers.get("release_please") is not True
+        or release_mode != "single"
+        or manifest.exists()
+    ):
+        return
+    releases = gh_json(
+        ["release", "list", "--repo", repository.name_with_owner,
+         "--exclude-drafts", "--exclude-pre-releases", "--limit", "2",
+         "--json", "tagName,isLatest"], env=env
+    )
+    stable = [
+        item for item in releases
+        if isinstance(item, dict) and isinstance(item.get("tagName"), str)
+        and item.get("isLatest") is True
+        and RELEASE_TAG_PATTERN.fullmatch(item["tagName"])
+    ]
+    if len(stable) > 1:
+        raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous")
+    if len(stable) == 1:
+        tag_name = stable[0]["tagName"]
+    else:
+        # GitHub Releases can be absent for a valid stable tag (for example
+        # repositories that publish artifacts elsewhere).  Fall back to the
+        # repository's exact SemVer tags, and never accept a template default.
+        tags = gh_json_lines(
+            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--jq", ".[].name | @json"],
+            env=env,
+        )
+        candidates = sorted(
+            {
+                tag for tag in tags
+                if isinstance(tag, str) and RELEASE_TAG_PATTERN.fullmatch(tag)
+            },
+            key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
+            reverse=True,
+        )
+        if not candidates:
+            raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous or missing")
+        tag_name = candidates[0]
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({".": tag_name[1:]}, indent=2) + "\n", encoding="utf-8")
+
+
 def update_template(
     repository_path: Path,
     *,
     template_source: str,
     template_ref: str | None,
     env: dict[str, str],
+    repository: Repository | None = None,
 ) -> list[str]:
     answers_path = repository_path / ANSWERS_FILE
     if answers_path.is_symlink():
@@ -707,6 +774,8 @@ def update_template(
     if not answers_path.is_file():
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
+    if repository is not None:
+        seed_single_release_manifest(repository_path, repository, env=env)
 
     command = [
         "copier",
@@ -932,6 +1001,7 @@ def process_repository(
             template_source=expected_template,
             template_ref=template_ref,
             env=env,
+            repository=repository,
         )
         updated_answers_path = destination / ANSWERS_FILE
         if is_regular_file(updated_answers_path, repository_root=destination):

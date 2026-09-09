@@ -23,10 +23,22 @@ on:
         description: Release Please manifest path.
         type: string
         default: .github/release-please/manifest.json
+      config-backed-single:
+        description: Use root config/manifest for generated single-package consumers.
+        type: boolean
+        default: false
       target-branch:
         description: Branch Release Please should target; empty uses repository default.
         type: string
         default: ""
+      enrich-release-notes:
+        description: Enrich the generated release PR from its optional PR-body sections.
+        type: boolean
+        default: false
+      enrichment-script:
+        description: Repository-relative enrichment script path.
+        type: string
+        default: scripts/enrich_release_notes.py
     outputs:
       releases-created:
         description: "true when this run tagged a release; empty or false otherwise."
@@ -48,8 +60,8 @@ jobs:
       - name: Validate mode
         env:
           MODE: ${{ inputs.mode }}
-        run: |
-          [[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }
+        run: '[[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }'
+
   single:
     if: ${{ inputs.mode == 'single' }}
     needs: validate
@@ -57,24 +69,33 @@ jobs:
     outputs:
       releases-created: ${{ steps.release.outputs.releases_created }}
       tag-name: ${{ steps.release.outputs.tag_name }}
+      prs-created: ${{ steps.release.outputs.prs_created }}
+      release-prs: ${{ steps.release.outputs.prs }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Run Release Please for one package
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          release-type: ${{ inputs.release-type }}
-          path: ${{ inputs.path }}
+          release-type: ${{ inputs.config-backed-single && '' || inputs.release-type }}
+          path: ${{ inputs.config-backed-single && '' || inputs.path }}
+          config-file: ${{ inputs.config-backed-single && inputs.config-file || '' }}
+          manifest-file: ${{ inputs.config-backed-single && inputs.manifest-file || '' }}
           target-branch: ${{ inputs.target-branch }}
+
   manifest:
     if: ${{ inputs.mode == 'manifest' }}
     needs: validate
     runs-on: ubuntu-latest
     outputs:
       releases-created: ${{ steps.release.outputs.releases_created }}
-      # Manifest mode prefixes per-package outputs with the package path, so a
-      # root-only manifest exposes the tag as `.--tag_name`.
       tag-name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
+      prs-created: ${{ steps.release.outputs.prs_created }}
+      release-prs: ${{ steps.release.outputs.prs }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Run Release Please in manifest mode
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -82,3 +103,61 @@ jobs:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           target-branch: ${{ inputs.target-branch }}
+
+  enrich:
+    if: >-
+      ${{ always() && inputs.enrich-release-notes &&
+          ((needs.single.result == 'success' && needs.single.outputs.prs-created == 'true') ||
+           (needs.manifest.result == 'success' && needs.manifest.outputs.prs-created == 'true')) }}
+    needs: [single, manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Prepare enriched release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_PRS: ${{ needs.single.outputs.release-prs || needs.manifest.outputs.release-prs }}
+          ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}
+          MODE: ${{ inputs.mode }}
+          PACKAGE_PATH: ${{ inputs.path }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          MANIFEST_FILE: ${{ inputs.manifest-file }}
+          CONFIG_BACKED_SINGLE: ${{ inputs.config-backed-single }}
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/release-enrichment
+        run: |
+          set -euo pipefail
+          printf '%s' "$RELEASE_PRS" > "$RUNNER_TEMP/release-prs.json"
+          arguments=(
+            --prepare
+            --repository "$REPOSITORY"
+            --release-prs "$RUNNER_TEMP/release-prs.json"
+            --mode "$MODE"
+            --path "$PACKAGE_PATH"
+            --config-file "$CONFIG_FILE"
+            --manifest-file "$MANIFEST_FILE"
+            --output-directory "$OUTPUT_DIRECTORY"
+          )
+          if [[ "$CONFIG_BACKED_SINGLE" == true ]]; then
+            arguments+=(--config-backed-single)
+          fi
+          python "$ENRICHMENT_SCRIPT" "${arguments[@]}"
+      - name: Update the existing Release Please pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/release-enrichment
+        run: |
+          set -euo pipefail
+          mapfile -t changelogs < "$OUTPUT_DIRECTORY/changelog-paths.txt"
+          if ((${#changelogs[@]})) && ! git diff --quiet -- "${changelogs[@]}"; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -- "${changelogs[@]}"
+            git commit -m "chore(release): enrich release notes"
+            git push origin HEAD
+          fi
+          release_pr="$(jq -r '.release_pr' "$OUTPUT_DIRECTORY/metadata.json")"
+          gh api -X PATCH "repos/${REPOSITORY}/pulls/${release_pr}" \
+            --input "$OUTPUT_DIRECTORY/release-body.json"

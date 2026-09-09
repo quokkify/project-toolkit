@@ -62,6 +62,132 @@ class DiscoveryTests(TestCase):
         self.assertEqual([repo.name_with_owner for repo in discovered], ["quokkify/public-example"])
 
 
+class SingleManifestSeedingTests(TestCase):
+    def test_tag_fallback_requests_json_lines(self) -> None:
+        with mock.patch.object(fleet, "run") as run_mock:
+            run_mock.return_value = type("Result", (), {"stdout": '"v1.2.3"\n', "stderr": "", "returncode": 0})()
+            self.assertEqual(
+                fleet.gh_json_lines(
+                    ["api", "repos/x/tags", "--paginate", "--jq", ".[].name | @json"],
+                    env={},
+                ),
+                ["v1.2.3"],
+            )
+            self.assertEqual(
+                run_mock.call_args.args[0],
+                ["gh", "api", "repos/x/tags", "--paginate", "--jq", ".[].name | @json"],
+            )
+
+    def test_seed_uses_unambiguous_latest_stable_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text(
+                "release_please: true\nrelease_mode: single\n", encoding="utf-8"
+            )
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n")
+            releases = [
+                {"tagName": "v4.5.6", "isLatest": True},
+                {"tagName": "v4.5.5", "isLatest": False},
+            ]
+            with mock.patch.object(fleet, "gh_json", return_value=releases), mock.patch.object(
+                fleet, "gh_json_lines"
+            ) as tags_mock:
+                fleet.seed_single_release_manifest(
+                    root, fleet.Repository("quokkify/example", "main"), env={}
+                )
+            self.assertEqual(
+                json.loads((root / ".github/release-please/manifest.json").read_text()),
+                {".": "4.5.6"},
+            )
+            tags_mock.assert_not_called()
+
+    def test_seed_repairs_a_released_single_consumer_with_missing_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text(
+                "release_please: true\nrelease_mode: single\n", encoding="utf-8"
+            )
+            with mock.patch.object(
+                fleet,
+                "gh_json",
+                return_value=[{"tagName": "v4.5.6", "isLatest": True}],
+            ), mock.patch.object(fleet, "gh_json_lines") as tags_mock:
+                fleet.seed_single_release_manifest(
+                    root, fleet.Repository("quokkify/example", "main"), env={}
+                )
+            self.assertEqual(
+                json.loads((root / ".github/release-please/manifest.json").read_text()),
+                {".": "4.5.6"},
+            )
+            tags_mock.assert_not_called()
+
+    def test_seed_uses_highest_exact_semver_tag_when_releases_are_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text("release_please: true\n", encoding="utf-8")
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n", encoding="utf-8")
+            repository = fleet.Repository("quokkify/example", "main")
+            with mock.patch.object(fleet, "gh_json", return_value=[]), mock.patch.object(
+                fleet, "gh_json_lines", return_value=["v1.2.3", "v1.10.0", "not-a-version"]
+            ):
+                fleet.seed_single_release_manifest(root, repository, env={})
+            self.assertEqual(
+                json.loads((root / ".github/release-please/manifest.json").read_text()),
+                {".": "1.10.0"},
+            )
+
+    def test_seed_fails_closed_on_ambiguous_stable_releases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text("release_please: true\n", encoding="utf-8")
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n", encoding="utf-8")
+            releases = [{"tagName": "v1.0.0", "isLatest": True}, {"tagName": "v2.0.0", "isLatest": True}]
+            with mock.patch.object(fleet, "gh_json", return_value=releases):
+                with self.assertRaisesRegex(fleet.FleetUpdateError, "ambiguous"):
+                    fleet.seed_single_release_manifest(root, fleet.Repository("quokkify/example", "main"), env={})
+
+    def test_seed_fails_closed_when_release_and_exact_tags_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text("release_please: true\n", encoding="utf-8")
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/release.yml").write_text("name: release\n")
+            with mock.patch.object(fleet, "gh_json", return_value=[]), mock.patch.object(
+                fleet, "gh_json_lines", return_value=["release-1", "v1.0.0-rc.1"]
+            ):
+                with self.assertRaisesRegex(fleet.FleetUpdateError, "ambiguous or missing"):
+                    fleet.seed_single_release_manifest(
+                        root, fleet.Repository("quokkify/example", "main"), env={}
+                    )
+
+    def test_manifest_mode_and_existing_version_are_never_reseeded(self) -> None:
+        for answers, existing in (
+            ("release_please: true\nrelease_mode: manifest\n", None),
+            ("release_please: true\nrelease_mode: single\n", {".": "9.8.7"}),
+        ):
+            with self.subTest(answers=answers), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / fleet.ANSWERS_FILE).write_text(answers, encoding="utf-8")
+                (root / ".github/workflows").mkdir(parents=True)
+                (root / ".github/workflows/release.yml").write_text("name: release\n")
+                manifest = root / ".github/release-please/manifest.json"
+                if existing is not None:
+                    manifest.parent.mkdir(parents=True, exist_ok=True)
+                    manifest.write_text(json.dumps(existing), encoding="utf-8")
+                with mock.patch.object(fleet, "gh_json") as releases_mock:
+                    fleet.seed_single_release_manifest(
+                        root, fleet.Repository("quokkify/example", "main"), env={}
+                    )
+                releases_mock.assert_not_called()
+                if existing is None:
+                    self.assertFalse(manifest.exists())
+                else:
+                    self.assertEqual(json.loads(manifest.read_text()), existing)
+
+
 class ProjectOwnedToolkitRefTests(TestCase):
     """The generated contract requires every toolkit reference to match toolkit_version."""
 

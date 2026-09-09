@@ -774,8 +774,6 @@ def update_template(
     if not answers_path.is_file():
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
-    if repository is not None:
-        seed_single_release_manifest(repository_path, repository, env=env)
 
     command = [
         "copier",
@@ -791,6 +789,10 @@ def update_template(
             command.extend(["--data", f"toolkit_version={template_ref}"])
     command.append(".")
     run(command, cwd=repository_path, env=env)
+    if repository is not None:
+        # Copier requires a pristine checkout. Seed a missing single-project
+        # Release Please manifest only after the update has completed.
+        seed_single_release_manifest(repository_path, repository, env=env)
     restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
     canonicalize_answers_source(repository_path, template_source)
     if template_ref and RELEASE_TAG_PATTERN.fullmatch(template_ref):

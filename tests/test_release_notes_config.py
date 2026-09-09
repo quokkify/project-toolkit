@@ -48,6 +48,41 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             "deps(deps)",
         )
 
+    def test_release_please_17_renders_native_dependencies_only(self) -> None:
+        npm = shutil.which("npm")
+        node = shutil.which("node")
+        if npm is None or node is None:
+            self.skipTest("node and npm are required for Release Please behavior coverage")
+        with tempfile.TemporaryDirectory(prefix="release-please-17-") as temporary:
+            install_root = Path(temporary) / "release-please"
+            install = subprocess.run(
+                [
+                    npm,
+                    "install",
+                    "--prefix",
+                    str(install_root),
+                    "--no-package-lock",
+                    "--ignore-scripts",
+                    "release-please@17.6.0",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(install.returncode, 0, install.stderr or install.stdout)
+            result = subprocess.run(
+                [
+                    node,
+                    str(ROOT / "tests/release_please_17_notes.cjs"),
+                    str(install_root / "node_modules/release-please"),
+                    str(CONFIG_PATH),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
     def test_root_and_template_have_matching_section_semantics(self) -> None:
         root_package = self.load_config(CONFIG_PATH)["packages"]["."]
         template_package = self.load_config(TEMPLATE_CONFIG_PATH)["packages"]["."]

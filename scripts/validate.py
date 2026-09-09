@@ -2749,6 +2749,7 @@ if os.environ.get(NESTED_MARKER) == "1":
 else:
     suite_env = {**os.environ, NESTED_MARKER: "1"}
     run([sys.executable, "tests/test_composite_actions.py"], env=suite_env)
+    run([sys.executable, "tests/test_release_notes_config.py"], env=suite_env)
     run([sys.executable, "tests/test_update_copier_fleet.py"], env=suite_env)
     run([sys.executable, "tests/test_validate_helpers.py"], env=suite_env)
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])

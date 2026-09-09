@@ -227,6 +227,31 @@ class RichNotesTests(TestCase):
         )
         self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [8])
 
+    def test_legacy_dependency_entries_are_rendered_under_dependencies(self):
+        rendered = notes._render_entries(
+            [{
+                "number": 219,
+                "title": "chore(deps): update allure",
+                "body": "",
+                "legacy_dependency": True,
+            }],
+            set(),
+        )
+        self.assertIn("### 📦 Dependencies", rendered)
+        self.assertIn("chore(deps): update allure", rendered)
+
+    def test_legacy_dependency_discovery_uses_previous_release_tag(self):
+        changelog = "## 2.21.1\n\n## 2.21.0\n"
+        completed = subprocess.CompletedProcess(
+            ["git"],
+            0,
+            "chore(deps): update allure (#219)\nchore: cleanup (#999)\n",
+            "",
+        )
+        with mock.patch.object(notes, "_run_git", return_value=completed) as run_git:
+            self.assertEqual(notes.legacy_dependency_pr_numbers(changelog), [219])
+        run_git.assert_called_once_with(["log", "v2.21.0..HEAD", "--format=%s"])
+
     def test_manifest_discovers_package_local_and_root_relative_changelogs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

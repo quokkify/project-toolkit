@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.0](https://github.com/quokkify/project-toolkit/compare/v2.20.1...v2.21.0) (2026-09-09)
+
+
+### ✨ Features
+
+* **release:** enrich release notes from PR bodies ([dd35650](https://github.com/quokkify/project-toolkit/commit/dd35650cce5f5d9e4aa74d620996a9bb33eab2e0))
+
 ## [2.20.1](https://github.com/quokkify/project-toolkit/compare/v2.20.0...v2.20.1) (2026-09-02)
 
 

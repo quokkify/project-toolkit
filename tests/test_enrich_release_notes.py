@@ -240,6 +240,26 @@ class RichNotesTests(TestCase):
         self.assertIn("### 📦 Dependencies", rendered)
         self.assertIn("chore(deps): update allure", rendered)
 
+    def test_legacy_dependency_entries_render_exactly_once_in_changelog_and_body(self):
+        prs = [
+            {
+                "number": number,
+                "title": f"chore(deps): update package-{number}",
+                "body": "",
+                "legacy_dependency": True,
+            }
+            for number in range(219, 225)
+        ]
+        changelog = notes.enrich_changelog("## 2.21.1\n", prs)
+        top = changelog[: notes._version_ranges(changelog)[0][1]]
+        rich = notes._render_entries(prs, set())
+        release_body = notes.enrich_release_body("## 2.21.1\n\n---\nfooter\n", rich)
+        for number in range(219, 225):
+            title = f"chore(deps): update package-{number}"
+            with self.subTest(number=number):
+                self.assertEqual(top.count(title), 1)
+                self.assertEqual(release_body.count(title), 1)
+
     def test_legacy_dependency_discovery_uses_previous_release_tag(self):
         changelog = "## 2.21.1\n\n## 2.21.0\n"
         completed = subprocess.CompletedProcess(
@@ -251,6 +271,26 @@ class RichNotesTests(TestCase):
         with mock.patch.object(notes, "_run_git", return_value=completed) as run_git:
             self.assertEqual(notes.legacy_dependency_pr_numbers(changelog), [219])
         run_git.assert_called_once_with(["log", "v2.21.0..HEAD", "--format=%s"])
+
+    def test_legacy_dependency_discovery_accepts_linked_release_headings(self):
+        changelog = (
+            "## [2.21.1](https://github.com/acme/widget/releases/tag/v2.21.1)\n\n"
+            "## [2.21.0](https://github.com/acme/widget/releases/tag/v2.21.0)\n"
+        )
+        completed = subprocess.CompletedProcess(
+            ["git"], 0, "chore(deps): update node (#224)\n", ""
+        )
+        with mock.patch.object(notes, "_run_git", return_value=completed) as run_git:
+            self.assertEqual(notes.legacy_dependency_pr_numbers(changelog), [224])
+        run_git.assert_called_once_with(["log", "v2.21.0..HEAD", "--format=%s"])
+
+    def test_legacy_dependency_discovery_fails_closed_when_history_is_missing(self):
+        changelog = "## 2.21.1\n\n## 2.21.0\n"
+        with mock.patch.object(
+            notes, "_run_git", side_effect=notes.EnrichmentError("missing tag")
+        ):
+            with self.assertRaisesRegex(notes.EnrichmentError, "missing tag"):
+                notes.legacy_dependency_pr_numbers(changelog)
 
     def test_manifest_discovers_package_local_and_root_relative_changelogs(self):
         with tempfile.TemporaryDirectory() as temporary:

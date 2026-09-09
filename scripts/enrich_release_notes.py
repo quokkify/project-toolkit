@@ -186,16 +186,19 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
 LEGACY_DEPENDENCY_COMMIT = re.compile(
     r"^chore\(deps\):.*?\(#(?P<number>[0-9]+)\)\s*$"
 )
-VERSION_HEADING = re.compile(r"^##[ \t]+(?P<version>[0-9]+\.[0-9]+\.[0-9]+)")
+VERSION_HEADING = re.compile(
+    r"^##[ \t]+(?:\[(?P<linked>[0-9]+\.[0-9]+\.[0-9]+)\]\([^)]*\)|"
+    r"(?P<plain>[0-9]+\.[0-9]+\.[0-9]+))"
+)
 
 
 def legacy_dependency_pr_numbers(changelog: str) -> list[int]:
     """Find pre-native dependency PRs since the previous generated release."""
-    versions = [
-        match.group("version")
-        for match in (VERSION_HEADING.match(line) for line in changelog.splitlines())
-        if match
-    ]
+    versions = []
+    for line in changelog.splitlines():
+        match = VERSION_HEADING.match(line)
+        if match:
+            versions.append(match.group("linked") or match.group("plain"))
     if len(versions) < 2:
         return []
     completed = _run_git(["log", f"v{versions[1]}..HEAD", "--format=%s"])
@@ -208,10 +211,11 @@ def legacy_dependency_pr_numbers(changelog: str) -> list[int]:
 
 
 def _run_git(arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run git without a shell; missing historical tags are non-fatal."""
+    """Run git without a shell and fail closed on missing history."""
     completed = subprocess.run(["git", *arguments], text=True, capture_output=True, check=False)
     if completed.returncode:
-        return subprocess.CompletedProcess(completed.args, 0, "", completed.stderr)
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise EnrichmentError(f"git {' '.join(arguments)} failed: {detail}")
     return completed
 
 

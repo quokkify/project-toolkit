@@ -2,6 +2,21 @@
 
 ## [2.21.1](https://github.com/quokkify/project-toolkit/compare/v2.21.0...v2.21.1) (2026-09-09)
 
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+<!-- project-toolkit:rich-release-notes pr=219 -->
+chore(deps): update allure to v3.16.1
+<!-- project-toolkit:rich-release-notes pr=220 -->
+chore(deps): update copier to v9.18.2
+<!-- project-toolkit:rich-release-notes pr=221 -->
+chore(deps): update quokkify/project-toolkit to v2.21.0
+<!-- project-toolkit:rich-release-notes pr=222 -->
+chore(deps): update renovate to v44.69.13
+<!-- project-toolkit:rich-release-notes pr=223 -->
+chore(deps): update actions/checkout action to v7
+<!-- project-toolkit:rich-release-notes pr=224 -->
+chore(deps): update node to v24.21.0
+<!-- project-toolkit:rich-block:end -->
 
 ### 🐛 Bug Fixes
 

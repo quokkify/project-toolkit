@@ -578,7 +578,31 @@ class TemplateUpdateTests(TestCase):
         self.assertIn("--data", copier_command)
         self.assertIn("toolkit_version=v2.8.1", copier_command)
 
-    def test_restores_prettier_formatting_when_answers_are_semantically_equal(self) -> None:
+    def test_seeds_single_manifest_only_after_clean_copier_update(self) -> None:
+        events: list[str] = []
+        with tempfile.TemporaryDirectory() as temporary:
+            repository_path = Path(temporary)
+            (repository_path / fleet.ANSWERS_FILE).write_text(
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                fleet, "run", side_effect=lambda *args, **kwargs: events.append("copier-update")
+            ), mock.patch.object(
+                fleet, "seed_single_release_manifest",
+                side_effect=lambda *args, **kwargs: events.append("seed-manifest"),
+            ), mock.patch.object(fleet, "restore_answers_format_if_semantically_equal"), mock.patch.object(
+                fleet, "canonicalize_answers_source"
+            ), mock.patch.object(fleet, "changed_paths", return_value=[]):
+                fleet.update_template(
+                    repository_path,
+                    template_source="quokkify/project-toolkit",
+                    template_ref="v2.8.1",
+                    env={},
+                    repository=fleet.Repository("quokkify/example", "main"),
+                )
+        self.assertEqual(events, ["copier-update", "seed-manifest"])
+
         original = (
             "_commit: v2.8.2\n"
             "_src_path: https://github.com/quokkify/project-toolkit.git\n"

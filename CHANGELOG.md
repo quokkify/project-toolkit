@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.21.1](https://github.com/quokkify/project-toolkit/compare/v2.21.0...v2.21.1) (2026-09-09)
+
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+<!-- project-toolkit:rich-release-notes pr=219 -->
+chore(deps): update allure to v3.16.1
+<!-- project-toolkit:rich-release-notes pr=220 -->
+chore(deps): update copier to v9.18.2
+<!-- project-toolkit:rich-release-notes pr=221 -->
+chore(deps): update quokkify/project-toolkit to v2.21.0
+<!-- project-toolkit:rich-release-notes pr=222 -->
+chore(deps): update renovate to v44.69.13
+<!-- project-toolkit:rich-release-notes pr=223 -->
+chore(deps): update actions/checkout action to v7
+<!-- project-toolkit:rich-release-notes pr=224 -->
+chore(deps): update node to v24.21.0
+<!-- project-toolkit:rich-block:end -->
+
+### 🐛 Bug Fixes
+
+* **fleet:** seed release manifest after copier update ([3219caa](https://github.com/quokkify/project-toolkit/commit/3219caae5280f9705b9867a115b25edfc34dd577))
+* **release:** group dependency enrichment headings ([#230](https://github.com/quokkify/project-toolkit/issues/230)) ([511fff3](https://github.com/quokkify/project-toolkit/commit/511fff32c58529294e4d29467424bca0eefc3468))
+* **release:** keep dependency notes visible in template ([#225](https://github.com/quokkify/project-toolkit/issues/225)) ([ab0714a](https://github.com/quokkify/project-toolkit/commit/ab0714a537b9480e8754ddbba38201128e339d28))
+* **release:** migrate legacy dependency notes ([#227](https://github.com/quokkify/project-toolkit/issues/227)) ([94973f7](https://github.com/quokkify/project-toolkit/commit/94973f76667b4a5e4c3be88a50b43486c11a2758))
+* **release:** preserve legacy dependency discovery ([#228](https://github.com/quokkify/project-toolkit/issues/228)) ([597983d](https://github.com/quokkify/project-toolkit/commit/597983ddd1575da39a6fb7917d15ecdd489e089a))
+
 ## [2.21.0](https://github.com/quokkify/project-toolkit/compare/v2.20.1...v2.21.0) (2026-09-09)
 
 

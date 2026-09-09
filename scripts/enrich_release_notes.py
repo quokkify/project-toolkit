@@ -139,7 +139,7 @@ def _remove_legacy_block(top: str) -> str:
 
 
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
-    entries: list[tuple[int, str, dict[str, str]]] = []
+    entries: list[tuple[int, str, dict[str, str], bool]] = []
     seen: set[str] = set()
     for pr in prs:
         number = str(pr.get("number", "")).strip()
@@ -169,13 +169,15 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             for value in untrusted
             for marker in reserved
         ):
-            entries.append((int(number), title, sections))
+            entries.append((int(number), title, sections, pr.get("legacy_dependency") is True))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
-    for number_value, title, sections in entries:
+    for number_value, title, sections, legacy_dependency in entries:
         number = str(number_value)
         blocks.append(MARKER.format(number=number))
-        if title:
+        # Legacy dependency titles are the dependency content itself.  Do not
+        # repeat them as a separate entry heading in generated output.
+        if title and not legacy_dependency:
             blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():
             if key in sections:

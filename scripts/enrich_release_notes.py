@@ -33,6 +33,31 @@ class EnrichmentError(RuntimeError):
     """Raised when release metadata is unsafe or ambiguous."""
 
 
+def _render_dependency_title(title: str, *, number: str, pr: Mapping[str, object]) -> str:
+    """Render a title-only dependency with visible source attribution."""
+    description = DEPENDENCY_TITLE_PATTERN.sub("", title, count=1).strip() or "Dependency update"
+    pr_url = pr.get("pr_url")
+    attribution = f"([#{number}]({pr_url}))" if isinstance(pr_url, str) and pr_url else f"(#{number})"
+    commit_url = pr.get("commit_url")
+    commit_sha = pr.get("commit_sha")
+    if isinstance(commit_url, str) and commit_url and isinstance(commit_sha, str) and commit_sha:
+        attribution += f" ([{commit_sha[:7]}]({commit_url}))"
+    return f"- {description} {attribution}"
+
+
+def _render_dependency_content(content: str) -> str:
+    """Normalize dependency entries to bullets without losing Markdown links."""
+    rendered: list[str] = []
+    for line in content.splitlines():
+        line = DEPENDENCY_TITLE_PATTERN.sub("", line.strip(), count=1).strip()
+        if not line:
+            continue
+        if not re.match(r"^(?:[-*+] |\d+[.)] )", line):
+            line = f"- {line}"
+        rendered.append(line)
+    return "\n".join(rendered) or "- Dependency update"
+
+
 def _without_comments(lines: Iterable[str]) -> str:
     text = "\n".join(lines).strip()
     return re.sub(r"<!--[\s\S]*?-->", "", text).strip()
@@ -142,7 +167,7 @@ def _remove_legacy_block(top: str) -> str:
 
 
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
-    entries: list[tuple[int, str, dict[str, str], bool]] = []
+    entries: list[tuple[int, str, dict[str, str], bool, Mapping[str, object]]] = []
     seen: set[str] = set()
     for pr in prs:
         number = str(pr.get("number", "")).strip()
@@ -178,11 +203,11 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             for value in untrusted
             for marker in reserved
         ):
-            entries.append((int(number), title, sections, pr.get("legacy_dependency") is True))
+            entries.append((int(number), title, sections, pr.get("legacy_dependency") is True, pr))
     entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
     dependency_heading_written = False
-    for number_value, title, sections, legacy_dependency in entries:
+    for number_value, title, sections, legacy_dependency, pr in entries:
         number = str(number_value)
         has_dependency_section = "dependencies" in sections
         if has_dependency_section and not dependency_heading_written:
@@ -190,7 +215,12 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             dependency_heading_written = True
         blocks.append(MARKER.format(number=number))
         if has_dependency_section:
-            blocks.append(sections["dependencies"])
+            content = sections["dependencies"]
+            if legacy_dependency and content == title:
+                content = _render_dependency_title(title, number=number, pr=pr)
+            else:
+                content = _render_dependency_content(content)
+            blocks.append(content)
         elif title and not legacy_dependency:
             blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():
@@ -586,6 +616,12 @@ def prepare_release_enrichment(
             "title": str(source.get("title", "")),
             "body": str(source.get("body") or ""),
             "legacy_dependency": number in legacy_numbers,
+            "pr_url": str(source.get("html_url") or ""),
+            "commit_sha": str(source.get("merge_commit_sha") or ""),
+            "commit_url": (
+                f"https://github.com/{repository}/commit/{source['merge_commit_sha']}"
+                if source.get("merge_commit_sha") else ""
+            ),
         }
 
     rendered_numbers: set[int] = set()

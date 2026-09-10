@@ -138,7 +138,8 @@ class RichNotesTests(TestCase):
             self.assertEqual(output.count(notes.DEPENDENCIES_HEADING), 1)
             for number in range(219, 225):
                 self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
-                self.assertEqual(output.count(f"chore(deps): update package {number}"), 1)
+                self.assertEqual(output.count(f"- update package {number}"), 1)
+                self.assertNotIn("chore(deps)", output)
 
     def test_dependency_heading_is_deduplicated_and_bare_chore_is_hidden(self):
         prs = [
@@ -273,7 +274,72 @@ class RichNotesTests(TestCase):
             set(),
         )
         self.assertIn("### 📦 Dependencies", rendered)
-        self.assertIn("chore(deps): update allure", rendered)
+        self.assertIn("- update allure", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+
+    def test_dependency_titles_render_as_bullets_without_conventional_prefix(self):
+        rendered = notes._render_entries(
+            [
+                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
+                {"number": 2, "title": "deps(deps): update two (#2)", "legacy_dependency": True},
+            ],
+            set(),
+        )
+        self.assertEqual(rendered.count("### 📦 Dependencies"), 1)
+        self.assertIn("- update one", rendered)
+        self.assertIn("- update two (#2)", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+        self.assertNotIn("deps(deps)", rendered)
+
+    def test_rich_dependency_content_is_preserved_for_legacy_mapping(self):
+        rendered = notes._render_entries(
+            [{
+                "number": 1,
+                "title": "chore(deps): update one",
+                "body": "## Dependencies\n- update one with compatibility note",
+                "legacy_dependency": True,
+            }],
+            set(),
+        )
+        self.assertIn("- update one with compatibility note", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+
+    def test_rich_linked_dependency_entries_are_bulleted_and_prefix_free(self):
+        rendered = notes._render_entries(
+            [{
+                "number": 12,
+                "title": "dependency summary",
+                "body": (
+                    "## Dependencies\n"
+                    "chore(deps): [update one](https://example.test/one)\n"
+                    "deps(deps): [update two](https://example.test/two)\n"
+                ),
+            }],
+            set(),
+        )
+        self.assertIn("- [update one](https://example.test/one)", rendered)
+        self.assertIn("- [update two](https://example.test/two)", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+        self.assertNotIn("deps(deps)", rendered)
+
+    def test_title_only_legacy_dependency_keeps_pr_and_commit_attribution(self):
+        sha = "a" * 40
+        rendered = notes._render_entries(
+            [{
+                "number": 219,
+                "title": "chore(deps): update allure",
+                "body": "",
+                "legacy_dependency": True,
+                "pr_url": "https://github.com/acme/widget/pull/219",
+                "commit_sha": sha,
+                "commit_url": f"https://github.com/acme/widget/commit/{sha}",
+            }],
+            set(),
+        )
+        self.assertIn("- update allure", rendered)
+        self.assertIn("[#219](https://github.com/acme/widget/pull/219)", rendered)
+        self.assertIn(f"[aaaaaaa](https://github.com/acme/widget/commit/{sha})", rendered)
+        self.assertNotIn("chore(deps)", rendered)
 
     def test_legacy_dependency_entries_render_exactly_once_in_changelog_and_body(self):
         prs = [
@@ -292,8 +358,10 @@ class RichNotesTests(TestCase):
         for number in range(219, 225):
             title = f"chore(deps): update package-{number}"
             with self.subTest(number=number):
-                self.assertEqual(top.count(title), 1)
-                self.assertEqual(release_body.count(title), 1)
+                self.assertEqual(top.count(title), 0)
+                self.assertEqual(release_body.count(title), 0)
+                self.assertEqual(top.count(f"- update package-{number}"), 1)
+                self.assertEqual(release_body.count(f"- update package-{number}"), 1)
 
     def test_legacy_dependency_discovery_uses_previous_release_tag(self):
         changelog = "## 2.21.1\n\n## 2.21.0\n"

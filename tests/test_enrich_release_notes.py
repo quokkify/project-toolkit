@@ -304,6 +304,43 @@ class RichNotesTests(TestCase):
         self.assertIn("- update one with compatibility note", rendered)
         self.assertNotIn("chore(deps)", rendered)
 
+    def test_rich_linked_dependency_entries_are_bulleted_and_prefix_free(self):
+        rendered = notes._render_entries(
+            [{
+                "number": 12,
+                "title": "dependency summary",
+                "body": (
+                    "## Dependencies\n"
+                    "chore(deps): [update one](https://example.test/one)\n"
+                    "deps(deps): [update two](https://example.test/two)\n"
+                ),
+            }],
+            set(),
+        )
+        self.assertIn("- [update one](https://example.test/one)", rendered)
+        self.assertIn("- [update two](https://example.test/two)", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+        self.assertNotIn("deps(deps)", rendered)
+
+    def test_title_only_legacy_dependency_keeps_pr_and_commit_attribution(self):
+        sha = "a" * 40
+        rendered = notes._render_entries(
+            [{
+                "number": 219,
+                "title": "chore(deps): update allure",
+                "body": "",
+                "legacy_dependency": True,
+                "pr_url": "https://github.com/acme/widget/pull/219",
+                "commit_sha": sha,
+                "commit_url": f"https://github.com/acme/widget/commit/{sha}",
+            }],
+            set(),
+        )
+        self.assertIn("- update allure", rendered)
+        self.assertIn("[#219](https://github.com/acme/widget/pull/219)", rendered)
+        self.assertIn(f"[aaaaaaa](https://github.com/acme/widget/commit/{sha})", rendered)
+        self.assertNotIn("chore(deps)", rendered)
+
     def test_legacy_dependency_entries_render_exactly_once_in_changelog_and_body(self):
         prs = [
             {

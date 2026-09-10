@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.21.2](https://github.com/quokkify/project-toolkit/compare/v2.21.1...v2.21.2) (2026-09-10)
+
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update github actions non-major updates ([#233](https://github.com/quokkify/project-toolkit/pull/233)) ([a8425f2](https://github.com/quokkify/project-toolkit/commit/a8425f283c90396381c4e1b356f0c799a0752c8d)) <!-- project-toolkit:rich-release-notes pr=233 -->
+- update allure to v3.17.0 ([#234](https://github.com/quokkify/project-toolkit/pull/234)) ([83e7163](https://github.com/quokkify/project-toolkit/commit/83e71639a5ecbf5ab13e2b1e97ba9c8056f64a93)) <!-- project-toolkit:rich-release-notes pr=234 -->
+- update renovate to v44.79.1 ([#235](https://github.com/quokkify/project-toolkit/pull/235)) ([35260a2](https://github.com/quokkify/project-toolkit/commit/35260a2a3a9c64fc7faa8515a56558d9df761f7a)) <!-- project-toolkit:rich-release-notes pr=235 -->
+- update github/codeql-action/analyze digest to b96794f ([#236](https://github.com/quokkify/project-toolkit/pull/236)) ([fb77ec8](https://github.com/quokkify/project-toolkit/commit/fb77ec8441277ea27893f68a110be24969eef137)) <!-- project-toolkit:rich-release-notes pr=236 -->
+- update github/codeql-action/init digest to b96794f ([#237](https://github.com/quokkify/project-toolkit/pull/237)) ([7706723](https://github.com/quokkify/project-toolkit/commit/7706723be734c20e6a3eb68d13399d1cc14b0dca)) <!-- project-toolkit:rich-release-notes pr=237 -->
+<!-- project-toolkit:rich-block:end -->
+
+### 🐛 Bug Fixes
+
+* **release:** defer mixed dependency sections ([1bd7d26](https://github.com/quokkify/project-toolkit/commit/1bd7d269096cd3c338530a0df4b5de039ab1a501))
+* **release:** render dependency notes as bullets ([#231](https://github.com/quokkify/project-toolkit/issues/231)) ([04a05ed](https://github.com/quokkify/project-toolkit/commit/04a05eda4e38d1ecdc5a6a00ba359b40814d9b59))
+
 ## [2.21.1](https://github.com/quokkify/project-toolkit/compare/v2.21.0...v2.21.1) (2026-09-09)
 
 <!-- project-toolkit:rich-block:start -->

@@ -33,6 +33,12 @@ class EnrichmentError(RuntimeError):
     """Raised when release metadata is unsafe or ambiguous."""
 
 
+def _render_dependency_title(title: str) -> str:
+    """Render a dependency title as one user-facing Markdown bullet."""
+    description = DEPENDENCY_TITLE_PATTERN.sub("", title, count=1).strip()
+    return f"- {description}" if description else "- Dependency update"
+
+
 def _without_comments(lines: Iterable[str]) -> str:
     text = "\n".join(lines).strip()
     return re.sub(r"<!--[\s\S]*?-->", "", text).strip()
@@ -190,7 +196,10 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             dependency_heading_written = True
         blocks.append(MARKER.format(number=number))
         if has_dependency_section:
-            blocks.append(sections["dependencies"])
+            content = sections["dependencies"]
+            if legacy_dependency and content == title:
+                content = _render_dependency_title(title)
+            blocks.append(content)
         elif title and not legacy_dependency:
             blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():

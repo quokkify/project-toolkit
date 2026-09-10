@@ -220,27 +220,32 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         ):
             entries.append((int(number), title, sections, pr.get("legacy_dependency") is True, pr))
     entries.sort(key=lambda item: item[0])
-    # Keep every dependency bullet together.  Markdown treats a heading,
+    # Keep every dependency bullet together. Markdown treats a heading,
     # paragraph, or another list as a boundary, so rendering in PR-number
     # order would split the dependency list when a rich non-dependency PR is
-    # interleaved between dependency PRs.
-    entries.sort(key=lambda item: ("dependencies" not in item[2], item[0]))
+    # interleaved between dependency PRs. A mixed entry must also defer its
+    # non-dependency sections until this first phase is complete.
+    entries.sort(key=lambda item: item[0])
     blocks: list[str] = []
     dependency_heading_written = False
     for number_value, title, sections, legacy_dependency, pr in entries:
         number = str(number_value)
         has_dependency_section = "dependencies" in sections
-        if has_dependency_section and not dependency_heading_written:
+        if not has_dependency_section:
+            continue
+        if not dependency_heading_written:
             blocks.append(DEPENDENCIES_HEADING)
             dependency_heading_written = True
-        if has_dependency_section:
-            content = sections["dependencies"]
-            if legacy_dependency and content == title:
-                content = _render_dependency_title(title, number=number, pr=pr)
-            else:
-                content = _render_dependency_content(content)
-            blocks.append(_add_dependency_marker(content, MARKER.format(number=number)))
+        content = sections["dependencies"]
+        if legacy_dependency and content == title:
+            content = _render_dependency_title(title, number=number, pr=pr)
         else:
+            content = _render_dependency_content(content)
+        blocks.append(_add_dependency_marker(content, MARKER.format(number=number)))
+    for number_value, title, sections, legacy_dependency, _pr in entries:
+        number = str(number_value)
+        has_dependency_section = "dependencies" in sections
+        if not has_dependency_section:
             blocks.append(MARKER.format(number=number))
             if title and not legacy_dependency:
                 blocks.append(f"#### {title}")

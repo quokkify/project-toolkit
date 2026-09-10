@@ -379,6 +379,29 @@ class RichNotesTests(TestCase):
         )
         self.assertNotIn("\n\n", rendered[dependency_start:highlight_start])
 
+    def test_mixed_dependency_and_highlight_stays_before_later_dependency(self):
+        rendered = notes._render_entries(
+            [
+                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
+                {
+                    "number": 2,
+                    "title": "mixed update",
+                    "body": "## Dependencies\n- update two\n## Highlight\nUseful note",
+                },
+                {"number": 3, "title": "chore(deps): update three", "legacy_dependency": True},
+            ],
+            set(),
+        )
+        dependency_start = rendered.index(notes.DEPENDENCIES_HEADING)
+        highlight_start = rendered.index("### Highlights")
+        dependency_text = rendered[dependency_start:highlight_start]
+        self.assertEqual(dependency_text.count("\n- "), 3)
+        self.assertEqual(dependency_text.count("rich-release-notes pr="), 3)
+        self.assertLess(dependency_text.index("update one"), dependency_text.index("update two"))
+        self.assertLess(dependency_text.index("update two"), dependency_text.index("update three"))
+        self.assertEqual(rendered.count("### Highlights"), 1)
+        self.assertEqual(rendered.count("Useful note"), 1)
+
     def test_rich_number_parser_accepts_only_machine_marker_shapes(self):
         marker = "<!-- project-toolkit:rich-release-notes pr=999 -->"
         text = "\n".join(

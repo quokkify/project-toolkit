@@ -322,6 +322,42 @@ class RichNotesTests(TestCase):
         self.assertNotIn("chore(deps)", rendered)
         self.assertNotIn("deps(deps)", rendered)
 
+    def test_dependency_markers_stay_inside_one_contiguous_markdown_list(self):
+        rendered = notes._render_entries(
+            [
+                {
+                    "number": 1,
+                    "title": "chore(deps): update one",
+                    "body": "",
+                    "legacy_dependency": True,
+                },
+                {
+                    "number": 2,
+                    "title": "deps(deps): [update two](https://example.test/two)",
+                    "body": "",
+                    "legacy_dependency": True,
+                },
+                {"number": 3, "title": "feature", "body": "## Highlight\nUseful note"},
+            ],
+            set(),
+        )
+        self.assertEqual(
+            rendered,
+            "\n".join(
+                [
+                    "### 📦 Dependencies",
+                    "- update one (#1) <!-- project-toolkit:rich-release-notes pr=1 -->",
+                    "- [update two](https://example.test/two) (#2) <!-- project-toolkit:rich-release-notes pr=2 -->",
+                    "<!-- project-toolkit:rich-release-notes pr=3 -->",
+                    "#### feature",
+                    "### Highlights",
+                    "Useful note",
+                ]
+            ),
+        )
+        self.assertEqual(notes._rich_numbers(rendered), {"1", "2", "3"})
+        self.assertNotIn("\n\n-", rendered)
+
     def test_title_only_legacy_dependency_keeps_pr_and_commit_attribution(self):
         sha = "a" * 40
         rendered = notes._render_entries(

@@ -19,7 +19,7 @@ RICH_HEADINGS = {
 }
 MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
 MARKER_PREFIX = "<!-- project-toolkit:rich-release-notes "
-MARKER_PATTERN = re.compile(r"^<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->$")
+MARKER_PATTERN = re.compile(r"<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->")
 BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
 BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -56,6 +56,13 @@ def _render_dependency_content(content: str) -> str:
             line = f"- {line}"
         rendered.append(line)
     return "\n".join(rendered) or "- Dependency update"
+
+
+def _add_dependency_marker(content: str, marker: str) -> str:
+    """Keep the source marker inside the dependency list item."""
+    lines = content.splitlines()
+    lines[0] = f"{lines[0]} {marker}"
+    return "\n".join(lines)
 
 
 def _without_comments(lines: Iterable[str]) -> str:
@@ -130,7 +137,7 @@ def _rich_numbers(text: str) -> set[str]:
                 fence = None
             continue
         if fence is None:
-            marker = MARKER_PATTERN.fullmatch(line.strip())
+            marker = MARKER_PATTERN.search(line)
             if marker:
                 numbers.add(marker.group(1))
     return numbers
@@ -213,16 +220,17 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         if has_dependency_section and not dependency_heading_written:
             blocks.append(DEPENDENCIES_HEADING)
             dependency_heading_written = True
-        blocks.append(MARKER.format(number=number))
         if has_dependency_section:
             content = sections["dependencies"]
             if legacy_dependency and content == title:
                 content = _render_dependency_title(title, number=number, pr=pr)
             else:
                 content = _render_dependency_content(content)
-            blocks.append(content)
-        elif title and not legacy_dependency:
-            blocks.append(f"#### {title}")
+            blocks.append(_add_dependency_marker(content, MARKER.format(number=number)))
+        else:
+            blocks.append(MARKER.format(number=number))
+            if title and not legacy_dependency:
+                blocks.append(f"#### {title}")
         for key, heading in RICH_HEADINGS.items():
             if key == "dependencies":
                 continue

@@ -322,6 +322,122 @@ class RichNotesTests(TestCase):
         self.assertNotIn("chore(deps)", rendered)
         self.assertNotIn("deps(deps)", rendered)
 
+    def test_dependency_markers_stay_inside_one_contiguous_markdown_list(self):
+        rendered = notes._render_entries(
+            [
+                {
+                    "number": 1,
+                    "title": "chore(deps): update one",
+                    "body": "",
+                    "legacy_dependency": True,
+                },
+                {
+                    "number": 2,
+                    "title": "deps(deps): [update two](https://example.test/two)",
+                    "body": "",
+                    "legacy_dependency": True,
+                },
+                {"number": 3, "title": "feature", "body": "## Highlight\nUseful note"},
+            ],
+            set(),
+        )
+        self.assertEqual(
+            rendered,
+            "\n".join(
+                [
+                    "### 📦 Dependencies",
+                    "- update one (#1) <!-- project-toolkit:rich-release-notes pr=1 -->",
+                    "- [update two](https://example.test/two) (#2) <!-- project-toolkit:rich-release-notes pr=2 -->",
+                    "<!-- project-toolkit:rich-release-notes pr=3 -->",
+                    "#### feature",
+                    "### Highlights",
+                    "Useful note",
+                ]
+            ),
+        )
+        self.assertEqual(notes._rich_numbers(rendered), {"1", "2", "3"})
+        self.assertNotIn("\n\n-", rendered)
+
+    def test_interleaved_rich_entries_keep_dependency_list_contiguous(self):
+        rendered = notes._render_entries(
+            [
+                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
+                {"number": 2, "title": "Highlight", "body": "## Highlight\nUseful note"},
+                {"number": 3, "title": "chore(deps): update three", "legacy_dependency": True},
+            ],
+            set(),
+        )
+        self.assertEqual(rendered.count(notes.DEPENDENCIES_HEADING), 1)
+        dependency_start = rendered.index(notes.DEPENDENCIES_HEADING)
+        highlight_start = rendered.index("<!-- project-toolkit:rich-release-notes pr=2 -->")
+        dependency_end = rendered.index("<!-- project-toolkit:rich-release-notes pr=3 -->")
+        self.assertLess(dependency_start, highlight_start)
+        self.assertLess(dependency_end, highlight_start)
+        self.assertEqual(
+            rendered[dependency_start:highlight_start].count("\n- "),
+            2,
+        )
+        self.assertNotIn("\n\n", rendered[dependency_start:highlight_start])
+
+    def test_mixed_dependency_and_highlight_stays_before_later_dependency(self):
+        rendered = notes._render_entries(
+            [
+                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
+                {
+                    "number": 2,
+                    "title": "mixed update",
+                    "body": "## Dependencies\n- update two\n## Highlight\nUseful note",
+                },
+                {"number": 3, "title": "chore(deps): update three", "legacy_dependency": True},
+            ],
+            set(),
+        )
+        dependency_start = rendered.index(notes.DEPENDENCIES_HEADING)
+        highlight_start = rendered.index("### Highlights")
+        dependency_text = rendered[dependency_start:highlight_start]
+        self.assertEqual(dependency_text.count("\n- "), 3)
+        self.assertEqual(dependency_text.count("rich-release-notes pr="), 3)
+        self.assertLess(dependency_text.index("update one"), dependency_text.index("update two"))
+        self.assertLess(dependency_text.index("update two"), dependency_text.index("update three"))
+        self.assertEqual(rendered.count("### Highlights"), 1)
+        self.assertEqual(rendered.count("Useful note"), 1)
+
+    def test_rich_number_parser_accepts_only_machine_marker_shapes(self):
+        marker = "<!-- project-toolkit:rich-release-notes pr=999 -->"
+        text = "\n".join(
+            [
+                marker,
+                f"- generated dependency {marker}",
+                f"literal documentation example: {marker} trailing text",
+                f"- malformed {marker} trailing text",
+                f"- multiple {marker} {marker}",
+                "```md",
+                marker,
+                f"- fenced dependency {marker}",
+                "```",
+            ]
+        )
+        self.assertEqual(notes._rich_numbers(text), {"999"})
+        self.assertEqual(
+            notes._rich_numbers(
+                f"literal documentation example: {marker} trailing text\n"
+                f"- malformed {marker} trailing text\n"
+                f"- multiple {marker} {marker}"
+            ),
+            set(),
+        )
+
+    def test_documentation_marker_substring_does_not_suppress_current_pr(self):
+        changelog = (
+            "## 1.0.0\n\n"
+            "literal documentation example: "
+            "<!-- project-toolkit:rich-release-notes pr=999 --> trailing text\n"
+        )
+        prs = [{"number": 999, "title": "Current highlight", "body": "## Highlight\nCurrent note"}]
+        output = notes.enrich_changelog(changelog, prs)
+        self.assertIn("Current note", output)
+        self.assertIn("rich-release-notes pr=999", output)
+
     def test_title_only_legacy_dependency_keeps_pr_and_commit_attribution(self):
         sha = "a" * 40
         rendered = notes._render_entries(

@@ -20,6 +20,12 @@ RICH_HEADINGS = {
 MARKER = "<!-- project-toolkit:rich-release-notes pr={number} -->"
 MARKER_PREFIX = "<!-- project-toolkit:rich-release-notes "
 MARKER_PATTERN = re.compile(r"<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->")
+STANDALONE_MARKER_PATTERN = re.compile(
+    r"^\s*<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->\s*$"
+)
+INLINE_MARKER_PATTERN = re.compile(
+    r"^\s*[-*+]\s+.+?\s+<!-- project-toolkit:rich-release-notes pr=([0-9]+) -->\s*$"
+)
 BLOCK_START = "<!-- project-toolkit:rich-block:start -->"
 BLOCK_END = "<!-- project-toolkit:rich-block:end -->"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -124,7 +130,7 @@ def _version_ranges(changelog: str) -> list[tuple[int, int]]:
 
 
 def _rich_numbers(text: str) -> set[str]:
-    """Read only canonical machine marker lines outside fenced Markdown."""
+    """Read canonical markers outside fences, not arbitrary prose."""
     numbers: set[str] = set()
     fence: tuple[str, int] | None = None
     for line in text.splitlines():
@@ -137,7 +143,9 @@ def _rich_numbers(text: str) -> set[str]:
                 fence = None
             continue
         if fence is None:
-            marker = MARKER_PATTERN.search(line)
+            marker = None
+            if line.count(MARKER_PREFIX) == 1:
+                marker = STANDALONE_MARKER_PATTERN.fullmatch(line) or INLINE_MARKER_PATTERN.fullmatch(line)
             if marker:
                 numbers.add(marker.group(1))
     return numbers
@@ -212,6 +220,11 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
         ):
             entries.append((int(number), title, sections, pr.get("legacy_dependency") is True, pr))
     entries.sort(key=lambda item: item[0])
+    # Keep every dependency bullet together.  Markdown treats a heading,
+    # paragraph, or another list as a boundary, so rendering in PR-number
+    # order would split the dependency list when a rich non-dependency PR is
+    # interleaved between dependency PRs.
+    entries.sort(key=lambda item: ("dependencies" not in item[2], item[0]))
     blocks: list[str] = []
     dependency_heading_written = False
     for number_value, title, sections, legacy_dependency, pr in entries:

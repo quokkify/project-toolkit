@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.2](https://github.com/quokkify/project-toolkit/compare/v2.21.1...v2.21.2) (2026-09-10)
+
+
+### 🐛 Bug Fixes
+
+* **release:** render dependency notes as bullets ([#231](https://github.com/quokkify/project-toolkit/issues/231)) ([04a05ed](https://github.com/quokkify/project-toolkit/commit/04a05eda4e38d1ecdc5a6a00ba359b40814d9b59))
+
 ## [2.21.1](https://github.com/quokkify/project-toolkit/compare/v2.21.0...v2.21.1) (2026-09-09)
 
 <!-- project-toolkit:rich-block:start -->

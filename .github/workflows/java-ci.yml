@@ -82,6 +82,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out toolkit actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: quokkify/project-toolkit
+          ref: ${{ github.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
       - name: Resolve build tool for dependency cache
         id: cache
         env:
@@ -148,7 +155,7 @@ jobs:
         run: bash -euo pipefail -c "$COMMAND"
       - name: Gradle lint or check with bounded recovery
         if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'gradle' }}
-        uses: ./actions/gradle-retry
+        uses: ./.toolkit/actions/gradle-retry
         with:
           command: ${{ steps.commands.outputs.lint }}
       - name: Maven lint or check
@@ -158,7 +165,7 @@ jobs:
         run: bash -euo pipefail -c "$COMMAND"
       - name: Gradle test with bounded recovery
         if: ${{ inputs.run-tests && steps.cache.outputs.tool == 'gradle' }}
-        uses: ./actions/gradle-retry
+        uses: ./.toolkit/actions/gradle-retry
         with:
           command: ${{ steps.commands.outputs.test }}
       - name: Maven test
@@ -168,7 +175,7 @@ jobs:
         run: bash -euo pipefail -c "$COMMAND"
       - name: Gradle build with bounded recovery
         if: ${{ inputs.run-build && steps.cache.outputs.tool == 'gradle' }}
-        uses: ./actions/gradle-retry
+        uses: ./.toolkit/actions/gradle-retry
         with:
           command: ${{ steps.commands.outputs.build }}
       - name: Maven build

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a Gradle command with bounded recovery for transient resolution failures.
-# 429 failures retain exponential retry; a not-found failure gets one refresh.
+# 429 failures retain exponential retry; a dependency not-found gets one refresh.
 set -uo pipefail
 
 command_string="${GRADLE_RETRY_COMMAND:-}"
@@ -48,9 +48,15 @@ while true; do
     continue
   fi
 
-  is_not_found=0
-  grep -qE 'Could not find .+' "$output" && is_not_found=1
-  if [[ "$is_not_found" -eq 1 && "$refresh_attempted" -eq 0 && "$command_string" != *--refresh-dependencies* ]]; then
+  # Gradle's dependency-resolution not-found report includes both the module
+  # coordinates and a repository search section. Do not treat unrelated DSL
+  # errors such as "Could not find method implementation()" as resolvable.
+  is_dependency_not_found=0
+  if grep -qE 'Could not find [^[:space:]]+:[^[:space:]]+:[^[:space:]]+' "$output" \
+    && grep -qE 'Searched in:' "$output"; then
+    is_dependency_not_found=1
+  fi
+  if [[ "$is_dependency_not_found" -eq 1 && "$refresh_attempted" -eq 0 && "$command_string" != *--refresh-dependencies* ]]; then
     refresh_attempted=1
     command_string="$command_string --refresh-dependencies"
     echo "::warning::Gradle dependency resolution failed; retrying once with --refresh-dependencies."

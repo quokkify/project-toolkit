@@ -8,6 +8,8 @@ Examples use the current toolkit release, `v2.6.0`. Renovate updates the referen
   - setup-python with dependency cache and install handling
 - `actions/setup-node/action.yml`
   - setup-node with package-manager detection and cache
+- `actions/setup-java-gradle/action.yml`
+  - setup-java with dependency/JDK caching and Gradle wrapper validation
 - `actions/gradle-retry/action.yml`
   - runs a trusted Gradle command with bounded HTTP 429 backoff and one `--refresh-dependencies` recovery attempt for repository not-found failures
 - `actions/compose-up/action.yml`

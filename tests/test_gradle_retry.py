@@ -23,7 +23,8 @@ class GradleRetryTests(unittest.TestCase):
                 "n=$((n + 1)); printf '%s' \"$n\" > \"$COUNT_FILE\"\n"
                 "case \"$MODE\" in\n"
                 "  ordinary) echo 'compilation failed'; exit 9;;\n"
-                "  not-found) if [[ \"$*\" == *--refresh-dependencies* ]]; then [[ \"${PERSISTENT:-0}\" == 1 ]] && { echo 'Could not find dependency'; exit 7; }; echo success; exit 0; fi; echo 'Could not find dependency'; exit 7;;\n"
+                "  dsl) echo 'Could not find method implementation() for arguments'; exit 11;;\n"
+                "  not-found) if [[ \"$*\" == *--refresh-dependencies* ]]; then [[ \"${PERSISTENT:-0}\" == 1 ]] && { echo 'Could not find org.example:missing:1.0.'; echo 'Searched in:'; exit 7; }; echo success; exit 0; fi; echo 'Could not find org.example:missing:1.0.'; echo 'Searched in:'; exit 7;;\n"
                 "  rate-limit) [[ $n -lt 2 ]] && { echo 'Could not GET repository, status code 429'; exit 8; }; echo success; exit 0;;\n"
                 "esac\n"
             )
@@ -51,6 +52,12 @@ class GradleRetryTests(unittest.TestCase):
         result, calls = self.run_case("ordinary")
         self.assertEqual(result.returncode, 9)
         self.assertEqual(calls, 1)
+
+    def test_dsl_not_found_is_not_retried_or_refreshed(self) -> None:
+        result, calls = self.run_case("dsl")
+        self.assertEqual(result.returncode, 11)
+        self.assertEqual(calls, 1)
+        self.assertNotIn("refresh-dependencies", result.stdout)
 
     def test_not_found_gets_exactly_one_refresh_retry(self) -> None:
         result, calls = self.run_case("not-found")

@@ -1055,6 +1055,7 @@ EXPECTED_ACTIONS = {
     "allure-report",
     "compose-up",
     "deploy-gh-pages-subdir",
+    "gradle-retry",
     "junit-step-summary",
     "setup-java-gradle",
     "setup-node",
@@ -1130,7 +1131,7 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
 action_paths = sorted((ROOT / "actions").glob("*/action.yml"))
 check(
     {path.parent.name for path in action_paths} == EXPECTED_ACTIONS,
-    "actions/: expected exactly the six documented composite actions",
+    "actions/: expected exactly the eight documented composite actions",
 )
 for action_path in action_paths:
     data = yaml.safe_load(action_path.read_text())

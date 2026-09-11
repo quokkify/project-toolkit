@@ -9,7 +9,9 @@ Examples use the current toolkit release, `v2.6.0`. Renovate updates the referen
 - `actions/setup-node/action.yml`
   - setup-node with package-manager detection and cache
 - `actions/setup-java-gradle/action.yml`
-  - setup-java + Gradle caching with wrapper validation enabled by default and workspace-relative wrapper resolution
+  - setup-java with dependency/JDK caching and Gradle wrapper validation
+- `actions/gradle-retry/action.yml`
+  - runs a trusted Gradle command with bounded HTTP 429 backoff and one `--refresh-dependencies` recovery attempt for repository not-found failures
 - `actions/compose-up/action.yml`
   - validates safe Compose/profile/hook inputs, delegates one startup lifecycle to the standalone health action, and optionally waits for HTTP readiness
 - `actions/deploy-gh-pages-subdir/action.yml`

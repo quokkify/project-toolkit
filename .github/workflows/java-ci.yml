@@ -82,6 +82,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out toolkit actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
       - name: Resolve build tool for dependency cache
         id: cache
         env:
@@ -107,6 +114,7 @@ jobs:
             ${{ inputs.working-directory }}/**/gradle-wrapper.properties
             ${{ inputs.working-directory }}/**/*.gradle*
             ${{ inputs.working-directory }}/**/gradle.properties
+            ${{ inputs.working-directory }}/**/*.versions.toml
             ${{ inputs.working-directory }}/**/pom.xml
             ${{ inputs.working-directory }}/**/.mvn/extensions.xml
       - name: Resolve build tool and commands
@@ -145,18 +153,33 @@ jobs:
         env:
           COMMAND: ${{ inputs.install-command }}
         run: bash -euo pipefail -c "$COMMAND"
-      - name: Lint or check
-        if: ${{ inputs.run-lint }}
+      - name: Gradle lint or check with bounded recovery
+        if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          command: ${{ steps.commands.outputs.lint }}
+      - name: Maven lint or check
+        if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'maven' }}
         env:
           COMMAND: ${{ steps.commands.outputs.lint }}
         run: bash -euo pipefail -c "$COMMAND"
-      - name: Test
-        if: ${{ inputs.run-tests }}
+      - name: Gradle test with bounded recovery
+        if: ${{ inputs.run-tests && steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          command: ${{ steps.commands.outputs.test }}
+      - name: Maven test
+        if: ${{ inputs.run-tests && steps.cache.outputs.tool == 'maven' }}
         env:
           COMMAND: ${{ steps.commands.outputs.test }}
         run: bash -euo pipefail -c "$COMMAND"
-      - name: Build
-        if: ${{ inputs.run-build }}
+      - name: Gradle build with bounded recovery
+        if: ${{ inputs.run-build && steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          command: ${{ steps.commands.outputs.build }}
+      - name: Maven build
+        if: ${{ inputs.run-build && steps.cache.outputs.tool == 'maven' }}
         env:
           COMMAND: ${{ steps.commands.outputs.build }}
         run: bash -euo pipefail -c "$COMMAND"

@@ -69,6 +69,7 @@ runs:
           ${{ inputs.working-directory }}/**/gradle-wrapper.properties
           ${{ inputs.working-directory }}/**/*.gradle*
           ${{ inputs.working-directory }}/**/gradle.properties
+          ${{ inputs.working-directory }}/**/*.versions.toml
     - name: Resolve Gradle wrapper command
       id: resolve
       shell: bash

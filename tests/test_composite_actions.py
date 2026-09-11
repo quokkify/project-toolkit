@@ -62,6 +62,11 @@ class SetupActionTests(unittest.TestCase):
         self.assertEqual(setup["with"]["cache-jdk"], "${{ inputs.cache-jdk }}")
         self.assertFalse(any(step.get("uses", "").startswith("actions/cache@") for step in steps))
 
+    def test_gradle_cache_includes_version_catalogs(self) -> None:
+        setup = next(step for step in action("setup-java-gradle")["runs"]["steps"] if step.get("name") == "Set up Java")
+        dependency_path = setup["with"]["cache-dependency-path"]
+        self.assertIn("**/*.versions.toml", dependency_path)
+
     def test_python_auto_detects_single_nondefault_requirements_file(self) -> None:
         install = action("setup-python")["runs"]["steps"][-1]
         with tempfile.TemporaryDirectory(prefix="python-action-test-") as tmp:
@@ -1127,6 +1132,59 @@ const core = {
                     "",
                 )
             )
+
+class GradleRetryExternalConsumerTests(unittest.TestCase):
+    def test_java_workflow_resolves_retry_from_toolkit_not_caller_workspace(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        steps = workflow["jobs"]["ci"]["steps"]
+        retry_steps = [
+            step
+            for step in steps
+            if step.get("name", "").startswith("Gradle ")
+            and "bounded recovery" in step.get("name", "")
+        ]
+        toolkit_checkout = next(
+            step for step in steps if step.get("name") == "Check out toolkit actions"
+        )
+        self.assertEqual(toolkit_checkout["with"]["repository"], "${{ job.workflow_repository }}")
+        self.assertEqual(toolkit_checkout["with"]["ref"], "${{ job.workflow_sha }}")
+        self.assertEqual(toolkit_checkout["with"]["path"], ".toolkit")
+        for step in retry_steps:
+            self.assertEqual(step["uses"], "./.toolkit/actions/gradle-retry")
+
+    def test_external_checkout_runtime_uses_action_path(self) -> None:
+        action_data = action("gradle-retry")
+        run_step = action_data["runs"]["steps"][0]
+        with tempfile.TemporaryDirectory(prefix="gradle-external-consumer-") as temporary:
+            root = Path(temporary)
+            caller = root / "caller"
+            toolkit_action = root / "toolkit" / "actions" / "gradle-retry"
+            caller.mkdir()
+            toolkit_action.mkdir(parents=True)
+            script = toolkit_action / "gradle-retry.sh"
+            shutil.copy2(ROOT / "actions/gradle-retry/gradle-retry.sh", script)
+            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+            fake = caller / "gradle"
+            fake.write_text("#!/usr/bin/env bash\necho runtime-success\n")
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            env = {
+                **os.environ,
+                "GITHUB_ACTION_PATH": str(toolkit_action),
+                "GRADLE_RETRY_COMMAND": str(fake),
+                "GRADLE_RETRY_MAX_ATTEMPTS": "1",
+                "GRADLE_RETRY_INITIAL_DELAY_SECONDS": "1",
+            }
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", run_step["run"]],
+                cwd=caller,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("runtime-success", result.stdout)
+
 
 class ReusableTestArtifactContractTests(unittest.TestCase):
     def test_language_workflows_share_opt_in_artifact_contract(self) -> None:

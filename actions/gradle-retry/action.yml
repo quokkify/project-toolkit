@@ -23,4 +23,7 @@ runs:
         GRADLE_RETRY_COMMAND: ${{ inputs.command }}
         GRADLE_RETRY_MAX_ATTEMPTS: ${{ inputs.max-attempts }}
         GRADLE_RETRY_INITIAL_DELAY_SECONDS: ${{ inputs.initial-delay-seconds }}
-      run: "${GITHUB_ACTION_PATH}/gradle-retry.sh"
+      run: |
+        # shellcheck disable=SC2034
+        export GRADLE_RETRY_COMMAND GRADLE_RETRY_MAX_ATTEMPTS GRADLE_RETRY_INITIAL_DELAY_SECONDS
+        "${GITHUB_ACTION_PATH}/gradle-retry.sh"

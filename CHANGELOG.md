@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.3](https://github.com/quokkify/project-toolkit/compare/v2.21.2...v2.21.3) (2026-09-11)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** invalidate Gradle catalogs and bound recovery ([#243](https://github.com/quokkify/project-toolkit/issues/243)) ([1e44ad1](https://github.com/quokkify/project-toolkit/commit/1e44ad17b7e10a2a7ac76a5a15c41a3a8b6a04a5))
+
 ## [2.21.2](https://github.com/quokkify/project-toolkit/compare/v2.21.1...v2.21.2) (2026-09-10)
 
 <!-- project-toolkit:rich-block:start -->

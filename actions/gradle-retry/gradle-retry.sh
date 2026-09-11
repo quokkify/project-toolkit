@@ -53,7 +53,7 @@ while true; do
   # errors such as "Could not find method implementation()" as resolvable.
   is_dependency_not_found=0
   if grep -qE 'Could not find [^[:space:]]+:[^[:space:]]+:[^[:space:]]+' "$output" \
-    && grep -qE 'Searched in:' "$output"; then
+    && grep -qE 'Searched in( the following locations)?:' "$output"; then
     is_dependency_not_found=1
   fi
   if [[ "$is_dependency_not_found" -eq 1 && "$refresh_attempted" -eq 0 && "$command_string" != *--refresh-dependencies* ]]; then

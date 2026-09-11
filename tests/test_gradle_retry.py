@@ -24,7 +24,7 @@ class GradleRetryTests(unittest.TestCase):
                 "case \"$MODE\" in\n"
                 "  ordinary) echo 'compilation failed'; exit 9;;\n"
                 "  dsl) echo 'Could not find method implementation() for arguments'; exit 11;;\n"
-                "  not-found) if [[ \"$*\" == *--refresh-dependencies* ]]; then [[ \"${PERSISTENT:-0}\" == 1 ]] && { echo 'Could not find org.example:missing:1.0.'; echo 'Searched in:'; exit 7; }; echo success; exit 0; fi; echo 'Could not find org.example:missing:1.0.'; echo 'Searched in:'; exit 7;;\n"
+                "  not-found) if [[ \"$*\" == *--refresh-dependencies* ]]; then [[ \"${PERSISTENT:-0}\" == 1 ]] && { echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7; }; echo success; exit 0; fi; echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7;;\n"
                 "  rate-limit) [[ $n -lt 2 ]] && { echo 'Could not GET repository, status code 429'; exit 8; }; echo success; exit 0;;\n"
                 "esac\n"
             )

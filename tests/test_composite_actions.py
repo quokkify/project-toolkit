@@ -1146,8 +1146,8 @@ class GradleRetryExternalConsumerTests(unittest.TestCase):
         toolkit_checkout = next(
             step for step in steps if step.get("name") == "Check out toolkit actions"
         )
-        self.assertEqual(toolkit_checkout["with"]["repository"], "quokkify/project-toolkit")
-        self.assertEqual(toolkit_checkout["with"]["ref"], "${{ github.workflow_sha }}")
+        self.assertEqual(toolkit_checkout["with"]["repository"], "${{ job.workflow_repository }}")
+        self.assertEqual(toolkit_checkout["with"]["ref"], "${{ job.workflow_sha }}")
         self.assertEqual(toolkit_checkout["with"]["path"], ".toolkit")
         for step in retry_steps:
             self.assertEqual(step["uses"], "./.toolkit/actions/gradle-retry")

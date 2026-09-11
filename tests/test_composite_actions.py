@@ -62,6 +62,11 @@ class SetupActionTests(unittest.TestCase):
         self.assertEqual(setup["with"]["cache-jdk"], "${{ inputs.cache-jdk }}")
         self.assertFalse(any(step.get("uses", "").startswith("actions/cache@") for step in steps))
 
+    def test_gradle_cache_includes_version_catalogs(self) -> None:
+        setup = next(step for step in action("setup-java-gradle")["runs"]["steps"] if step.get("name") == "Set up Java")
+        dependency_path = setup["with"]["cache-dependency-path"]
+        self.assertIn("**/*.versions.toml", dependency_path)
+
     def test_python_auto_detects_single_nondefault_requirements_file(self) -> None:
         install = action("setup-python")["runs"]["steps"][-1]
         with tempfile.TemporaryDirectory(prefix="python-action-test-") as tmp:

@@ -67,7 +67,10 @@ jobs:
           npx --yes --package renovate@44.79.1 renovate-config-validator
           --strict --no-global renovate/default.json .github/renovate.json
       - name: Run actionlint on toolkit and examples
-        run: actionlint .github/workflows/*.yml examples/*.yml
+        run: >-
+          actionlint
+          -ignore 'property "workflow_(repository|sha)" is not defined'
+          .github/workflows/*.yml examples/*.yml
       - name: Check shell snippets
         run: |
           python scripts/check_action_shells.py

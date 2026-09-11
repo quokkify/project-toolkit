@@ -2,6 +2,11 @@
 
 ## [2.21.3](https://github.com/quokkify/project-toolkit/compare/v2.21.2...v2.21.3) (2026-09-11)
 
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update quokkify/project-toolkit to v2.21.2 ([#241](https://github.com/quokkify/project-toolkit/pull/241)) ([4e42096](https://github.com/quokkify/project-toolkit/commit/4e4209671fa40b6e2545f3a9581ff9f88e0232a4)) <!-- project-toolkit:rich-release-notes pr=241 -->
+- update renovate to v44.80.0 ([#242](https://github.com/quokkify/project-toolkit/pull/242)) ([1437a02](https://github.com/quokkify/project-toolkit/commit/1437a028b72c7b59d2eaa200aaf12bbb616f1be7)) <!-- project-toolkit:rich-release-notes pr=242 -->
+<!-- project-toolkit:rich-block:end -->
 
 ### 🐛 Bug Fixes
 

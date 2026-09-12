@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -322,26 +323,50 @@ def parse_template_source(raw_answers: str) -> str:
 
 
 def has_custom_allure_outputs(repository_path: Path) -> bool:
-    """Recognize complete custom Allure output in any workflow filename."""
+    """Recognize complete custom Allure output in executable workflow steps."""
     for workflow_path in workflow_files(repository_path):
-        workflow = workflow_path.read_text(encoding="utf-8")
-        config_match = re.search(
-            r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-            workflow,
-            re.MULTILINE,
-        )
-        extractor_match = re.search(
-            r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
-            workflow,
-            re.MULTILINE,
-        )
-        if not config_match or not extractor_match:
+        try:
+            document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
             continue
-        config_path = next(value for value in config_match.groups() if value is not None)
-        extractor_path = extractor_match.group(1)
-        if all(
-            is_regular_file(repository_path / path, repository_root=repository_path)
-            for path in (config_path, extractor_path)
+        if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+            continue
+        config_paths: set[str] = set()
+        extractor_paths: set[str] = set()
+        for job in document["jobs"].values():
+            if not isinstance(job, dict):
+                continue
+            executable_units = [job]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_units.extend(step for step in steps if isinstance(step, dict))
+            for unit in executable_units:
+                options = unit.get("with")
+                config_path = options.get("config-file") if isinstance(options, dict) else None
+                if isinstance(config_path, str):
+                    config_paths.add(config_path)
+                run = unit.get("run")
+                if not isinstance(run, str):
+                    continue
+                for line in run.splitlines():
+                    if line.lstrip().startswith("#"):
+                        continue
+                    try:
+                        tokens = shlex.split(line, comments=True)
+                    except ValueError:
+                        continue
+                    for index, token in enumerate(tokens[:-1]):
+                        if (
+                            token in {"python", "python3"}
+                            and (index == 0 or tokens[index - 1] in {"&&", ";", "|"})
+                            and tokens[index + 1].endswith("safe_extract.py")
+                        ):
+                            extractor_paths.add(tokens[index + 1])
+        if any(
+            is_regular_file(repository_path / config, repository_root=repository_path)
+            and is_regular_file(repository_path / extractor, repository_root=repository_path)
+            for config in config_paths
+            for extractor in extractor_paths
         ):
             return True
     return False
@@ -364,7 +389,7 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
     language_patterns = {
         "python": r"python-ci|setup-python|python\s+-m\s+pytest|pytest",
         "node": r"node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+",
-        "java": r"java-ci|setup-java-gradle|gradlew|gradle\s+(?:build|test)|maven",
+        "java": r"java-ci|(?:actions/)?setup-java(?:-[A-Za-z0-9_-]+)?@|gradlew|gradle\s+(?:build|test)|(?:^|\s)\./mvnw(?:\s|$)|maven",
     }
     found: set[str] = set()
     for workflow in workflow_files(repository_path):
@@ -389,7 +414,11 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
             job_with = job.get("with", {})
             if isinstance(job_with, dict) and isinstance(job_with.get("working-directory"), str):
                 job_path = job_with["working-directory"]
-            units: list[tuple[Any, str]] = [(job.get("uses", ""), job_path), (job.get("run", ""), job_path)]
+            units: list[tuple[Any, str]] = []
+            if isinstance(job.get("uses"), str):
+                units.append((job["uses"], job_path))
+            if isinstance(job.get("run"), str):
+                units.append((job["run"], job_path))
             steps = job.get("steps", [])
             if isinstance(steps, list):
                 for step in steps:
@@ -398,9 +427,12 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
                         step_with = step.get("with", {})
                         if isinstance(step_with, dict):
                             step_path = step_with.get("working-directory", step_path)
-                        units.append((step, step_path))
+                        if isinstance(step.get("uses"), str):
+                            units.append((step["uses"], step_path))
+                        if isinstance(step.get("run"), str):
+                            units.append((step["run"], step_path))
             for unit, path in units:
-                text = str(unit)
+                text = unit
                 if not isinstance(path, str):
                     path = "."
                 for component, pattern in language_patterns.items():
@@ -594,13 +626,13 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
     current = counts.get("up-to-date", 0)
     drift = counts.get("would-update", 0)
     excluded = counts.get("excluded", 0)
-    mismatches = sum(inventory_has_mismatch(result.inventory) for result in results)
+    mismatches = configuration_gap_count(results)
     lines = [
         "## Copier fleet audit",
         "",
         f"Fleet: {len(results)} repositories",
         "",
-        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
+        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
         "",
         "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",

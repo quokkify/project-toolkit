@@ -1051,10 +1051,10 @@ class TemplateInventoryTests(TestCase):
             config.parent.mkdir(parents=True)
             workflow.write_text(
                 "name: Allure report\n\n"
-                "steps:\n"
-                "  - run: python tools/allure/safe_extract.py\n"
-                "    with:\n"
-                "      config-file: tools/allure/allurerc.mjs\n",
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: python tools/allure/safe_extract.py\n"
+                "        with:\n"
+                "          config-file: tools/allure/allurerc.mjs\n",
                 encoding="utf-8",
             )
             config.write_text("export default {};\n", encoding="utf-8")
@@ -1081,8 +1081,8 @@ class TemplateInventoryTests(TestCase):
             workflow.parent.mkdir(parents=True)
             config.parent.mkdir(parents=True)
             workflow.write_text(
-                "steps:\n  - run: python tools/allure/safe_extract.py\n"
-                "    with:\n      config-file: tools/allure/allurerc.mjs\n",
+                "jobs:\n  report:\n    steps:\n      - run: python tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
                 encoding="utf-8",
             )
             config.write_text("export default {};\n", encoding="utf-8")
@@ -1091,6 +1091,53 @@ class TemplateInventoryTests(TestCase):
                 "components: []\nallure_report: true\n", repository
             )
         self.assertEqual(inventory.allure_report, "custom")
+
+    def test_allure_ignores_comments_and_quoted_run_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      # run: python tools/safe_extract.py\n"
+                "      - run: \"echo 'python tools/safe_extract.py config-file: tools/allure/allurerc.mjs'\"\n",
+                encoding="utf-8",
+            )
+            (repository / "tools/allure").mkdir(parents=True)
+            (repository / "tools/allure/allurerc.mjs").write_text("{}\n", encoding="utf-8")
+            (repository / "tools/safe_extract.py").write_text("# helper\n", encoding="utf-8")
+            inventory = fleet.inventory_from_answers("allure_report: true\n", repository)
+        self.assertEqual(inventory.allure_report, "missing")
+
+    def test_component_inference_uses_only_step_uses_and_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n"
+                "      - name: setup\n"
+                "        env: {FAKE: setup-java}\n"
+                "        with: {command: ./mvnw}\n"
+                "      - uses: actions/setup-java@v4\n"
+                "      - run: ./mvnw test\n"
+                "        working-directory: server\n",
+                encoding="utf-8",
+            )
+            components = fleet.inferred_components(repository)
+        self.assertEqual(components, ("java:.", "java:server"))
+
+    def test_markdown_reports_configuration_gap_count_once_and_json_aliases(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v1.0.0", target_commit=None, components=("none",), baseline="1/2",
+            missing_baseline=(fleet.BASELINE_PATHS[0],), docker="unknown", codeql="unknown",
+            allure_report="unknown", release_please="unknown", renovate="unknown",
+        )
+        result = fleet.Result("quokkify/example", "up-to-date", inventory=inventory)
+        markdown = fleet.markdown_report([result], {"up-to-date": 1})
+        report = fleet.json.loads(fleet.json_report([result], {"up-to-date": 1}))
+        self.assertEqual(markdown.count("configuration gap"), 1)
+        self.assertEqual(report["configuration_gaps"], report["configuration_mismatches"])
 
     def test_release_please_partial_evidence_is_missing(self) -> None:
         cases = ("# release-please\n", "release-please-config.json\n")

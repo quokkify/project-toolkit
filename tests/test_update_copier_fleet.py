@@ -835,6 +835,88 @@ class TemplateInventoryTests(TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("generated\n", encoding="utf-8")
 
+    def test_infers_java_component_from_workflow_when_answers_are_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/java.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  build:\n    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.21.2\n"
+                "    with:\n      working-directory: backend\n",
+                encoding="utf-8",
+            )
+            inventory = fleet.inventory_from_answers("components: []\n", repository)
+        self.assertEqual(inventory.components, ("java:backend",))
+
+    def test_infers_components_when_answers_key_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  test:\n    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2\n"
+                "    with:\n      working-directory: backend\n",
+                encoding="utf-8",
+            )
+            inventory = fleet.inventory_from_answers("docker: false\n", repository)
+        self.assertEqual(inventory.components, ("python:backend",))
+
+    def test_keeps_mixed_job_paths_paired_to_their_language(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  backend:\n    steps:\n      - uses: actions/setup-python@v5\n"
+                "        with:\n          working-directory: backend\n"
+                "  frontend:\n    steps:\n      - uses: actions/setup-node@v4\n"
+                "        with:\n          working-directory: frontend\n",
+                encoding="utf-8",
+            )
+            inventory = fleet.inventory_from_answers("components: []\n", repository)
+        self.assertEqual(inventory.components, ("node:frontend", "python:backend"))
+
+    def test_custom_release_please_workflow_is_not_reported_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/custom-release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  release:\n    steps:\n      - uses: googleapis/release-please-action@v4\n",
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "custom")
+        self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_comment_only_release_please_action_is_reported_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/notes.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: notes\n# uses: googleapis/release-please-action@v4\n",
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertTrue(fleet.inventory_has_mismatch(inventory))
+
+    def test_quoted_release_please_text_is_not_executable_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/notes.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'jobs:\n  notes:\n    steps:\n      - run: "uses: googleapis/release-please-action@v4"\n',
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "missing")
+
     def test_reports_configured_features_and_materialized_outputs(self) -> None:
         raw_answers = (
             "_commit: v2.8.2\n"
@@ -969,10 +1051,10 @@ class TemplateInventoryTests(TestCase):
             config.parent.mkdir(parents=True)
             workflow.write_text(
                 "name: Allure report\n\n"
-                "steps:\n"
-                "  - run: python tools/allure/safe_extract.py\n"
-                "    with:\n"
-                "      config-file: tools/allure/allurerc.mjs\n",
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: python tools/allure/safe_extract.py\n"
+                "        with:\n"
+                "          config-file: tools/allure/allurerc.mjs\n",
                 encoding="utf-8",
             )
             config.write_text("export default {};\n", encoding="utf-8")
@@ -989,6 +1071,145 @@ class TemplateInventoryTests(TestCase):
 
         self.assertEqual(inventory.allure_report, "custom")
         self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_allure_accepts_complete_helpers_in_nonstandard_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n      - run: python tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            inventory = fleet.inventory_from_answers(
+                "components: []\nallure_report: true\n", repository
+            )
+        self.assertEqual(inventory.allure_report, "custom")
+
+    def test_allure_accepts_attached_shell_separator_before_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: cd tools; python ../tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertTrue(fleet.has_custom_allure_outputs(repository))
+
+    def test_allure_ignores_extractor_in_heredoc_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: |\n"
+                "          cat <<'EOF'\n"
+                "          python tools/allure/safe_extract.py\n"
+                "          EOF\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertFalse(fleet.has_custom_allure_outputs(repository))
+
+    def test_allure_ignores_comments_and_quoted_run_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      # run: python tools/safe_extract.py\n"
+                "      - run: \"echo 'python tools/safe_extract.py config-file: tools/allure/allurerc.mjs'\"\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            (repository / "tools/allure").mkdir(parents=True)
+            (repository / "tools/allure/allurerc.mjs").write_text("{}\n", encoding="utf-8")
+            (repository / "tools/safe_extract.py").write_text("# helper\n", encoding="utf-8")
+            inventory = fleet.inventory_from_answers("allure_report: true\n", repository)
+        self.assertEqual(inventory.allure_report, "missing")
+
+    def test_component_inference_uses_only_step_uses_and_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  build:\n    steps:\n"
+                "      - name: setup\n"
+                "        env: {FAKE: setup-java}\n"
+                "        with: {command: ./mvnw}\n"
+                "      - uses: actions/setup-java@v4\n"
+                "      - run: ./mvnw test\n"
+                "        working-directory: server\n",
+                encoding="utf-8",
+            )
+            components = fleet.inferred_components(repository)
+        self.assertEqual(components, ("java:.", "java:server"))
+
+    def test_markdown_reports_configuration_gap_count_once_and_json_aliases(self) -> None:
+        inventory = fleet.TemplateInventory(
+            commit="v1.0.0", target_commit=None, components=("none",), baseline="1/2",
+            missing_baseline=(fleet.BASELINE_PATHS[0],), docker="unknown", codeql="unknown",
+            allure_report="unknown", release_please="unknown", renovate="unknown",
+        )
+        result = fleet.Result("quokkify/example", "up-to-date", inventory=inventory)
+        markdown = fleet.markdown_report([result], {"up-to-date": 1})
+        report = fleet.json.loads(fleet.json_report([result], {"up-to-date": 1}))
+        self.assertEqual(markdown.count("configuration gap"), 1)
+        self.assertEqual(report["configuration_gaps"], report["configuration_mismatches"])
+
+    def test_release_please_partial_evidence_is_missing(self) -> None:
+        cases = ("# release-please\n", "release-please-config.json\n")
+        for marker in cases:
+            with self.subTest(marker=marker):
+                with tempfile.TemporaryDirectory() as temporary:
+                    repository = Path(temporary)
+                    workflow = repository / ".github/workflows/custom.yml"
+                    workflow.parent.mkdir(parents=True)
+                    workflow.write_text(marker, encoding="utf-8")
+                    if marker.startswith("release"):
+                        (repository / "release-please-config.json").write_text(
+                            "{}\n", encoding="utf-8"
+                        )
+                    inventory = fleet.inventory_from_answers(
+                        "release_please: true\n", repository
+                    )
+                self.assertEqual(inventory.release_please, "missing")
+
+    def test_release_please_custom_action_is_custom(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/custom-release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  release:\n    steps:\n      - uses: acme/release-please-action@v1\n",
+                encoding="utf-8",
+            )
+            inventory = fleet.inventory_from_answers(
+                "release_please: true\n", repository
+            )
+        self.assertEqual(inventory.release_please, "custom")
 
     def test_symlinked_template_outputs_are_reported_as_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

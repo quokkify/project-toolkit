@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -321,30 +323,198 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def _shell_heredoc_free(run: str) -> str:
+    """Remove heredoc bodies before inspecting shell command tokens."""
+    lines = run.splitlines(keepends=True)
+    kept: list[str] = []
+    delimiter: str | None = None
+    strip_tabs = False
+    for line in lines:
+        if delimiter is not None:
+            candidate = line.rstrip("\\r\\n")
+            if (candidate.lstrip("\\t") if strip_tabs else candidate) == delimiter:
+                delimiter = None
+            continue
+        kept.append(line)
+        match = re.search(r"<<(-?)[ \\t]*(?:['\"]([^'\"]+)['\"]|([^ \\t;&|]+))", line)
+        if match:
+            strip_tabs = bool(match.group(1))
+            delimiter = match.group(2) or match.group(3)
+    return "".join(kept)
+
+
+def _shell_extractor_paths(run: str) -> set[str]:
+    """Find extractor paths used as shell commands, not embedded text."""
+    try:
+        lexer = shlex.shlex(_shell_heredoc_free(run), posix=True, punctuation_chars=";&|")
+        lexer.commenters = "#"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+
+    extractors: set[str] = set()
+    command_start = True
+    working_directory = "."
+    pending_cd = False
+    for index, token in enumerate(tokens):
+        if token in {";", "&&", "||", "|", "&"}:
+            command_start = True
+            pending_cd = False
+            continue
+        if command_start and token == "cd":
+            pending_cd = True
+        elif pending_cd:
+            working_directory = posixpath.normpath(
+                posixpath.join(working_directory, token)
+            )
+            pending_cd = False
+        elif command_start and token in {"python", "python3"} and index + 1 < len(tokens):
+            extractor = tokens[index + 1]
+            if extractor.endswith("safe_extract.py"):
+                extractors.add(posixpath.normpath(posixpath.join(working_directory, extractor)))
+        command_start = False
+    return extractors
+
+
 def has_custom_allure_outputs(repository_path: Path) -> bool:
-    """Recognize a complete Allure setup that keeps its helpers outside the template paths."""
-    workflow_path = repository_path / FEATURE_PATHS["allure_report"]
-    if not is_regular_file(workflow_path, repository_root=repository_path):
-        return False
-    workflow = workflow_path.read_text(encoding="utf-8")
-    config_match = re.search(
-        r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-        workflow,
-        re.MULTILINE,
-    )
-    extractor_match = re.search(
-        r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
-        workflow,
-        re.MULTILINE,
-    )
-    if not config_match or not extractor_match:
-        return False
-    config_path = next(value for value in config_match.groups() if value is not None)
-    extractor_path = extractor_match.group(1)
-    return all(
-        is_regular_file(repository_path / path, repository_root=repository_path)
-        for path in (config_path, extractor_path)
-    )
+    """Recognize complete custom Allure output in executable workflow steps."""
+    for workflow_path in workflow_files(repository_path):
+        try:
+            document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+            continue
+        config_paths: set[str] = set()
+        extractor_paths: set[str] = set()
+        for job in document["jobs"].values():
+            if not isinstance(job, dict):
+                continue
+            executable_units = [job]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_units.extend(step for step in steps if isinstance(step, dict))
+            for unit in executable_units:
+                options = unit.get("with")
+                config_path = options.get("config-file") if isinstance(options, dict) else None
+                if isinstance(config_path, str):
+                    config_paths.add(config_path)
+                run = unit.get("run")
+                if isinstance(run, str):
+                    extractor_paths.update(_shell_extractor_paths(run))
+        if any(
+            is_regular_file(repository_path / config, repository_root=repository_path)
+            and is_regular_file(repository_path / extractor, repository_root=repository_path)
+            for config in config_paths
+            for extractor in extractor_paths
+        ):
+            return True
+    return False
+
+
+def workflow_files(repository_path: Path) -> list[Path]:
+    """Return regular workflow files without following repository symlinks."""
+    workflows = repository_path / ".github" / "workflows"
+    if not workflows.is_dir() or workflows.is_symlink():
+        return []
+    return [
+        path
+        for path in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml"))
+        if is_regular_file(path, repository_root=repository_path)
+    ]
+
+
+def inferred_components(repository_path: Path) -> tuple[str, ...]:
+    """Infer language/path pairs within each workflow job or step."""
+    language_patterns = {
+        "python": r"python-ci|setup-python|python\s+-m\s+pytest|pytest",
+        "node": r"node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+",
+        "java": r"java-ci|(?:actions/)?setup-java(?:-[A-Za-z0-9_-]+)?@|gradlew|gradle\s+(?:build|test)|(?:^|\s)\./mvnw(?:\s|$)|maven",
+    }
+    found: set[str] = set()
+    for workflow in workflow_files(repository_path):
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        jobs = document.get("jobs", {}) if isinstance(document, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            job_path = job.get("working-directory", ".")
+            defaults = job.get("defaults", {})
+            if isinstance(defaults, dict):
+                run_defaults = defaults.get("run", {})
+                if isinstance(run_defaults, dict):
+                    job_path = run_defaults.get("working-directory", job_path)
+            if not isinstance(job_path, str):
+                job_path = "."
+            job_with = job.get("with", {})
+            if isinstance(job_with, dict) and isinstance(job_with.get("working-directory"), str):
+                job_path = job_with["working-directory"]
+            units: list[tuple[Any, str]] = []
+            if isinstance(job.get("uses"), str):
+                units.append((job["uses"], job_path))
+            if isinstance(job.get("run"), str):
+                units.append((job["run"], job_path))
+            steps = job.get("steps", [])
+            if isinstance(steps, list):
+                for step in steps:
+                    if isinstance(step, dict):
+                        step_path = step.get("working-directory", job_path)
+                        step_with = step.get("with", {})
+                        if isinstance(step_with, dict):
+                            step_path = step_with.get("working-directory", step_path)
+                        if isinstance(step.get("uses"), str):
+                            units.append((step["uses"], step_path))
+                        if isinstance(step.get("run"), str):
+                            units.append((step["run"], step_path))
+            for unit, path in units:
+                text = unit
+                if not isinstance(path, str):
+                    path = "."
+                for component, pattern in language_patterns.items():
+                    if re.search(pattern, text, re.IGNORECASE):
+                        found.add(f"{component}:{path}")
+    return tuple(sorted(found))
+
+
+def has_custom_release_please_outputs(repository_path: Path) -> bool:
+    """Recognize an executable custom Release Please workflow.
+
+    Parse the workflow document before inspecting jobs and steps.  Searching
+    raw YAML text would treat comments and quoted values as executable action
+    evidence, hiding a real configuration gap.
+    """
+    standard = repository_path / FEATURE_PATHS["release_please"]
+    action_pattern = re.compile(r"(?:^|/)release[-_]please-action@", re.IGNORECASE)
+    for workflow in workflow_files(repository_path):
+        if workflow == standard:
+            continue
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        jobs = document.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            executable_uses = [job.get("uses")]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_uses.extend(
+                    step.get("uses") for step in steps if isinstance(step, dict)
+                )
+            if any(isinstance(uses, str) and action_pattern.search(uses) for uses in executable_uses):
+                return True
+    return False
 
 
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
@@ -361,7 +531,11 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
             return "enabled"
         if key == "allure_report" and has_custom_allure_outputs(repository_path):
             return "custom"
+        if key == "release_please" and has_custom_release_please_outputs(repository_path):
+            return "custom"
         return "missing"
+    if key == "release_please" and has_custom_release_please_outputs(repository_path):
+        return "custom"
     return "custom" if any(materialized) else "disabled"
 
 
@@ -385,12 +559,14 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
                 components_valid = False
                 break
             components.append(f"{component_type}:{component_path}")
-    else:
+    elif raw_components is not None:
         components_valid = False
     if not components_valid:
         components = ["unknown"]
-    elif not components:
-        components = ["none"]
+    else:
+        components = list(inferred_components(repository_path)) if not components else components
+        if not components:
+            components = ["none"]
 
     missing_baseline = tuple(
         path
@@ -424,6 +600,11 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
         or inventory.release_please == "missing"
         or inventory.renovate == "missing"
     )
+
+
+def configuration_gap_count(results: Sequence[Result]) -> int:
+    """Count inventory gaps independently from synchronization drift."""
+    return sum(inventory_has_mismatch(result.inventory) for result in results)
 
 
 def console_lines(result: Result) -> list[str]:
@@ -486,13 +667,13 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
     current = counts.get("up-to-date", 0)
     drift = counts.get("would-update", 0)
     excluded = counts.get("excluded", 0)
-    mismatches = sum(inventory_has_mismatch(result.inventory) for result in results)
+    mismatches = configuration_gap_count(results)
     lines = [
         "## Copier fleet audit",
         "",
         f"Fleet: {len(results)} repositories",
         "",
-        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⏭️ {excluded} excluded",
+        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
         "",
         "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -592,10 +773,12 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 "renovate": result.inventory.renovate,
             }
         repositories.append(item)
+    gaps = configuration_gap_count(results)
     payload = {
         "schema_version": 3,
         "summary": counts,
-        "configuration_mismatches": sum(inventory_has_mismatch(result.inventory) for result in results),
+        "configuration_gaps": gaps,
+        "configuration_mismatches": gaps,
         "repositories": repositories,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -1164,6 +1347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("summary: " + ", ".join(f"{status}={count}" for status, count in sorted(counts.items())))
     for line in feature_summary(results):
         print(line)
+    print(f"configuration-gaps: {configuration_gap_count(results)}")
     if args.markdown_report:
         args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
         args.markdown_report.write_text(markdown_report(results, counts), encoding="utf-8")

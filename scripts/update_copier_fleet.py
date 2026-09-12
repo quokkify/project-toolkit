@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -322,6 +323,60 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def _shell_heredoc_free(run: str) -> str:
+    """Remove heredoc bodies before inspecting shell command tokens."""
+    lines = run.splitlines(keepends=True)
+    kept: list[str] = []
+    delimiter: str | None = None
+    strip_tabs = False
+    for line in lines:
+        if delimiter is not None:
+            candidate = line.rstrip("\\r\\n")
+            if (candidate.lstrip("\\t") if strip_tabs else candidate) == delimiter:
+                delimiter = None
+            continue
+        kept.append(line)
+        match = re.search(r"<<(-?)[ \\t]*(?:['\"]([^'\"]+)['\"]|([^ \\t;&|]+))", line)
+        if match:
+            strip_tabs = bool(match.group(1))
+            delimiter = match.group(2) or match.group(3)
+    return "".join(kept)
+
+
+def _shell_extractor_paths(run: str) -> set[str]:
+    """Find extractor paths used as shell commands, not embedded text."""
+    try:
+        lexer = shlex.shlex(_shell_heredoc_free(run), posix=True, punctuation_chars=";&|")
+        lexer.commenters = "#"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+
+    extractors: set[str] = set()
+    command_start = True
+    working_directory = "."
+    pending_cd = False
+    for index, token in enumerate(tokens):
+        if token in {";", "&&", "||", "|", "&"}:
+            command_start = True
+            pending_cd = False
+            continue
+        if command_start and token == "cd":
+            pending_cd = True
+        elif pending_cd:
+            working_directory = posixpath.normpath(
+                posixpath.join(working_directory, token)
+            )
+            pending_cd = False
+        elif command_start and token in {"python", "python3"} and index + 1 < len(tokens):
+            extractor = tokens[index + 1]
+            if extractor.endswith("safe_extract.py"):
+                extractors.add(posixpath.normpath(posixpath.join(working_directory, extractor)))
+        command_start = False
+    return extractors
+
+
 def has_custom_allure_outputs(repository_path: Path) -> bool:
     """Recognize complete custom Allure output in executable workflow steps."""
     for workflow_path in workflow_files(repository_path):
@@ -346,22 +401,8 @@ def has_custom_allure_outputs(repository_path: Path) -> bool:
                 if isinstance(config_path, str):
                     config_paths.add(config_path)
                 run = unit.get("run")
-                if not isinstance(run, str):
-                    continue
-                for line in run.splitlines():
-                    if line.lstrip().startswith("#"):
-                        continue
-                    try:
-                        tokens = shlex.split(line, comments=True)
-                    except ValueError:
-                        continue
-                    for index, token in enumerate(tokens[:-1]):
-                        if (
-                            token in {"python", "python3"}
-                            and (index == 0 or tokens[index - 1] in {"&&", ";", "|"})
-                            and tokens[index + 1].endswith("safe_extract.py")
-                        ):
-                            extractor_paths.add(tokens[index + 1])
+                if isinstance(run, str):
+                    extractor_paths.update(_shell_extractor_paths(run))
         if any(
             is_regular_file(repository_path / config, repository_root=repository_path)
             and is_regular_file(repository_path / extractor, repository_root=repository_path)

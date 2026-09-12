@@ -1092,6 +1092,45 @@ class TemplateInventoryTests(TestCase):
             )
         self.assertEqual(inventory.allure_report, "custom")
 
+    def test_allure_accepts_attached_shell_separator_before_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: cd tools; python ../tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertTrue(fleet.has_custom_allure_outputs(repository))
+
+    def test_allure_ignores_extractor_in_heredoc_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: |\n"
+                "          cat <<'EOF'\n"
+                "          python tools/allure/safe_extract.py\n"
+                "          EOF\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertFalse(fleet.has_custom_allure_outputs(repository))
+
     def test_allure_ignores_comments_and_quoted_run_text(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
@@ -1100,7 +1139,8 @@ class TemplateInventoryTests(TestCase):
             workflow.write_text(
                 "jobs:\n  report:\n    steps:\n"
                 "      # run: python tools/safe_extract.py\n"
-                "      - run: \"echo 'python tools/safe_extract.py config-file: tools/allure/allurerc.mjs'\"\n",
+                "      - run: \"echo 'python tools/safe_extract.py config-file: tools/allure/allurerc.mjs'\"\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
                 encoding="utf-8",
             )
             (repository / "tools/allure").mkdir(parents=True)

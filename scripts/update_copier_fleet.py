@@ -347,6 +347,52 @@ def has_custom_allure_outputs(repository_path: Path) -> bool:
     )
 
 
+def workflow_files(repository_path: Path) -> list[Path]:
+    """Return regular workflow files without following repository symlinks."""
+    workflows = repository_path / ".github" / "workflows"
+    if not workflows.is_dir() or workflows.is_symlink():
+        return []
+    return [
+        path
+        for path in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml"))
+        if is_regular_file(path, repository_root=repository_path)
+    ]
+
+
+def inferred_components(repository_path: Path) -> tuple[str, ...]:
+    """Infer language components from caller-owned workflow usage."""
+    found: set[str] = set()
+    for workflow in workflow_files(repository_path):
+        content = workflow.read_text(encoding="utf-8")
+        paths = sorted(
+            set(re.findall(r"^\s*working-directory:\s*([^\s#]+)", content, re.MULTILINE))
+        ) or ["."]
+        if re.search(r"(?:python-ci|setup-python|python\s+-m\s+pytest|pytest)", content, re.IGNORECASE):
+            found.update(f"python:{path}" for path in paths)
+        if re.search(r"(?:node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+)", content, re.IGNORECASE):
+            found.update(f"node:{path}" for path in paths)
+        if re.search(r"(?:java-ci|setup-java-gradle|gradlew|gradle\s+(?:build|test)|maven)", content, re.IGNORECASE):
+            found.update(f"java:{path}" for path in paths)
+    return tuple(sorted(found))
+
+
+def has_custom_release_please_outputs(repository_path: Path) -> bool:
+    """Recognize Release Please owned outside the generated release path."""
+    standard = repository_path / FEATURE_PATHS["release_please"]
+    for workflow in workflow_files(repository_path):
+        if workflow == standard:
+            continue
+        content = workflow.read_text(encoding="utf-8")
+        if re.search(r"release[-_]please|release-please-action", content, re.IGNORECASE):
+            return True
+    config_paths = (
+        repository_path / ".github/release-please/config.json",
+        repository_path / ".release-please-manifest.json",
+        repository_path / "release-please-config.json",
+    )
+    return any(is_regular_file(path, repository_root=repository_path) for path in config_paths)
+
+
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
     configured = answers.get(key)
     if not isinstance(configured, bool):
@@ -361,7 +407,11 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
             return "enabled"
         if key == "allure_report" and has_custom_allure_outputs(repository_path):
             return "custom"
+        if key == "release_please" and has_custom_release_please_outputs(repository_path):
+            return "custom"
         return "missing"
+    if key == "release_please" and has_custom_release_please_outputs(repository_path):
+        return "custom"
     return "custom" if any(materialized) else "disabled"
 
 
@@ -390,7 +440,7 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
     if not components_valid:
         components = ["unknown"]
     elif not components:
-        components = ["none"]
+        components = list(inferred_components(repository_path)) or ["none"]
 
     missing_baseline = tuple(
         path
@@ -424,6 +474,11 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
         or inventory.release_please == "missing"
         or inventory.renovate == "missing"
     )
+
+
+def configuration_gap_count(results: Sequence[Result]) -> int:
+    """Count inventory gaps independently from synchronization drift."""
+    return sum(inventory_has_mismatch(result.inventory) for result in results)
 
 
 def console_lines(result: Result) -> list[str]:
@@ -492,7 +547,7 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "",
         f"Fleet: {len(results)} repositories",
         "",
-        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⏭️ {excluded} excluded",
+        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
         "",
         "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -592,10 +647,12 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 "renovate": result.inventory.renovate,
             }
         repositories.append(item)
+    gaps = configuration_gap_count(results)
     payload = {
         "schema_version": 3,
         "summary": counts,
-        "configuration_mismatches": sum(inventory_has_mismatch(result.inventory) for result in results),
+        "configuration_gaps": gaps,
+        "configuration_mismatches": gaps,
         "repositories": repositories,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -1164,6 +1221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("summary: " + ", ".join(f"{status}={count}" for status, count in sorted(counts.items())))
     for line in feature_summary(results):
         print(line)
+    print(f"configuration-gaps: {configuration_gap_count(results)}")
     if args.markdown_report:
         args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
         args.markdown_report.write_text(markdown_report(results, counts), encoding="utf-8")

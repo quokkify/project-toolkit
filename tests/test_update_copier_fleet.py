@@ -835,6 +835,33 @@ class TemplateInventoryTests(TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("generated\n", encoding="utf-8")
 
+    def test_infers_java_component_from_workflow_when_answers_are_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/java.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  build:\n    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.21.2\n"
+                "    with:\n      working-directory: backend\n",
+                encoding="utf-8",
+            )
+            inventory = fleet.inventory_from_answers("components: []\n", repository)
+        self.assertEqual(inventory.components, ("java:backend",))
+
+    def test_custom_release_please_workflow_is_not_reported_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/custom-release.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  release:\n    uses: googleapis/release-please-action@v4\n",
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "custom")
+        self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
     def test_reports_configured_features_and_materialized_outputs(self) -> None:
         raw_answers = (
             "_commit: v2.8.2\n"

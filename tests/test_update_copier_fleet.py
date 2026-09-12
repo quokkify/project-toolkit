@@ -882,13 +882,40 @@ class TemplateInventoryTests(TestCase):
             workflow = repository / ".github/workflows/custom-release.yml"
             workflow.parent.mkdir(parents=True)
             workflow.write_text(
-                "jobs:\n  release:\n    uses: googleapis/release-please-action@v4\n",
+                "jobs:\n  release:\n    steps:\n      - uses: googleapis/release-please-action@v4\n",
                 encoding="utf-8",
             )
             self.write_baseline(repository)
             inventory = fleet.inventory_from_answers("release_please: true\n", repository)
         self.assertEqual(inventory.release_please, "custom")
         self.assertFalse(fleet.inventory_has_mismatch(inventory))
+
+    def test_comment_only_release_please_action_is_reported_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/notes.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: notes\n# uses: googleapis/release-please-action@v4\n",
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "missing")
+        self.assertTrue(fleet.inventory_has_mismatch(inventory))
+
+    def test_quoted_release_please_text_is_not_executable_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/notes.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                'jobs:\n  notes:\n    steps:\n      - run: "uses: googleapis/release-please-action@v4"\n',
+                encoding="utf-8",
+            )
+            self.write_baseline(repository)
+            inventory = fleet.inventory_from_answers("release_please: true\n", repository)
+        self.assertEqual(inventory.release_please, "missing")
 
     def test_reports_configured_features_and_materialized_outputs(self) -> None:
         raw_answers = (

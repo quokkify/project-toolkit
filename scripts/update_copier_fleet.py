@@ -410,18 +410,37 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
 
 
 def has_custom_release_please_outputs(repository_path: Path) -> bool:
-    """Recognize an executable custom Release Please workflow."""
+    """Recognize an executable custom Release Please workflow.
+
+    Parse the workflow document before inspecting jobs and steps.  Searching
+    raw YAML text would treat comments and quoted values as executable action
+    evidence, hiding a real configuration gap.
+    """
     standard = repository_path / FEATURE_PATHS["release_please"]
+    action_pattern = re.compile(r"(?:^|/)release[-_]please-action@", re.IGNORECASE)
     for workflow in workflow_files(repository_path):
         if workflow == standard:
             continue
-        content = workflow.read_text(encoding="utf-8")
-        if re.search(
-            r"uses:\s*(?:googleapis/)?release-please-action@|uses:\s*[^\s]+release[-_]please[^\s]*@",
-            content,
-            re.IGNORECASE,
-        ):
-            return True
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        jobs = document.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            executable_uses = [job.get("uses")]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_uses.extend(
+                    step.get("uses") for step in steps if isinstance(step, dict)
+                )
+            if any(isinstance(uses, str) and action_pattern.search(uses) for uses in executable_uses):
+                return True
     return False
 
 

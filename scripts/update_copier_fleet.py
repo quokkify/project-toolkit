@@ -322,29 +322,29 @@ def parse_template_source(raw_answers: str) -> str:
 
 
 def has_custom_allure_outputs(repository_path: Path) -> bool:
-    """Recognize a complete Allure setup that keeps its helpers outside the template paths."""
-    workflow_path = repository_path / FEATURE_PATHS["allure_report"]
-    if not is_regular_file(workflow_path, repository_root=repository_path):
-        return False
-    workflow = workflow_path.read_text(encoding="utf-8")
-    config_match = re.search(
-        r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-        workflow,
-        re.MULTILINE,
-    )
-    extractor_match = re.search(
-        r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
-        workflow,
-        re.MULTILINE,
-    )
-    if not config_match or not extractor_match:
-        return False
-    config_path = next(value for value in config_match.groups() if value is not None)
-    extractor_path = extractor_match.group(1)
-    return all(
-        is_regular_file(repository_path / path, repository_root=repository_path)
-        for path in (config_path, extractor_path)
-    )
+    """Recognize complete custom Allure output in any workflow filename."""
+    for workflow_path in workflow_files(repository_path):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        config_match = re.search(
+            r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
+            workflow,
+            re.MULTILINE,
+        )
+        extractor_match = re.search(
+            r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
+            workflow,
+            re.MULTILINE,
+        )
+        if not config_match or not extractor_match:
+            continue
+        config_path = next(value for value in config_match.groups() if value is not None)
+        extractor_path = extractor_match.group(1)
+        if all(
+            is_regular_file(repository_path / path, repository_root=repository_path)
+            for path in (config_path, extractor_path)
+        ):
+            return True
+    return False
 
 
 def workflow_files(repository_path: Path) -> list[Path]:
@@ -360,37 +360,69 @@ def workflow_files(repository_path: Path) -> list[Path]:
 
 
 def inferred_components(repository_path: Path) -> tuple[str, ...]:
-    """Infer language components from caller-owned workflow usage."""
+    """Infer language/path pairs within each workflow job or step."""
+    language_patterns = {
+        "python": r"python-ci|setup-python|python\s+-m\s+pytest|pytest",
+        "node": r"node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+",
+        "java": r"java-ci|setup-java-gradle|gradlew|gradle\s+(?:build|test)|maven",
+    }
     found: set[str] = set()
     for workflow in workflow_files(repository_path):
-        content = workflow.read_text(encoding="utf-8")
-        paths = sorted(
-            set(re.findall(r"^\s*working-directory:\s*([^\s#]+)", content, re.MULTILINE))
-        ) or ["."]
-        if re.search(r"(?:python-ci|setup-python|python\s+-m\s+pytest|pytest)", content, re.IGNORECASE):
-            found.update(f"python:{path}" for path in paths)
-        if re.search(r"(?:node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+)", content, re.IGNORECASE):
-            found.update(f"node:{path}" for path in paths)
-        if re.search(r"(?:java-ci|setup-java-gradle|gradlew|gradle\s+(?:build|test)|maven)", content, re.IGNORECASE):
-            found.update(f"java:{path}" for path in paths)
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        jobs = document.get("jobs", {}) if isinstance(document, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            job_path = job.get("working-directory", ".")
+            defaults = job.get("defaults", {})
+            if isinstance(defaults, dict):
+                run_defaults = defaults.get("run", {})
+                if isinstance(run_defaults, dict):
+                    job_path = run_defaults.get("working-directory", job_path)
+            if not isinstance(job_path, str):
+                job_path = "."
+            job_with = job.get("with", {})
+            if isinstance(job_with, dict) and isinstance(job_with.get("working-directory"), str):
+                job_path = job_with["working-directory"]
+            units: list[tuple[Any, str]] = [(job.get("uses", ""), job_path), (job.get("run", ""), job_path)]
+            steps = job.get("steps", [])
+            if isinstance(steps, list):
+                for step in steps:
+                    if isinstance(step, dict):
+                        step_path = step.get("working-directory", job_path)
+                        step_with = step.get("with", {})
+                        if isinstance(step_with, dict):
+                            step_path = step_with.get("working-directory", step_path)
+                        units.append((step, step_path))
+            for unit, path in units:
+                text = str(unit)
+                if not isinstance(path, str):
+                    path = "."
+                for component, pattern in language_patterns.items():
+                    if re.search(pattern, text, re.IGNORECASE):
+                        found.add(f"{component}:{path}")
     return tuple(sorted(found))
 
 
 def has_custom_release_please_outputs(repository_path: Path) -> bool:
-    """Recognize Release Please owned outside the generated release path."""
+    """Recognize an executable custom Release Please workflow."""
     standard = repository_path / FEATURE_PATHS["release_please"]
     for workflow in workflow_files(repository_path):
         if workflow == standard:
             continue
         content = workflow.read_text(encoding="utf-8")
-        if re.search(r"release[-_]please|release-please-action", content, re.IGNORECASE):
+        if re.search(
+            r"uses:\s*(?:googleapis/)?release-please-action@|uses:\s*[^\s]+release[-_]please[^\s]*@",
+            content,
+            re.IGNORECASE,
+        ):
             return True
-    config_paths = (
-        repository_path / ".github/release-please/config.json",
-        repository_path / ".release-please-manifest.json",
-        repository_path / "release-please-config.json",
-    )
-    return any(is_regular_file(path, repository_root=repository_path) for path in config_paths)
+    return False
 
 
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
@@ -435,12 +467,14 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
                 components_valid = False
                 break
             components.append(f"{component_type}:{component_path}")
-    else:
+    elif raw_components is not None:
         components_valid = False
     if not components_valid:
         components = ["unknown"]
-    elif not components:
-        components = list(inferred_components(repository_path)) or ["none"]
+    else:
+        components = list(inferred_components(repository_path)) if not components else components
+        if not components:
+            components = ["none"]
 
     missing_baseline = tuple(
         path

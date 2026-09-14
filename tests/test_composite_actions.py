@@ -1265,6 +1265,37 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
 
 
 class AllureCopierModeSwitchTests(unittest.TestCase):
+    def _assert_no_copier_conflicts(self, destination: Path) -> None:
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=destination,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        unmerged = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            cwd=destination,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        self.assertEqual(unmerged, [], f"Copier update left unmerged paths; status={status}")
+        conflicts = []
+        for path in destination.rglob("*"):
+            if path.is_file() and (path.name.endswith(".rej") or path.name.endswith(".orig")):
+                conflicts.append(path)
+                continue
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text()
+            except UnicodeDecodeError:
+                continue
+            if re.search(r"(?m)^(<<<<<<<|=======|>>>>>>>)", text):
+                conflicts.append(path)
+        self.assertEqual(conflicts, [], "Copier update left conflict artifacts")
+
     def _run_resolver(self, workflow_text: str, source_path: str, artifacts: list[str]) -> dict:
         workflow = yaml.safe_load(workflow_text)
         script = workflow["jobs"]["resolve"]["steps"][0]["with"]["script"]
@@ -1320,6 +1351,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             for data_file in (java_data, empty_data):
                 result = subprocess.run([copier, "update", "--trust", "--defaults", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self._assert_no_copier_conflicts(destination)
                 if data_file == java_data:
                     java_validate = (destination / ".github/workflows/validate.yml").read_text()
                     java_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
@@ -1327,18 +1359,6 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "mode"], cwd=destination, check=True)
             workflow_path = destination / ".github/workflows/allure-report.yml"
             workflow = workflow_path.read_text()
-            conflict_paths = []
-            for path in destination.rglob("*"):
-                if path.is_file() and (path.name.endswith(".rej") or path.name.endswith(".orig")):
-                    conflict_paths.append(path)
-                if path.is_file():
-                    try:
-                        text = path.read_text()
-                    except UnicodeDecodeError:
-                        continue
-                    if re.search(r"(?m)^(<<<<<<<|=======|>>>>>>>)", text):
-                        conflict_paths.append(path)
-            self.assertEqual(conflict_paths, [])
             parsed = yaml.safe_load(workflow)
             trigger = parsed.get("on", parsed.get(True))
             self.assertIsNotNone(trigger)
@@ -1347,7 +1367,9 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(workflows, ["Validate", "Run tests"])
             self.assertEqual(len(set(workflows)), 2)
             self.assertIn("allure-results-java-1", java_validate)
-            self.assertIn("## Release notes", (destination / ".github/pull_request_template.md").read_text())
+            pull_request_template = (destination / ".github/pull_request_template.md").read_text()
+            for heading in ("Description", "Release notes", "Highlight", "Usage example", "Migration", "Breaking change"):
+                self.assertIn(f"## {heading}", pull_request_template)
 
             rendered_script = yaml.safe_load(workflow)["jobs"]["resolve"]["steps"][0]["with"]["script"]
             script_path = root / "generated-resolver.js"
@@ -1366,6 +1388,49 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             external_too_few = self._run_resolver(workflow, ".github/workflows/test.yml", ["external-allure-one"])
             self.assertEqual(external_too_few["outputs"], {})
             self.assertIn("External Allure artifact contract mismatch", external_too_few["failures"][0])
+            external_too_many = self._run_resolver(
+                workflow,
+                ".github/workflows/test.yml",
+                [f"external-allure-{index}" for index in range(8)],
+            )
+            self.assertEqual(external_too_many["outputs"], {})
+            self.assertIn("External Allure artifact contract mismatch", external_too_many["failures"][0])
+            external_duplicate = self._run_resolver(
+                workflow,
+                ".github/workflows/test.yml",
+                ["external-allure-one", "external-allure-one"],
+            )
+            self.assertEqual(external_duplicate["outputs"], {})
+            self.assertIn("External Allure artifact contract mismatch", external_duplicate["failures"][0])
+            inactive_component_trigger = self._run_resolver(
+                workflow,
+                ".github/workflows/validate.yml",
+                ["external-allure-one", "external-allure-two"],
+            )
+            self.assertEqual(inactive_component_trigger["outputs"].get("ready"), "false")
+            self.assertEqual(inactive_component_trigger["failures"], [])
+
+            default_data = root / "default.yml"
+            default_data.write_text(
+                (ROOT / "tests/scenarios/allure-external.yml")
+                .read_text()
+                .replace("allure_external_workflow_name: Run tests", "allure_external_workflow_name: Validate")
+                .replace("allure_external_workflow_path: .github/workflows/test.yml", "allure_external_workflow_path: .github/workflows/validate.yml")
+            )
+            default_destination = root / "default-consumer"
+            subprocess.run(
+                [copier, "copy", "--trust", "--defaults", "--data-file", str(default_data), str(source), str(default_destination)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            default_workflow = (default_destination / ".github/workflows/allure-report.yml").read_text()
+            default_trigger = yaml.safe_load(default_workflow).get("on", yaml.safe_load(default_workflow).get(True))
+            self.assertEqual(default_trigger["workflow_run"]["workflows"], ["Validate"])
+            default_zero = self._run_resolver(default_workflow, ".github/workflows/validate.yml", [])
+            self.assertEqual(default_zero["outputs"].get("ready"), "false")
+            self.assertEqual(default_zero["failures"], [])
+            self.assertIn("No external Allure artifacts found", default_zero["warnings"][0])
 
             component_exact = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"])
             self.assertEqual(component_exact["outputs"].get("ready"), "true")
@@ -1373,6 +1438,13 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             component_wrong = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["external-allure-one"])
             self.assertEqual(component_wrong["outputs"], {})
             self.assertIn("Allure artifact contract mismatch", component_wrong["failures"][0])
+            inactive_external_trigger = self._run_resolver(
+                java_workflow,
+                ".github/workflows/test.yml",
+                ["allure-results-java-1"],
+            )
+            self.assertEqual(inactive_external_trigger["outputs"].get("ready"), "false")
+            self.assertEqual(inactive_external_trigger["failures"], [])
 
 
 if __name__ == "__main__":

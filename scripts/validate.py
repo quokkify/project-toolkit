@@ -1762,15 +1762,19 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
             if allure_config_path.is_file():
                 run(["node", "--check", str(allure_config_path)])
+            resolver_script = yaml.safe_load(allure_workflow_path.read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            resolver_script_path = tmp_path / f"{scenario}-resolver.js"
+            resolver_script_path.write_text(f"async function main() {{\n{resolver_script}\n}}\n", encoding="utf-8")
+            run(["node", "--check", str(resolver_script_path)])
             check(allure_extractor_path.is_file(), f"{scenario}: missing bounded ZIP extractor")
             if allure_extractor_path.is_file():
                 run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
             allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
             allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
-            expected_source_workflow = "Run tests" if scenario == "allure-external" else "Validate"
+            expected_source_workflows = ["Validate", "Run tests"] if scenario == "allure-external" else ["Validate"]
             check(
                 allure_triggers
-                == {"workflow_run": {"workflows": [expected_source_workflow], "types": ["completed"]}},
+                == {"workflow_run": {"workflows": expected_source_workflows, "types": ["completed"]}},
                 f"{scenario}: report workflow has the wrong source workflow trigger",
             )
             check(
@@ -1838,7 +1842,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             )
             extractor_text = allure_extractor_path.read_text()
             external_allure = scenario == "allure-external"
-            expected_materialize_target = "source-artifacts" if external_allure else "results"
             preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
             check(
                 all(
@@ -1849,7 +1852,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "artifact_manifest" in report_text
                 and "${{ runner.temp }}/allure-archives" in report_text
                 and "${{ runner.temp }}/allure-expanded" in report_text
-                and f"MATERIALIZE_ROOT: ${{{{ github.workspace }}}}/.allure-input/{expected_materialize_target}"
+                and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
                 in report_text
                 and "python .github/allure/safe_extract.py" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
@@ -1881,21 +1884,24 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             if scenario == "allure-external":
                 artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
-                    'workflows: ["Run tests"]' in report_text
-                    and 'run.path !== ".github/workflows/test.yml"' in report_text
+                    'workflows: [Validate, "Run tests"]' in report_text
+                    and 'const externalWorkflowPath = ".github/workflows/test.yml"' in report_text
+                    and "const componentMode = false" in report_text
+                    and "const externalMode = true" in report_text
                     and 'const artifactPrefix = "external-allure-"' in report_text
                     and "const minimumArtifacts = 2" in report_text
                     and "const maximumArtifacts = 7" in report_text
                     and 'categories-file: ".github/allure/categories.json"' in report_text
                     and "new Set(actualNames).size" in report_text
-                    and "allureArtifacts.map((artifact) => ({" in report_text
-                    and "expectedArtifacts.map((name)" not in report_text,
+                    and "No external Allure artifacts found; report generation skipped." in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text,
                     "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
                 check(
-                    "source-artifacts-directory: .allure-input/source-artifacts" in report_text
-                    and "results-directory: .allure-input/results" in report_text,
-                    "allure-external: external results must be merged from a separate source directory",
+                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
+                    and "results-directory: .allure-input/results" in report_text
+                    and 'const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";' in report_text,
+                    "allure-external: stable source directory contract is missing",
                 )
             else:
                 for artifact_name in artifact_names:
@@ -1904,8 +1910,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         f"{scenario}: missing exact artifact contract for {artifact_name}",
                     )
                 check(
-                    "source-artifacts-directory" not in report_text,
-                    f"{scenario}: component results are already merged and need no source directory",
+                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
+                    and 'materialize-root: ${{ steps.resolve.outputs.materialize-root }}' in report_text,
+                    f"{scenario}: stable Allure source directory contract is missing",
                 )
             if scenario == "allure-polyglot":
                 check(

@@ -1263,5 +1263,61 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
         )
 
 
+class AllureCopierModeSwitchTests(unittest.TestCase):
+    def test_switches_external_and_component_modes_without_conflicts(self) -> None:
+        copier = shutil.which("copier")
+        if copier is None:
+            self.skipTest("copier is required for Copier mode-switch coverage")
+        with tempfile.TemporaryDirectory(prefix="allure-mode-switch-") as temporary:
+            root = Path(temporary)
+            source = root / "template-source"
+            shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "template"], cwd=source, check=True)
+            destination = root / "consumer"
+            subprocess.run([copier, "copy", "--trust", "--defaults", "--data-file", str(ROOT / "tests/scenarios/allure-external.yml"), str(source), str(destination)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
+            subprocess.run(["git", "add", "."], cwd=destination, check=True)
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], cwd=destination, check=True)
+            java_validate = ""
+            java_data = root / "java.yml"
+            java_data.write_text("components:\n  - type: java\n    path: .\n")
+            empty_data = root / "empty.yml"
+            empty_data.write_text("components: []\n")
+            for data_file in (java_data, empty_data):
+                result = subprocess.run([copier, "update", "--trust", "--defaults", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if data_file == java_data:
+                    java_validate = (destination / ".github/workflows/validate.yml").read_text()
+                subprocess.run(["git", "add", "."], cwd=destination, check=True)
+                subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "mode"], cwd=destination, check=True)
+            workflow_path = destination / ".github/workflows/allure-report.yml"
+            workflow = workflow_path.read_text()
+            conflict_paths = []
+            for path in destination.rglob("*"):
+                if path.is_file() and (path.name.endswith(".rej") or path.name.endswith(".orig")):
+                    conflict_paths.append(path)
+                if path.is_file():
+                    try:
+                        text = path.read_text()
+                    except UnicodeDecodeError:
+                        continue
+                    if re.search(r"(?m)^(<<<<<<<|=======|>>>>>>>)", text):
+                        conflict_paths.append(path)
+            self.assertEqual(conflict_paths, [])
+            parsed = yaml.safe_load(workflow)
+            trigger = parsed.get("on", parsed.get(True))
+            self.assertIsNotNone(trigger)
+            assert trigger is not None
+            workflows = trigger["workflow_run"]["workflows"]
+            self.assertEqual(workflows, ["Validate", "Run tests"])
+            self.assertEqual(len(set(workflows)), 2)
+            self.assertIn("No external Allure artifacts found; report generation skipped.", workflow)
+            self.assertIn("External Allure artifact contract mismatch", workflow)
+            self.assertIn("allure-results-java-1", java_validate)
+            self.assertIn("## Release notes", (destination / ".github/pull_request_template.md").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

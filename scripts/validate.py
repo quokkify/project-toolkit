@@ -1767,10 +1767,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
             allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
             allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
-            expected_source_workflow = "Run tests" if scenario == "allure-external" else "Validate"
+            expected_source_workflows = ["Validate", "Run tests"] if scenario == "allure-external" else ["Validate"]
             check(
                 allure_triggers
-                == {"workflow_run": {"workflows": [expected_source_workflow], "types": ["completed"]}},
+                == {"workflow_run": {"workflows": expected_source_workflows, "types": ["completed"]}},
                 f"{scenario}: report workflow has the wrong source workflow trigger",
             )
             check(
@@ -1838,7 +1838,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             )
             extractor_text = allure_extractor_path.read_text()
             external_allure = scenario == "allure-external"
-            expected_materialize_target = "source-artifacts" if external_allure else "results"
+            expected_materialize_target = "results"
             preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
             check(
                 all(
@@ -1881,21 +1881,22 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             if scenario == "allure-external":
                 artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
-                    'workflows: ["Run tests"]' in report_text
-                    and 'run.path !== ".github/workflows/test.yml"' in report_text
+                    'workflows: [Validate, "Run tests"]' in report_text
+                    and 'const externalWorkflowPath = ".github/workflows/test.yml"' in report_text
+                    and "const componentRun = run.path === componentWorkflowPath" in report_text
                     and 'const artifactPrefix = "external-allure-"' in report_text
                     and "const minimumArtifacts = 2" in report_text
                     and "const maximumArtifacts = 7" in report_text
                     and 'categories-file: ".github/allure/categories.json"' in report_text
                     and "new Set(actualNames).size" in report_text
-                    and "allureArtifacts.map((artifact) => ({" in report_text
-                    and "expectedArtifacts.map((name)" not in report_text,
+                    and "No external Allure artifacts found; report generation skipped." in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text,
                     "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
                 check(
-                    "source-artifacts-directory: .allure-input/source-artifacts" in report_text
+                    "source-artifacts-directory: .allure-input/results" in report_text
                     and "results-directory: .allure-input/results" in report_text,
-                    "allure-external: external results must be merged from a separate source directory",
+                    "allure-external: stable source directory contract is missing",
                 )
             else:
                 for artifact_name in artifact_names:
@@ -1904,8 +1905,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         f"{scenario}: missing exact artifact contract for {artifact_name}",
                     )
                 check(
-                    "source-artifacts-directory" not in report_text,
-                    f"{scenario}: component results are already merged and need no source directory",
+                    "source-artifacts-directory: .allure-input/results" in report_text,
+                    f"{scenario}: stable Allure source directory contract is missing",
                 )
             if scenario == "allure-polyglot":
                 check(

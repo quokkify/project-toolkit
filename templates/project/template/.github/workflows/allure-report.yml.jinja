@@ -2,7 +2,7 @@ name: Allure report
 
 on:
   workflow_run:
-    workflows: [{% if components %}Validate{% else %}{{ allure_external_workflow_name | tojson }}{% endif %}]
+    workflows: [Validate{% if allure_external_workflow_name != 'Validate' %}, {{ allure_external_workflow_name | tojson }}{% endif %}]
     types: [completed]
 
 permissions: {}
@@ -40,18 +40,21 @@ jobs:
         with:
           script: |
             const run = context.payload.workflow_run;
-{% if components %}            const expectedArtifacts = [
+            const expectedArtifacts = [
             {% for component in components %}  "allure-results-{{ component.type }}-{{ loop.index }}",
             {% endfor %}];
-{% else %}            const artifactPrefix = {{ allure_external_artifact_prefix | tojson }};
+            const artifactPrefix = {{ allure_external_artifact_prefix | tojson }};
             const minimumArtifacts = {{ allure_external_artifact_min_count }};
             const maximumArtifacts = {{ allure_external_artifact_max_count }};
-{% endif %}
+            const componentWorkflowPath = ".github/workflows/validate.yml";
+            const externalWorkflowPath = {{ allure_external_workflow_path | tojson }};
             const skip = (message) => {
               core.warning(message);
               core.setOutput("ready", "false");
             };
-            if (run.path !== {% if components %}".github/workflows/validate.yml"{% else %}{{ allure_external_workflow_path | tojson }}{% endif %}) {
+            const componentRun = run.path === componentWorkflowPath;
+            const externalRun = run.path === externalWorkflowPath && !componentRun;
+            if (!componentRun && !externalRun) {
               skip(`Ignore unexpected source workflow path: ${run.path}`);
               return;
             }
@@ -95,22 +98,23 @@ jobs:
               per_page: 100,
             });
             const allureArtifacts = artifacts.filter((artifact) =>
-              artifact.name.startsWith({% if components %}"allure-results-"{% else %}artifactPrefix{% endif %})
+              artifact.name.startsWith(componentRun ? "allure-results-" : artifactPrefix)
             );
             const actualNames = allureArtifacts.map((artifact) => artifact.name).sort();
-{% if components %}
             const expectedNames = [...expectedArtifacts].sort();
-            if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+            if (componentRun && JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
               core.setFailed(`Allure artifact contract mismatch. Expected ${expectedNames.join(", ")}; received ${actualNames.join(", ") || "none"}.`);
               return;
             }
-{% else %}
-            if (actualNames.length < minimumArtifacts || actualNames.length > maximumArtifacts ||
+            if (externalRun && actualNames.length === 0) {
+              skip("No external Allure artifacts found; report generation skipped.");
+              return;
+            }
+            if (externalRun && (actualNames.length < minimumArtifacts || actualNames.length > maximumArtifacts ||
                 new Set(actualNames).size !== actualNames.length) {
               core.setFailed(`External Allure artifact contract mismatch. Expected ${minimumArtifacts}-${maximumArtifacts} unique artifacts with prefix ${artifactPrefix}; received ${actualNames.length}.`);
               return;
             }
-{% endif %}
             if (allureArtifacts.some((artifact) => artifact.expired)) {
               core.setFailed("One or more required Allure artifacts have expired.");
               return;
@@ -124,17 +128,13 @@ jobs:
               return;
             }
             core.setOutput("artifact_manifest", JSON.stringify(
-{% if components %}
-              expectedArtifacts.map((name) => {
+              componentRun ? expectedArtifacts.map((name) => {
                 const artifact = allureArtifacts.find((candidate) => candidate.name === name);
                 return { name, id: Number(artifact.id) };
-              })
-{% else %}
-              allureArtifacts.map((artifact) => ({
+              }) : allureArtifacts.map((artifact) => ({
                 name: artifact.name,
                 id: Number(artifact.id),
               }))
-{% endif %}
             ));
             const pull = matches[0];
             core.setOutput("ready", "true");
@@ -167,15 +167,15 @@ jobs:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-archives
           OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-expanded
-          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/{% if components %}results{% else %}source-artifacts{% endif %}
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
         run: python .github/allure/safe_extract.py
       - name: Build Allure report without write privileges
         uses: quokkify/project-toolkit/actions/allure-report@{{ toolkit_version }}
         with:
           github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           results-directory: .allure-input/results
-{% if not components %}          source-artifacts-directory: .allure-input/source-artifacts
-{% endif %}          report-directory: allure-report
+          source-artifacts-directory: .allure-input/results
+          report-directory: allure-report
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}
 {% endif %}          source-run-id: {% raw %}${{ github.event.workflow_run.id }}{% endraw %}

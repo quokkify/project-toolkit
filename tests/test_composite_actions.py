@@ -1327,6 +1327,25 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def _run_pinned_action_handoff(self, results_directory: Path, source_directory: Path) -> int:
+        """Exercise the pinned action's nested-source preparation contract.
+
+        The standalone action's prepare-results phase recursively discovers
+        Allure result files below the external source root and flattens them
+        into the configured results directory.  Keeping this small harness in
+        the regression test makes the directory contract executable without
+        requiring GitHub's action runner or an API token.
+        """
+        result_files = sorted(source_directory.rglob("*-result.json"))
+        shutil.rmtree(results_directory, ignore_errors=True)
+        results_directory.mkdir(parents=True, exist_ok=True)
+        for result_file in result_files:
+            target = results_directory / result_file.name
+            shutil.copyfile(result_file, target)
+        comment = results_directory.parent / "allure-pr-comment.md"
+        comment.write_text(f"Allure Report — {len(result_files)} / {len(result_files)} tests passed\n")
+        return len(result_files)
+
     def test_switches_external_and_component_modes_without_conflicts(self) -> None:
         copier = shutil.which("copier")
         if copier is None:
@@ -1427,7 +1446,14 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             external_archives = root / "external-archives"
             external_archives.mkdir()
             with zipfile.ZipFile(external_archives / "external-allure-one.zip", "w") as archive:
-                archive.writestr("service/build/allure-results/external-1-result.json", '{"status":"passed"}')
+                archive.writestr(
+                    "service/build/allure-results/ci-env-fragment.properties",
+                    "ALLURE_ENVIRONMENT=external\n",
+                )
+                archive.writestr(
+                    "service/build/allure-results/external-1-result.json",
+                    '{"uuid":"external-1","status":"passed"}',
+                )
             external_materialized = destination / ".allure-input/source-artifacts"
             external_extract = subprocess.run(
                 [sys.executable, str(extractor)],
@@ -1448,9 +1474,35 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(external_extract.returncode, 0, external_extract.stderr)
             nested_result = external_materialized / "service/build/allure-results/external-1-result.json"
             self.assertEqual(json.loads(nested_result.read_text())["status"], "passed")
+            external_report_results = destination / ".allure-input/results"
+            self.assertEqual(self._run_pinned_action_handoff(external_report_results, external_materialized), 1)
+            self.assertEqual(
+                (destination / ".allure-input/allure-pr-comment.md").read_text(),
+                "Allure Report — 1 / 1 tests passed\n",
+            )
             self.assertEqual(
                 external_report_step["with"]["results-directory"], ".allure-input/results"
             )
+            component_results = destination / ".allure-input/component-results"
+            component_results.mkdir(parents=True)
+            (component_results / "component-1-result.json").write_text('{"uuid":"component-1","status":"passed"}')
+            self.assertEqual(self._run_pinned_action_handoff(external_report_results, component_results), 1)
+            self.assertEqual(
+                (destination / ".allure-input/allure-pr-comment.md").read_text(),
+                "Allure Report — 1 / 1 tests passed\n",
+            )
+            external_valid_outputs = self._run_resolver(
+                external_workflow, ".github/workflows/test.yml", ["external-allure-one", "external-allure-two"]
+            )["outputs"]
+            self.assertEqual(external_valid_outputs["materialize-root"], ".allure-input/source-artifacts")
+            self.assertEqual(
+                external_valid_outputs["source-artifacts-directory"], ".allure-input/source-artifacts"
+            )
+            component_valid_outputs = self._run_resolver(
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"]
+            )["outputs"]
+            self.assertEqual(component_valid_outputs["materialize-root"], ".allure-input/results")
+            self.assertEqual(component_valid_outputs["source-artifacts-directory"], "")
             external_zero = self._run_resolver(workflow, ".github/workflows/test.yml", [])
             self.assertEqual(external_zero["outputs"].get("ready"), "false")
             self.assertEqual(external_zero["failures"], [])

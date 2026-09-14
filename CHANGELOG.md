@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.4](https://github.com/quokkify/project-toolkit/compare/v2.21.3...v2.21.4) (2026-09-14)
+
+
+### 🐛 Bug Fixes
+
+* **allure:** keep Copier workflow contract mode-neutral ([#247](https://github.com/quokkify/project-toolkit/issues/247)) ([4e6dedc](https://github.com/quokkify/project-toolkit/commit/4e6dedce79e151519d286e1d35c307afc9978862))
+
 ## [2.21.3](https://github.com/quokkify/project-toolkit/compare/v2.21.2...v2.21.3) (2026-09-11)
 
 <!-- project-toolkit:rich-block:start -->

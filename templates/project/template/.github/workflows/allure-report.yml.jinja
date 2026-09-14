@@ -176,7 +176,7 @@ jobs:
         with:
           github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           results-directory: .allure-input/results
-          source-artifacts-directory: .allure-input/results
+          source-artifacts-directory: ""
           report-directory: allure-report
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}

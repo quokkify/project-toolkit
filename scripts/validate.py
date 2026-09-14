@@ -1899,7 +1899,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
                 check(
-                    "source-artifacts-directory: .allure-input/results" in report_text
+                    'source-artifacts-directory: ""' in report_text
                     and "results-directory: .allure-input/results" in report_text,
                     "allure-external: stable source directory contract is missing",
                 )
@@ -1910,7 +1910,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         f"{scenario}: missing exact artifact contract for {artifact_name}",
                     )
                 check(
-                    "source-artifacts-directory: .allure-input/results" in report_text,
+                    'source-artifacts-directory: ""' in report_text,
                     f"{scenario}: stable Allure source directory contract is missing",
                 )
             if scenario == "allure-polyglot":

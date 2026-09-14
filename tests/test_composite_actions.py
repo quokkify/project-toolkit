@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -1376,6 +1377,39 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             script_path.write_text("async function main() {\n" + rendered_script + "\n}\n")
             syntax_check = subprocess.run(["node", "--check", str(script_path)], check=False, capture_output=True, text=True)
             self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+            generate_steps = yaml.safe_load(workflow)["jobs"]["generate"]["steps"]
+            report_step = next(
+                step for step in generate_steps
+                if step.get("uses", "").startswith("quokkify/project-toolkit/actions/allure-report@")
+            )
+            self.assertEqual(report_step["with"]["results-directory"], ".allure-input/results")
+            self.assertEqual(report_step["with"]["source-artifacts-directory"], "")
+            archives = root / "archives"
+            archives.mkdir()
+            with zipfile.ZipFile(archives / "allure-results-java-1.zip", "w") as archive:
+                archive.writestr("result.json", "{}")
+            extractor = destination / ".github/allure/safe_extract.py"
+            materialized = destination / ".allure-input/results"
+            extracted = root / "extracted"
+            extract_result = subprocess.run(
+                [sys.executable, str(extractor)],
+                cwd=destination,
+                env={
+                    **os.environ,
+                    "ARTIFACT_MANIFEST": '[{"name":"allure-results-java-1","id":1}]',
+                    "ARTIFACT_ARCHIVE_DIR": str(archives),
+                    "ARCHIVE_ROOT": str(root / "downloaded"),
+                    "OUTPUT_ROOT": str(extracted),
+                    "MATERIALIZE_ROOT": str(materialized),
+                    "GITHUB_WORKSPACE": str(destination),
+                },
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(extract_result.returncode, 0, extract_result.stderr)
+            self.assertEqual((materialized / "result.json").read_text(), "{}")
+            self.assertFalse((materialized / "allure-results").exists())
             external_zero = self._run_resolver(workflow, ".github/workflows/test.yml", [])
             self.assertEqual(external_zero["outputs"].get("ready"), "false")
             self.assertEqual(external_zero["failures"], [])

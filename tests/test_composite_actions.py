@@ -1327,23 +1327,56 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def _run_pinned_action_handoff(self, results_directory: Path, source_directory: Path) -> int:
-        """Exercise the pinned action's nested-source preparation contract.
+    def _run_pinned_action_handoff(
+        self, results_directory: Path, source_directory: Path | None
+    ) -> int:
+        """Exercise the pinned action's source/legacy preparation contract.
 
-        The standalone action's prepare-results phase recursively discovers
-        Allure result files below the external source root and flattens them
-        into the configured results directory.  Keeping this small harness in
-        the regression test makes the directory contract executable without
-        requiring GitHub's action runner or an API token.
+        This is a deterministic equivalent of the pinned action's preparation
+        and PR-summary stages. External mode requires a nested ``allure-results``
+        directory and exactly one ``Module`` provenance value, then flattens
+        validated result JSON into ``results_directory``. Component mode passes
+        an empty source input and consumes already-materialized top-level files.
         """
-        result_files = sorted(source_directory.rglob("*-result.json"))
-        shutil.rmtree(results_directory, ignore_errors=True)
-        results_directory.mkdir(parents=True, exist_ok=True)
+        if source_directory is None:
+            self.assertEqual(results_directory.name, "results")
+            result_files = sorted(results_directory.glob("*-result.json"))
+        else:
+            source_directories = sorted(
+                path
+                for path in source_directory.rglob("allure-results")
+                if path.is_dir()
+            )
+            self.assertEqual(len(source_directories), 1)
+            source = source_directories[0]
+            fragment = source / "ci-env-fragment.properties"
+            self.assertTrue(fragment.is_file())
+            modules = {
+                line.split("=", 1)[1].strip()
+                for line in fragment.read_text().splitlines()
+                if line.strip().startswith("Module=") and line.split("=", 1)[1].strip()
+            }
+            self.assertEqual(len(modules), 1)
+            result_files = sorted(source.glob("*-result.json"))
+            self.assertGreater(len(result_files), 0)
+            shutil.rmtree(results_directory, ignore_errors=True)
+            results_directory.mkdir(parents=True, exist_ok=True)
+            for result_file in result_files:
+                document = json.loads(result_file.read_text())
+                self.assertIsInstance(document, dict)
+                self.assertIn("status", document)
+                target = results_directory / result_file.name
+                self.assertFalse(target.exists())
+                target.write_text(json.dumps(document) + "\n")
+
+        self.assertGreater(len(result_files), 0)
         for result_file in result_files:
-            target = results_directory / result_file.name
-            shutil.copyfile(result_file, target)
+            document = json.loads(result_file.read_text())
+            self.assertIsInstance(document, dict)
+            self.assertIn("status", document)
+        passed = sum(json.loads(path.read_text())["status"] == "passed" for path in result_files)
         comment = results_directory.parent / "allure-pr-comment.md"
-        comment.write_text(f"Allure Report — {len(result_files)} / {len(result_files)} tests passed\n")
+        comment.write_text(f"Allure Report — {passed} / {len(result_files)} tests passed\n")
         return len(result_files)
 
     def test_switches_external_and_component_modes_without_conflicts(self) -> None:
@@ -1448,7 +1481,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             with zipfile.ZipFile(external_archives / "external-allure-one.zip", "w") as archive:
                 archive.writestr(
                     "service/build/allure-results/ci-env-fragment.properties",
-                    "ALLURE_ENVIRONMENT=external\n",
+                    "Module=external\nALLURE_ENVIRONMENT=external\n",
                 )
                 archive.writestr(
                     "service/build/allure-results/external-1-result.json",
@@ -1483,10 +1516,12 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(
                 external_report_step["with"]["results-directory"], ".allure-input/results"
             )
-            component_results = destination / ".allure-input/component-results"
-            component_results.mkdir(parents=True)
-            (component_results / "component-1-result.json").write_text('{"uuid":"component-1","status":"passed"}')
-            self.assertEqual(self._run_pinned_action_handoff(external_report_results, component_results), 1)
+            shutil.rmtree(external_report_results)
+            external_report_results.mkdir(parents=True)
+            (external_report_results / "component-1-result.json").write_text(
+                '{"uuid":"component-1","status":"passed"}'
+            )
+            self.assertEqual(self._run_pinned_action_handoff(external_report_results, None), 1)
             self.assertEqual(
                 (destination / ".allure-input/allure-pr-comment.md").read_text(),
                 "Allure Report — 1 / 1 tests passed\n",

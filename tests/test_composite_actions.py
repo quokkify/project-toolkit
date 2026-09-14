@@ -1349,6 +1349,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             empty_data = root / "empty.yml"
             empty_data.write_text("components: []\n")
             java_workflow = ""
+            external_workflow = ""
             for data_file in (java_data, empty_data):
                 result = subprocess.run([copier, "update", "--trust", "--defaults", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -1356,6 +1357,8 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 if data_file == java_data:
                     java_validate = (destination / ".github/workflows/validate.yml").read_text()
                     java_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
+                else:
+                    external_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
                 subprocess.run(["git", "add", "."], cwd=destination, check=True)
                 subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "mode"], cwd=destination, check=True)
             workflow_path = destination / ".github/workflows/allure-report.yml"
@@ -1383,7 +1386,18 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 if step.get("uses", "").startswith("quokkify/project-toolkit/actions/allure-report@")
             )
             self.assertEqual(report_step["with"]["results-directory"], ".allure-input/results")
-            self.assertEqual(report_step["with"]["source-artifacts-directory"], "")
+            self.assertEqual(
+                report_step["with"]["source-artifacts-directory"],
+                "${{ needs.resolve.outputs.source-artifacts-directory }}",
+            )
+            external_report_step = next(
+                step for step in yaml.safe_load(external_workflow)["jobs"]["generate"]["steps"]
+                if step.get("uses", "").startswith("quokkify/project-toolkit/actions/allure-report@")
+            )
+            self.assertEqual(
+                external_report_step["with"]["source-artifacts-directory"],
+                "${{ needs.resolve.outputs.source-artifacts-directory }}",
+            )
             archives = root / "archives"
             archives.mkdir()
             with zipfile.ZipFile(archives / "allure-results-java-1.zip", "w") as archive:
@@ -1410,6 +1424,33 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(extract_result.returncode, 0, extract_result.stderr)
             self.assertEqual((materialized / "result.json").read_text(), "{}")
             self.assertFalse((materialized / "allure-results").exists())
+            external_archives = root / "external-archives"
+            external_archives.mkdir()
+            with zipfile.ZipFile(external_archives / "external-allure-one.zip", "w") as archive:
+                archive.writestr("service/build/allure-results/external-1-result.json", '{"status":"passed"}')
+            external_materialized = destination / ".allure-input/source-artifacts"
+            external_extract = subprocess.run(
+                [sys.executable, str(extractor)],
+                cwd=destination,
+                env={
+                    **os.environ,
+                    "ARTIFACT_MANIFEST": '[{"name":"external-allure-one","id":1}]',
+                    "ARTIFACT_ARCHIVE_DIR": str(external_archives),
+                    "ARCHIVE_ROOT": str(root / "external-downloaded"),
+                    "OUTPUT_ROOT": str(root / "external-expanded"),
+                    "MATERIALIZE_ROOT": str(external_materialized),
+                    "GITHUB_WORKSPACE": str(destination),
+                },
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(external_extract.returncode, 0, external_extract.stderr)
+            nested_result = external_materialized / "service/build/allure-results/external-1-result.json"
+            self.assertEqual(json.loads(nested_result.read_text())["status"], "passed")
+            self.assertEqual(
+                external_report_step["with"]["results-directory"], ".allure-input/results"
+            )
             external_zero = self._run_resolver(workflow, ".github/workflows/test.yml", [])
             self.assertEqual(external_zero["outputs"].get("ready"), "false")
             self.assertEqual(external_zero["failures"], [])

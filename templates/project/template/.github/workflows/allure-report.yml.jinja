@@ -33,6 +33,8 @@ jobs:
       pr-number: {% raw %}${{ steps.resolve.outputs.pr-number }}{% endraw %}
       fork-pr: {% raw %}${{ steps.resolve.outputs.fork-pr }}{% endraw %}
       artifact_manifest: {% raw %}${{ steps.resolve.outputs.artifact_manifest }}{% endraw %}
+      materialize-root: {% raw %}${{ steps.resolve.outputs.materialize-root }}{% endraw %}
+      source-artifacts-directory: {% raw %}${{ steps.resolve.outputs.source-artifacts-directory }}{% endraw %}
     steps:
       - name: Resolve PR and validate source artifacts
         id: resolve
@@ -50,6 +52,8 @@ jobs:
             const externalWorkflowPath = {{ allure_external_workflow_path | tojson }};
             const componentMode = {{ "true" if components else "false" }};
             const externalMode = {{ "false" if components else "true" }};
+            const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";
+            const sourceArtifactsDirectory = componentMode ? "" : ".allure-input/source-artifacts";
             const skip = (message) => {
               core.warning(message);
               core.setOutput("ready", "false");
@@ -138,6 +142,8 @@ jobs:
                 id: Number(artifact.id),
               }))
             ));
+            core.setOutput("materialize-root", materializeRoot);
+            core.setOutput("source-artifacts-directory", sourceArtifactsDirectory);
             const pull = matches[0];
             core.setOutput("ready", "true");
             core.setOutput("pr-number", String(pull.number));
@@ -169,14 +175,14 @@ jobs:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           ARCHIVE_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-archives
           OUTPUT_ROOT: {% raw %}${{ runner.temp }}{% endraw %}/allure-expanded
-          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/.allure-input/results
+          MATERIALIZE_ROOT: {% raw %}${{ github.workspace }}{% endraw %}/{% raw %}${{ needs.resolve.outputs.materialize-root }}{% endraw %}
         run: python .github/allure/safe_extract.py
       - name: Build Allure report without write privileges
         uses: quokkify/project-toolkit/actions/allure-report@{{ toolkit_version }}
         with:
           github-token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
           results-directory: .allure-input/results
-          source-artifacts-directory: ""
+          source-artifacts-directory: {% raw %}${{ needs.resolve.outputs.source-artifacts-directory }}{% endraw %}
           report-directory: allure-report
           config-file: .github/allure/allurerc.mjs
 {% if allure_categories_file %}          categories-file: {{ allure_categories_file | tojson }}

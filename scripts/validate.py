@@ -1842,7 +1842,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             )
             extractor_text = allure_extractor_path.read_text()
             external_allure = scenario == "allure-external"
-            expected_materialize_target = "results"
             preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
             check(
                 all(
@@ -1853,7 +1852,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "artifact_manifest" in report_text
                 and "${{ runner.temp }}/allure-archives" in report_text
                 and "${{ runner.temp }}/allure-expanded" in report_text
-                and f"MATERIALIZE_ROOT: ${{{{ github.workspace }}}}/.allure-input/{expected_materialize_target}"
+                and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
                 in report_text
                 and "python .github/allure/safe_extract.py" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
@@ -1899,8 +1898,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     "allure-external: rendered source workflow or bounded artifact contract is incomplete",
                 )
                 check(
-                    'source-artifacts-directory: ""' in report_text
-                    and "results-directory: .allure-input/results" in report_text,
+                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
+                    and "results-directory: .allure-input/results" in report_text
+                    and 'const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";' in report_text,
                     "allure-external: stable source directory contract is missing",
                 )
             else:
@@ -1910,7 +1910,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         f"{scenario}: missing exact artifact contract for {artifact_name}",
                     )
                 check(
-                    'source-artifacts-directory: ""' in report_text,
+                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
+                    and 'materialize-root: ${{ steps.resolve.outputs.materialize-root }}' in report_text,
                     f"{scenario}: stable Allure source directory contract is missing",
                 )
             if scenario == "allure-polyglot":

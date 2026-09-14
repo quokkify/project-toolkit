@@ -41,7 +41,7 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.21.2
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.21.3
     with:
       python-version: "3.12"
       test-command: pytest

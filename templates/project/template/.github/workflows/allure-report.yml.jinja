@@ -48,12 +48,14 @@ jobs:
             const maximumArtifacts = {{ allure_external_artifact_max_count }};
             const componentWorkflowPath = ".github/workflows/validate.yml";
             const externalWorkflowPath = {{ allure_external_workflow_path | tojson }};
+            const componentMode = {{ "true" if components else "false" }};
+            const externalMode = {{ "false" if components else "true" }};
             const skip = (message) => {
               core.warning(message);
               core.setOutput("ready", "false");
             };
-            const componentRun = run.path === componentWorkflowPath;
-            const externalRun = run.path === externalWorkflowPath && !componentRun;
+            const componentRun = componentMode && run.path === componentWorkflowPath;
+            const externalRun = externalMode && run.path === externalWorkflowPath;
             if (!componentRun && !externalRun) {
               skip(`Ignore unexpected source workflow path: ${run.path}`);
               return;
@@ -111,7 +113,7 @@ jobs:
               return;
             }
             if (externalRun && (actualNames.length < minimumArtifacts || actualNames.length > maximumArtifacts ||
-                new Set(actualNames).size !== actualNames.length) {
+                new Set(actualNames).size !== actualNames.length)) {
               core.setFailed(`External Allure artifact contract mismatch. Expected ${minimumArtifacts}-${maximumArtifacts} unique artifacts with prefix ${artifactPrefix}; received ${actualNames.length}.`);
               return;
             }

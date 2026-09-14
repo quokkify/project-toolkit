@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -1264,6 +1265,36 @@ class DeployGhPagesSubdirTests(unittest.TestCase):
 
 
 class AllureCopierModeSwitchTests(unittest.TestCase):
+    def _run_resolver(self, workflow_text: str, source_path: str, artifacts: list[str]) -> dict:
+        workflow = yaml.safe_load(workflow_text)
+        script = workflow["jobs"]["resolve"]["steps"][0]["with"]["script"]
+        harness = """
+const input = JSON.parse(process.argv[1]);
+const outputs = {};
+const failures = [];
+const warnings = [];
+const run = {path: input.source_path, head_repository: {full_name: "example/fork"}, head_sha: "abc", id: 1, workflow_id: 7};
+const pull = {number: 42, base: {repo: {full_name: "example/project"}}, head: {repo: {full_name: "example/fork"}, sha: "abc"}, user: {login: "author"}};
+const github = {
+  rest: {pulls: {list: "pulls"}, actions: {listWorkflowRuns: "runs", listWorkflowRunArtifacts: "artifacts"}},
+  paginate: async (operation) => operation === "pulls" ? [pull] : operation === "runs" ? [{id: 1}] : input.artifacts.map((name, id) => ({name, id: id + 1, expired: false, size_in_bytes: 1})),
+};
+const context = {payload: {workflow_run: run}, repo: {owner: "example", repo: "project"}};
+const core = {setOutput: (name, value) => { outputs[name] = value; }, warning: (message) => warnings.push(message), setFailed: (message) => failures.push(message)};
+async function main() {
+""" + script + """
+}
+main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).catch((error) => { console.error(error); process.exit(1); });
+"""
+        result = subprocess.run(
+            ["node", "-e", harness, json.dumps({"source_path": source_path, "artifacts": artifacts})],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def test_switches_external_and_component_modes_without_conflicts(self) -> None:
         copier = shutil.which("copier")
         if copier is None:
@@ -1285,11 +1316,13 @@ class AllureCopierModeSwitchTests(unittest.TestCase):
             java_data.write_text("components:\n  - type: java\n    path: .\n")
             empty_data = root / "empty.yml"
             empty_data.write_text("components: []\n")
+            java_workflow = ""
             for data_file in (java_data, empty_data):
                 result = subprocess.run([copier, "update", "--trust", "--defaults", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 if data_file == java_data:
                     java_validate = (destination / ".github/workflows/validate.yml").read_text()
+                    java_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
                 subprocess.run(["git", "add", "."], cwd=destination, check=True)
                 subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "mode"], cwd=destination, check=True)
             workflow_path = destination / ".github/workflows/allure-report.yml"
@@ -1313,10 +1346,33 @@ class AllureCopierModeSwitchTests(unittest.TestCase):
             workflows = trigger["workflow_run"]["workflows"]
             self.assertEqual(workflows, ["Validate", "Run tests"])
             self.assertEqual(len(set(workflows)), 2)
-            self.assertIn("No external Allure artifacts found; report generation skipped.", workflow)
-            self.assertIn("External Allure artifact contract mismatch", workflow)
             self.assertIn("allure-results-java-1", java_validate)
             self.assertIn("## Release notes", (destination / ".github/pull_request_template.md").read_text())
+
+            rendered_script = yaml.safe_load(workflow)["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            script_path = root / "generated-resolver.js"
+            script_path.write_text("async function main() {\n" + rendered_script + "\n}\n")
+            syntax_check = subprocess.run(["node", "--check", str(script_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+            external_zero = self._run_resolver(workflow, ".github/workflows/test.yml", [])
+            self.assertEqual(external_zero["outputs"].get("ready"), "false")
+            self.assertEqual(external_zero["failures"], [])
+            self.assertIn("No external Allure artifacts found", external_zero["warnings"][0])
+            external_valid = self._run_resolver(
+                workflow, ".github/workflows/test.yml", ["external-allure-one", "external-allure-two"]
+            )
+            self.assertEqual(external_valid["outputs"].get("ready"), "true")
+            self.assertEqual(external_valid["failures"], [])
+            external_too_few = self._run_resolver(workflow, ".github/workflows/test.yml", ["external-allure-one"])
+            self.assertEqual(external_too_few["outputs"], {})
+            self.assertIn("External Allure artifact contract mismatch", external_too_few["failures"][0])
+
+            component_exact = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"])
+            self.assertEqual(component_exact["outputs"].get("ready"), "true")
+            self.assertEqual(component_exact["failures"], [])
+            component_wrong = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["external-allure-one"])
+            self.assertEqual(component_wrong["outputs"], {})
+            self.assertIn("Allure artifact contract mismatch", component_wrong["failures"][0])
 
 
 if __name__ == "__main__":

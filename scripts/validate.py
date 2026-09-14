@@ -1762,6 +1762,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
             if allure_config_path.is_file():
                 run(["node", "--check", str(allure_config_path)])
+            resolver_script = yaml.safe_load(allure_workflow_path.read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            resolver_script_path = tmp_path / f"{scenario}-resolver.js"
+            resolver_script_path.write_text(f"async function main() {{\n{resolver_script}\n}}\n", encoding="utf-8")
+            run(["node", "--check", str(resolver_script_path)])
             check(allure_extractor_path.is_file(), f"{scenario}: missing bounded ZIP extractor")
             if allure_extractor_path.is_file():
                 run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
@@ -1883,7 +1887,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 check(
                     'workflows: [Validate, "Run tests"]' in report_text
                     and 'const externalWorkflowPath = ".github/workflows/test.yml"' in report_text
-                    and "const componentRun = run.path === componentWorkflowPath" in report_text
+                    and "const componentMode = false" in report_text
+                    and "const externalMode = true" in report_text
                     and 'const artifactPrefix = "external-allure-"' in report_text
                     and "const minimumArtifacts = 2" in report_text
                     and "const maximumArtifacts = 7" in report_text

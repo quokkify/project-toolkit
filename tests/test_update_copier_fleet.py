@@ -1131,6 +1131,79 @@ class TemplateInventoryTests(TestCase):
             extractor.write_text("# extractor\n", encoding="utf-8")
             self.assertFalse(fleet.has_custom_allure_outputs(repository))
 
+    def test_allure_finds_extractor_in_multiline_python_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: |\n"
+                "          python \\\n"
+                "            tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertTrue(fleet.has_custom_allure_outputs(repository))
+
+    def test_allure_ignores_quoted_semicolons_and_echo_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: echo \"python tools/allure/safe_extract.py; echo text\"\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            (repository / "tools/allure").mkdir(parents=True)
+            (repository / "tools/allure/allurerc.mjs").write_text("{}\n", encoding="utf-8")
+            (repository / "tools/allure/safe_extract.py").write_text("# helper\n", encoding="utf-8")
+            self.assertFalse(fleet.has_custom_allure_outputs(repository))
+
+    def test_allure_ignores_heredoc_body_but_finds_command_after_delimiter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/report.yml"
+            config = repository / "tools/allure/allurerc.mjs"
+            extractor = repository / "tools/allure/safe_extract.py"
+            workflow.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            workflow.write_text(
+                "jobs:\n  report:\n    steps:\n"
+                "      - run: |\n"
+                "          cat <<'EOF'\n"
+                "          python tools/allure/safe_extract.py\n"
+                "          EOF\n"
+                "          python tools/allure/safe_extract.py\n"
+                "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                encoding="utf-8",
+            )
+            config.write_text("export default {};\n", encoding="utf-8")
+            extractor.write_text("# extractor\n", encoding="utf-8")
+            self.assertTrue(fleet.has_custom_allure_outputs(repository))
+
+    def test_workflow_defaults_run_directory_is_inherited_by_components(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = repository / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "defaults:\n  run:\n    working-directory: backend\n"
+                "jobs:\n  test:\n    steps:\n"
+                "      - uses: actions/setup-python@v5\n"
+                "      - run: python -m pytest\n",
+                encoding="utf-8",
+            )
+            components = fleet.inferred_components(repository)
+        self.assertEqual(components, ("python:backend",))
+
     def test_allure_ignores_comments_and_quoted_run_text(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

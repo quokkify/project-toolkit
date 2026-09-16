@@ -327,19 +327,59 @@ def _shell_heredoc_free(run: str) -> str:
     """Remove heredoc bodies before inspecting shell command tokens."""
     lines = run.splitlines(keepends=True)
     kept: list[str] = []
-    delimiter: str | None = None
-    strip_tabs = False
+    delimiters: list[tuple[str, bool]] = []
     for line in lines:
-        if delimiter is not None:
-            candidate = line.rstrip("\\r\\n")
-            if (candidate.lstrip("\\t") if strip_tabs else candidate) == delimiter:
-                delimiter = None
+        if delimiters:
+            candidate = line.rstrip("\r\n")
+            delimiter, strip_tabs = delimiters.pop(0)
+            if (candidate.lstrip("\t") if strip_tabs else candidate) != delimiter:
+                delimiters.insert(0, (delimiter, strip_tabs))
+            else:
+                # The heredoc's terminating newline is also a command
+                # separator.  Preserve that boundary after dropping data.
+                kept.append(";\n")
             continue
         kept.append(line)
-        match = re.search(r"<<(-?)[ \\t]*(?:['\"]([^'\"]+)['\"]|([^ \\t;&|]+))", line)
-        if match:
-            strip_tabs = bool(match.group(1))
-            delimiter = match.group(2) or match.group(3)
+        quote: str | None = None
+        index = 0
+        while index < len(line) - 1:
+            character = line[index]
+            if quote:
+                if character == quote and (index == 0 or line[index - 1] != "\\"):
+                    quote = None
+                index += 1
+                continue
+            if character in "'\"":
+                quote = character
+                index += 1
+                continue
+            if line[index : index + 2] != "<<":
+                index += 1
+                continue
+            index += 2
+            strip_tabs = index < len(line) and line[index] == "-"
+            if strip_tabs:
+                index += 1
+            while index < len(line) and line[index] in " \t":
+                index += 1
+            if index >= len(line):
+                break
+            if line[index] in "'\"":
+                delimiter_quote = line[index]
+                index += 1
+                end = line.find(delimiter_quote, index)
+                if end < 0:
+                    break
+                delimiter = line[index:end]
+                index = end + 1
+            else:
+                start = index
+                while index < len(line) and line[index] not in " \t;&|\r\n":
+                    index += 1
+                delimiter = line[start:index]
+            if delimiter:
+                delimiters.append((delimiter, strip_tabs))
+            break
     return "".join(kept)
 
 
@@ -369,8 +409,14 @@ def _shell_extractor_paths(run: str) -> set[str]:
                 posixpath.join(working_directory, token)
             )
             pending_cd = False
-        elif command_start and token in {"python", "python3"} and index + 1 < len(tokens):
-            extractor = tokens[index + 1]
+        elif command_start and token in {"python", "python3"}:
+            extractor_index = index + 1
+            while extractor_index < len(tokens) and tokens[extractor_index] in {"\\", "\n"}:
+                extractor_index += 1
+            if extractor_index >= len(tokens):
+                command_start = False
+                continue
+            extractor = tokens[extractor_index]
             if extractor.endswith("safe_extract.py"):
                 extractors.add(posixpath.normpath(posixpath.join(working_directory, extractor)))
         command_start = False
@@ -438,13 +484,23 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
             document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
         except yaml.YAMLError:
             continue
-        jobs = document.get("jobs", {}) if isinstance(document, dict) else {}
+        if not isinstance(document, dict):
+            continue
+        jobs = document.get("jobs", {})
         if not isinstance(jobs, dict):
             continue
+        workflow_defaults = document.get("defaults", {})
+        workflow_path = "."
+        if isinstance(workflow_defaults, dict):
+            workflow_run_defaults = workflow_defaults.get("run", {})
+            if isinstance(workflow_run_defaults, dict):
+                workflow_path = workflow_run_defaults.get("working-directory", workflow_path)
+        if not isinstance(workflow_path, str):
+            workflow_path = "."
         for job in jobs.values():
             if not isinstance(job, dict):
                 continue
-            job_path = job.get("working-directory", ".")
+            job_path = job.get("working-directory", workflow_path)
             defaults = job.get("defaults", {})
             if isinstance(defaults, dict):
                 run_defaults = defaults.get("run", {})

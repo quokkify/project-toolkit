@@ -6,5 +6,4 @@ jobs:
   java:
     uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0
     with:
-      java-version: "21"
       build-tool: auto

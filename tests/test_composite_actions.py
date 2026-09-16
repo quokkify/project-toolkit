@@ -24,6 +24,19 @@ def action(name: str) -> dict:
 
 
 class SetupActionTests(unittest.TestCase):
+    def test_java_defaults_are_17_and_versions_remain_overridable(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        workflow_inputs = workflow[True]["workflow_call"]["inputs"]
+        self.assertEqual(workflow_inputs["java-version"]["default"], "17")
+
+        action_inputs = action("setup-java-gradle")["inputs"]
+        self.assertEqual(action_inputs["java-version"]["default"], "17")
+        setup = next(
+            step for step in action("setup-java-gradle")["runs"]["steps"]
+            if step.get("name") == "Set up Java"
+        )
+        self.assertEqual(setup["with"]["java-version"], "${{ inputs.java-version }}")
+
     def test_boolean_validation_is_first_and_fails_closed(self) -> None:
         cases = {
             "setup-python": {"CACHE_DEPENDENCIES": "maybe", "INSTALL_DEPENDENCIES": "true", "PACKAGE_MANAGER": "auto", "POETRY_VERSION": "2.1.4", "UV_VERSION": "0.8.15"},

@@ -1079,17 +1079,23 @@ class TemplateInventoryTests(TestCase):
             "echo setup # comment\npython tools/allure/safe_extract.py",
             "echo setup &&\npython tools/allure/safe_extract.py",
             "printf x |\npython tools/allure/safe_extract.py",
+            "echo setup;# comment\npython tools/allure/safe_extract.py",
+            ":;# cat <<EOF\npython tools/allure/safe_extract.py",
+            "echo $((1 << 2))\npython tools/allure/safe_extract.py",
         ):
             with self.subTest(run=run):
                 self.assertEqual(fleet._shell_extractor_paths(run), expected)
 
     def test_shell_extractor_ignores_heredoc_marker_in_comments(self) -> None:
-        self.assertEqual(
-            fleet._shell_extractor_paths(
-                "# cat <<EOF\npython tools/allure/safe_extract.py"
-            ),
-            {"tools/allure/safe_extract.py"},
-        )
+        for run in (
+            "# cat <<EOF\npython tools/allure/safe_extract.py",
+            ":;# cat <<EOF\npython tools/allure/safe_extract.py",
+        ):
+            with self.subTest(run=run):
+                self.assertEqual(
+                    fleet._shell_extractor_paths(run),
+                    {"tools/allure/safe_extract.py"},
+                )
 
     def test_allure_accepts_complete_helpers_in_nonstandard_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

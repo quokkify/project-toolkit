@@ -341,6 +341,7 @@ def _shell_heredoc_free(run: str) -> str:
             continue
         kept.append(line)
         quote: str | None = None
+        arithmetic_depth = 0
         index = 0
         while index < len(line) - 1:
             character = line[index]
@@ -353,12 +354,29 @@ def _shell_heredoc_free(run: str) -> str:
                 quote = character
                 index += 1
                 continue
-            # A heredoc marker in a shell comment is just comment text.
-            if character == "#" and (index == 0 or line[index - 1].isspace()):
+            # A heredoc marker in a shell comment is just comment text. A
+            # comment may begin directly after a shell control operator.
+            previous = line[:index].rstrip()
+            if character == "#" and (
+                not previous
+                or line[index - 1].isspace()
+                or previous.endswith((";", "&&", "||", "|", "&"))
+            ):
                 break
+            if line.startswith("$((", index):
+                arithmetic_depth += 1
+                index += 3
+                continue
+            if arithmetic_depth and line.startswith("))", index):
+                arithmetic_depth -= 1
+                index += 2
+                continue
             # A here-string (<<<) consumes one word, not following lines.
             if line[index : index + 2] != "<<":
                 index += 1
+                continue
+            if arithmetic_depth:
+                index += 2
                 continue
             if line[index : index + 3] == "<<<":
                 index += 3
@@ -423,7 +441,12 @@ def _shell_newline_separated(run: str) -> str:
             escaped = False
             continue
         if quote is None and not comment and character == "#":
-            if not result or result[-1].isspace():
+            previous = "".join(result).rstrip()
+            if (
+                not previous
+                or (result and result[-1].isspace())
+                or previous.endswith((";", "&&", "||", "|", "&"))
+            ):
                 comment = True
         if comment:
             # Do not let shlex's comment mode consume following physical

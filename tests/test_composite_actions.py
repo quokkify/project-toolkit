@@ -29,6 +29,13 @@ class SetupActionTests(unittest.TestCase):
         workflow_inputs = workflow[True]["workflow_call"]["inputs"]
         self.assertEqual(workflow_inputs["java-version"]["default"], "17")
 
+        validation_workflow = yaml.safe_load((ROOT / ".github/workflows/validate-toolkit.yml").read_text())
+        validation_setup = next(
+            step for step in validation_workflow["jobs"]["java"]["steps"]
+            if step.get("name") == "Set up Java"
+        )
+        self.assertEqual(validation_setup["with"]["java-version"], "17")
+
         action_inputs = action("setup-java-gradle")["inputs"]
         self.assertEqual(action_inputs["java-version"]["default"], "17")
         setup = next(

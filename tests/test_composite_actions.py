@@ -24,33 +24,15 @@ def action(name: str) -> dict:
 
 
 class SetupActionTests(unittest.TestCase):
-    def test_public_java_examples_pin_version_when_release_defaults_differ(self) -> None:
-        """Examples must remain Java 17 while consuming older immutable releases."""
-        release_defaults = {
-            "quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0": "21",
-            "quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0": "21",
-        }
-        examples = {
-            "quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0": yaml.safe_load(
-                (ROOT / "examples/java-ci.yml").read_text()
-            )["jobs"]["java"],
-            "quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0": next(
-                step
-                for step in yaml.safe_load((ROOT / "examples/setup-actions.yml").read_text())["jobs"][
-                    "setup-java"
-                ]["steps"]
-                if step.get("uses") == "quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0"
-            ),
-        }
-        for reference, release_default in release_defaults.items():
-            with self.subTest(reference=reference):
-                self.assertNotEqual(release_default, "17")
-                self.assertEqual(examples[reference]["with"]["java-version"], "17")
-
     def test_java_defaults_are_17_and_versions_remain_overridable(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
         workflow_inputs = workflow[True]["workflow_call"]["inputs"]
         self.assertEqual(workflow_inputs["java-version"]["default"], "17")
+        workflow_setup = next(
+            step for step in workflow["jobs"]["ci"]["steps"]
+            if step.get("name") == "Set up Java"
+        )
+        self.assertEqual(workflow_setup["with"]["java-version"], "${{ inputs.java-version }}")
 
         validation_workflow = yaml.safe_load((ROOT / ".github/workflows/validate-toolkit.yml").read_text())
         validation_setup = next(
@@ -66,6 +48,19 @@ class SetupActionTests(unittest.TestCase):
             if step.get("name") == "Set up Java"
         )
         self.assertEqual(setup["with"]["java-version"], "${{ inputs.java-version }}")
+
+        example_workflow = yaml.safe_load((ROOT / "examples/java-ci.yml").read_text())
+        self.assertEqual(example_workflow["jobs"]["java"]["with"]["java-version"], "17")
+
+        polyglot_workflow = yaml.safe_load((ROOT / "examples/polyglot-ci.yml").read_text())
+        self.assertEqual(polyglot_workflow["jobs"]["java"]["with"]["java-version"], "17")
+
+        examples = yaml.safe_load((ROOT / "examples/setup-actions.yml").read_text())
+        setup_java = next(
+            step for step in examples["jobs"]["setup-java"]["steps"]
+            if step.get("name") == "Setup Java and Gradle cache"
+        )
+        self.assertEqual(setup_java["with"]["java-version"], "17")
 
     def test_boolean_validation_is_first_and_fails_closed(self) -> None:
         cases = {

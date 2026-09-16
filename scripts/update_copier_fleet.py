@@ -407,34 +407,36 @@ def _shell_heredoc_free(run: str) -> str:
                 index += 1
             if index >= len(line):
                 break
-            if line[index] in "'\"":
-                delimiter_quote = line[index]
-                index += 1
-                end = line.find(delimiter_quote, index)
-                if end < 0:
-                    break
-                delimiter = line[index:end]
-                index = end + 1
-            else:
-                start = index
-                while index < len(line) and line[index] not in " \t;&|\r\n":
-                    index += 1
-                raw_delimiter = line[start:index]
-                # Shell quote removal applies to the delimiter word. In
-                # particular, <<\EOF closes with an unescaped EOF line.
-                delimiter_chars: list[str] = []
-                escaped_delimiter = False
-                for delimiter_character in raw_delimiter:
-                    if escaped_delimiter:
-                        delimiter_chars.append(delimiter_character)
-                        escaped_delimiter = False
-                    elif delimiter_character == "\\":
-                        escaped_delimiter = True
+            # Read the complete shell word and apply quote removal. Delimiter
+            # words may mix quoted and unquoted segments, and an escaped
+            # whitespace remains part of the word (e.g. <<E\ OF).
+            delimiter_chars: list[str] = []
+            delimiter_quote: str | None = None
+            escaped_delimiter = False
+            while index < len(line):
+                delimiter_character = line[index]
+                if escaped_delimiter:
+                    delimiter_chars.append(delimiter_character)
+                    escaped_delimiter = False
+                elif delimiter_character == "\\":
+                    escaped_delimiter = True
+                elif delimiter_quote:
+                    if delimiter_character == delimiter_quote:
+                        delimiter_quote = None
                     else:
                         delimiter_chars.append(delimiter_character)
-                if escaped_delimiter:
-                    delimiter_chars.append("\\")
-                delimiter = "".join(delimiter_chars)
+                elif delimiter_character in "'\"":
+                    delimiter_quote = delimiter_character
+                elif delimiter_character in " \t;&|\r\n":
+                    break
+                else:
+                    delimiter_chars.append(delimiter_character)
+                index += 1
+            if escaped_delimiter:
+                delimiter_chars.append("\\")
+            if delimiter_quote:
+                break
+            delimiter = "".join(delimiter_chars)
             if delimiter:
                 delimiters.append((delimiter, strip_tabs))
             # A command can contain multiple heredoc redirects. Find all of

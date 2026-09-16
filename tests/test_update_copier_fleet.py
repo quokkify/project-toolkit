@@ -1302,6 +1302,30 @@ class TemplateInventoryTests(TestCase):
                     (repository / "tools/allure/safe_extract.py").write_text("# helper\n", encoding="utf-8")
                     self.assertTrue(fleet.has_custom_allure_outputs(repository))
 
+    def test_allure_finds_command_after_mixed_quoted_heredoc_delimiters(self) -> None:
+        runs = (
+            'cat <<E"OF"\nbody\nEOF\n',
+            "cat <<'E'O'F'\nbody\nEOF\n",
+            "cat <<E\\ OF\nbody\nE OF\n",
+        )
+        for run in runs:
+            with self.subTest(run=run):
+                with tempfile.TemporaryDirectory() as temporary:
+                    repository = Path(temporary)
+                    workflow = repository / ".github/workflows/report.yml"
+                    workflow.parent.mkdir(parents=True)
+                    workflow.write_text(
+                        "jobs:\n  report:\n    steps:\n"
+                        "      - run: |\n"
+                        + "".join(f"          {line}" for line in (run + "python tools/allure/safe_extract.py\n").splitlines(keepends=True))
+                        + "        with:\n          config-file: tools/allure/allurerc.mjs\n",
+                        encoding="utf-8",
+                    )
+                    (repository / "tools/allure").mkdir(parents=True)
+                    (repository / "tools/allure/allurerc.mjs").write_text("{}\n", encoding="utf-8")
+                    (repository / "tools/allure/safe_extract.py").write_text("# helper\n", encoding="utf-8")
+                    self.assertTrue(fleet.has_custom_allure_outputs(repository))
+
     def test_workflow_defaults_run_directory_is_inherited_by_components(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

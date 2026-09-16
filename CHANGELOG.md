@@ -2,6 +2,18 @@
 
 ## [2.21.5](https://github.com/quokkify/project-toolkit/compare/v2.21.4...v2.21.5) (2026-09-16)
 
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update renovate to v44.82.1 ([#251](https://github.com/quokkify/project-toolkit/pull/251)) ([33ee3ec](https://github.com/quokkify/project-toolkit/commit/33ee3ec3b442653b6771c7e6d44eabee50cdbbf7)) <!-- project-toolkit:rich-release-notes pr=251 -->
+- update quokkify/project-toolkit to v2.21.4 ([#252](https://github.com/quokkify/project-toolkit/pull/252)) ([cc20190](https://github.com/quokkify/project-toolkit/commit/cc201907ca7efe5155ff6c7d3672dafc707116c4)) <!-- project-toolkit:rich-release-notes pr=252 -->
+- update renovate to v44.82.4 ([#253](https://github.com/quokkify/project-toolkit/pull/253)) ([3f8ecf7](https://github.com/quokkify/project-toolkit/commit/3f8ecf73fbdc733a939ecb14009e5484d763c170)) <!-- project-toolkit:rich-release-notes pr=253 -->
+- update java-jdk to v25 ([#254](https://github.com/quokkify/project-toolkit/pull/254)) ([5e5cab2](https://github.com/quokkify/project-toolkit/commit/5e5cab25a18383a91386907ccb5b83c80f1ae01a)) <!-- project-toolkit:rich-release-notes pr=254 -->
+- update renovate to v44.82.5 ([#255](https://github.com/quokkify/project-toolkit/pull/255)) ([ba5e350](https://github.com/quokkify/project-toolkit/commit/ba5e3508f8dbe5547c84ffe5770921f0c08e498b)) <!-- project-toolkit:rich-release-notes pr=255 -->
+- update github actions non-major updates ([#256](https://github.com/quokkify/project-toolkit/pull/256)) ([4d475f2](https://github.com/quokkify/project-toolkit/commit/4d475f21b6b892c718b26426f67a7fa2f6175b68)) <!-- project-toolkit:rich-release-notes pr=256 -->
+- update renovate to v44.83.0 ([#261](https://github.com/quokkify/project-toolkit/pull/261)) ([4791e2b](https://github.com/quokkify/project-toolkit/commit/4791e2bb75d2cfb14a90ee9b7de637371f63d76c)) <!-- project-toolkit:rich-release-notes pr=261 -->
+- update docker/setup-buildx-action action to v4.4.1 ([#262](https://github.com/quokkify/project-toolkit/pull/262)) ([e44b0a9](https://github.com/quokkify/project-toolkit/commit/e44b0a9e056b29bd8e3f3b09eff41d20df1a1df1)) <!-- project-toolkit:rich-release-notes pr=262 -->
+- update renovate to v44.94.0 ([#263](https://github.com/quokkify/project-toolkit/pull/263)) ([e8cf624](https://github.com/quokkify/project-toolkit/commit/e8cf62475271d295654517ba0ec514eb8b668665)) <!-- project-toolkit:rich-release-notes pr=263 -->
+<!-- project-toolkit:rich-block:end -->
 
 ### 🐛 Bug Fixes
 

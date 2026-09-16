@@ -327,7 +327,7 @@ def _shell_heredoc_free(run: str) -> str:
     """Remove heredoc bodies before inspecting shell command tokens."""
     lines = run.splitlines(keepends=True)
     kept: list[str] = []
-    delimiters: list[tuple[str, bool]] = []
+    delimiters: list[tuple[str, bool, bool]] = []
     quote: str | None = None
     arithmetic_depth = 0
     paren_arithmetic_depth = 0
@@ -335,15 +335,30 @@ def _shell_heredoc_free(run: str) -> str:
     while line_index < len(lines):
         line = lines[line_index]
         if delimiters:
-            candidate = line.rstrip("\r\n")
-            delimiter, strip_tabs = delimiters.pop(0)
+            delimiter, strip_tabs, quoted = delimiters.pop(0)
+            body_lines = [line]
+            consumed_body_lines = 1
+            # For an unquoted heredoc, Bash removes backslash-newline pairs
+            # from the body before checking the closing delimiter.  Fold the
+            # physical lines here so a delimiter-like line joined to prior
+            # body text cannot be mistaken for the closing delimiter.
+            if not quoted:
+                while body_lines[-1].rstrip("\r\n").endswith("\\"):
+                    next_index = line_index + consumed_body_lines
+                    if next_index >= len(lines):
+                        break
+                    current = body_lines[-1].rstrip("\r\n")
+                    body_lines[-1] = current[:-1]
+                    body_lines.append(lines[next_index])
+                    consumed_body_lines += 1
+            candidate = "".join(body_lines).rstrip("\r\n")
             if (candidate.lstrip("\t") if strip_tabs else candidate) != delimiter:
-                delimiters.insert(0, (delimiter, strip_tabs))
+                delimiters.insert(0, (delimiter, strip_tabs, quoted))
             else:
                 # The command line already retained its terminating newline,
                 # which separates it from commands after the heredoc.
                 pass
-            line_index += 1
+            line_index += consumed_body_lines
             continue
         # A backslash-newline is removed by the shell before parsing.  Fold
         # such continuations for delimiter recognition, while retaining the
@@ -428,6 +443,7 @@ def _shell_heredoc_free(run: str) -> str:
             # whitespace remains part of the word (e.g. <<E\ OF).
             delimiter_chars: list[str] = []
             delimiter_quote: str | None = None
+            delimiter_was_quoted = False
             escaped_delimiter = False
             while index < len(line):
                 delimiter_character = line[index]
@@ -448,6 +464,7 @@ def _shell_heredoc_free(run: str) -> str:
                         delimiter_chars.append(delimiter_character)
                 elif delimiter_character in "'\"":
                     delimiter_quote = delimiter_character
+                    delimiter_was_quoted = True
                 elif delimiter_character in " \t;&|\r\n":
                     break
                 else:
@@ -459,7 +476,7 @@ def _shell_heredoc_free(run: str) -> str:
                 break
             delimiter = "".join(delimiter_chars)
             if delimiter:
-                delimiters.append((delimiter, strip_tabs))
+                delimiters.append((delimiter, strip_tabs, delimiter_was_quoted))
             # A command can contain multiple heredoc redirects. Find all of
             # them so every body is suppressed before tokenization.
             index += 1

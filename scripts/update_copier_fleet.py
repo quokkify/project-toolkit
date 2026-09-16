@@ -331,7 +331,9 @@ def _shell_heredoc_free(run: str) -> str:
     quote: str | None = None
     arithmetic_depth = 0
     paren_arithmetic_depth = 0
-    for line in lines:
+    line_index = 0
+    while line_index < len(lines):
+        line = lines[line_index]
         if delimiters:
             candidate = line.rstrip("\r\n")
             delimiter, strip_tabs = delimiters.pop(0)
@@ -341,8 +343,22 @@ def _shell_heredoc_free(run: str) -> str:
                 # The command line already retained its terminating newline,
                 # which separates it from commands after the heredoc.
                 pass
+            line_index += 1
             continue
-        kept.append(line)
+        # A backslash-newline is removed by the shell before parsing.  Fold
+        # such continuations for delimiter recognition, while retaining the
+        # original physical lines in the output and advancing past them.
+        logical_line = line
+        consumed_lines = 1
+        while logical_line.rstrip("\r\n").endswith("\\"):
+            continuation = logical_line.rstrip("\r\n")
+            trailing_slashes = len(continuation) - len(continuation.rstrip("\\"))
+            if trailing_slashes % 2 == 0 or line_index + consumed_lines >= len(lines):
+                break
+            logical_line = continuation[:-1] + lines[line_index + consumed_lines]
+            consumed_lines += 1
+        kept.extend(lines[line_index : line_index + consumed_lines])
+        line = logical_line
         comment = False
         index = 0
         while index < len(line):
@@ -447,6 +463,7 @@ def _shell_heredoc_free(run: str) -> str:
             # A command can contain multiple heredoc redirects. Find all of
             # them so every body is suppressed before tokenization.
             index += 1
+        line_index += consumed_lines
     return "".join(kept)
 
 

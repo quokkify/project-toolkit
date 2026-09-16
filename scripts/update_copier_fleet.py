@@ -416,9 +416,14 @@ def _shell_heredoc_free(run: str) -> str:
             while index < len(line):
                 delimiter_character = line[index]
                 if escaped_delimiter:
+                    # In an unquoted word, a backslash quotes any following
+                    # character. Within double quotes it only quotes the
+                    # shell's escapable characters; otherwise it is literal.
+                    if delimiter_quote == '"' and delimiter_character not in '$`"\\\n':
+                        delimiter_chars.append("\\")
                     delimiter_chars.append(delimiter_character)
                     escaped_delimiter = False
-                elif delimiter_character == "\\":
+                elif delimiter_character == "\\" and delimiter_quote != "'":
                     escaped_delimiter = True
                 elif delimiter_quote:
                     if delimiter_character == delimiter_quote:

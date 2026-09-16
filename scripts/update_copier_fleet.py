@@ -328,6 +328,9 @@ def _shell_heredoc_free(run: str) -> str:
     lines = run.splitlines(keepends=True)
     kept: list[str] = []
     delimiters: list[tuple[str, bool]] = []
+    quote: str | None = None
+    arithmetic_depth = 0
+    paren_arithmetic_depth = 0
     for line in lines:
         if delimiters:
             candidate = line.rstrip("\r\n")
@@ -340,11 +343,17 @@ def _shell_heredoc_free(run: str) -> str:
                 pass
             continue
         kept.append(line)
-        quote: str | None = None
-        arithmetic_depth = 0
+        comment = False
         index = 0
-        while index < len(line) - 1:
+        while index < len(line):
             character = line[index]
+            if character == "\n":
+                comment = False
+                index += 1
+                continue
+            if comment:
+                index += 1
+                continue
             if quote:
                 if character == quote and (index == 0 or line[index - 1] != "\\"):
                     quote = None
@@ -362,6 +371,7 @@ def _shell_heredoc_free(run: str) -> str:
                 or line[index - 1].isspace()
                 or previous.endswith((";", "&&", "||", "|", "&"))
             ):
+                comment = True
                 break
             if line.startswith("$((", index):
                 arithmetic_depth += 1
@@ -371,11 +381,19 @@ def _shell_heredoc_free(run: str) -> str:
                 arithmetic_depth -= 1
                 index += 2
                 continue
+            if not arithmetic_depth and line.startswith("((", index):
+                paren_arithmetic_depth += 1
+                index += 2
+                continue
+            if paren_arithmetic_depth and line.startswith("))", index):
+                paren_arithmetic_depth -= 1
+                index += 2
+                continue
             # A here-string (<<<) consumes one word, not following lines.
             if line[index : index + 2] != "<<":
                 index += 1
                 continue
-            if arithmetic_depth:
+            if arithmetic_depth or paren_arithmetic_depth:
                 index += 2
                 continue
             if line[index : index + 3] == "<<<":
@@ -401,7 +419,22 @@ def _shell_heredoc_free(run: str) -> str:
                 start = index
                 while index < len(line) and line[index] not in " \t;&|\r\n":
                     index += 1
-                delimiter = line[start:index]
+                raw_delimiter = line[start:index]
+                # Shell quote removal applies to the delimiter word. In
+                # particular, <<\EOF closes with an unescaped EOF line.
+                delimiter_chars: list[str] = []
+                escaped_delimiter = False
+                for delimiter_character in raw_delimiter:
+                    if escaped_delimiter:
+                        delimiter_chars.append(delimiter_character)
+                        escaped_delimiter = False
+                    elif delimiter_character == "\\":
+                        escaped_delimiter = True
+                    else:
+                        delimiter_chars.append(delimiter_character)
+                if escaped_delimiter:
+                    delimiter_chars.append("\\")
+                delimiter = "".join(delimiter_chars)
             if delimiter:
                 delimiters.append((delimiter, strip_tabs))
             # A command can contain multiple heredoc redirects. Find all of

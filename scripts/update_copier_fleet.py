@@ -353,6 +353,9 @@ def _shell_heredoc_free(run: str) -> str:
                 quote = character
                 index += 1
                 continue
+            # A heredoc marker in a shell comment is just comment text.
+            if character == "#" and (index == 0 or line[index - 1].isspace()):
+                break
             # A here-string (<<<) consumes one word, not following lines.
             if line[index : index + 2] != "<<":
                 index += 1
@@ -394,7 +397,40 @@ def _shell_newline_separated(run: str) -> str:
     result: list[str] = []
     quote: str | None = None
     escaped = False
+    comment = False
     for character in run:
+        if character == "\n":
+            if escaped:
+                if result and result[-1] == "\\":
+                    result.pop()
+                result.append(" ")
+                escaped = False
+                continue
+            # Keep a physical newline after a comment so shlex can terminate
+            # the comment.  Newlines after a shell continuation operator are
+            # whitespace, not an additional command separator.
+            if quote is None and not comment:
+                stripped = "".join(result).rstrip()
+                if stripped.endswith(("&&", "||", "|")):
+                    result.append(character)
+                else:
+                    result.append(";")
+            elif comment:
+                result.append(";")
+            else:
+                result.append(character)
+            comment = False
+            escaped = False
+            continue
+        if quote is None and not comment and character == "#":
+            if not result or result[-1].isspace():
+                comment = True
+        if comment:
+            # Do not let shlex's comment mode consume following physical
+            # lines; retain only whitespace until the newline above.
+            result.append(" ")
+            escaped = False
+            continue
         if character == "\n" and escaped:
             if result and result[-1] == "\\":
                 result.pop()
@@ -407,10 +443,7 @@ def _shell_newline_separated(run: str) -> str:
             continue
         if character in "'\"" and not escaped:
             quote = None if quote == character else character if quote is None else quote
-        if character == "\n" and quote is None:
-            result.append(";")
-        else:
-            result.append(character)
+        result.append(character)
         escaped = False
     return "".join(result)
 

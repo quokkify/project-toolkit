@@ -343,12 +343,15 @@ def _shell_heredoc_free(run: str) -> str:
             # physical lines here so a delimiter-like line joined to prior
             # body text cannot be mistaken for the closing delimiter.
             if not quoted:
-                while body_lines[-1].rstrip("\r\n").endswith("\\"):
+                while True:
+                    body_text = body_lines[-1].rstrip("\r\n")
+                    trailing_slashes = len(body_text) - len(body_text.rstrip("\\"))
+                    if trailing_slashes % 2 == 0:
+                        break
                     next_index = line_index + consumed_body_lines
                     if next_index >= len(lines):
                         break
-                    current = body_lines[-1].rstrip("\r\n")
-                    body_lines[-1] = current[:-1]
+                    body_lines[-1] = body_text[:-1]
                     body_lines.append(lines[next_index])
                     consumed_body_lines += 1
             candidate = "".join(body_lines).rstrip("\r\n")
@@ -457,6 +460,7 @@ def _shell_heredoc_free(run: str) -> str:
                     escaped_delimiter = False
                 elif delimiter_character == "\\" and delimiter_quote != "'":
                     escaped_delimiter = True
+                    delimiter_was_quoted = True
                 elif delimiter_quote:
                     if delimiter_character == delimiter_quote:
                         delimiter_quote = None

@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.21.5](https://github.com/quokkify/project-toolkit/compare/v2.21.4...v2.21.5) (2026-09-16)
+
+
+### 🐛 Bug Fixes
+
+* default toolkit Java to 17 ([#257](https://github.com/quokkify/project-toolkit/issues/257)) ([fcd3a7a](https://github.com/quokkify/project-toolkit/commit/fcd3a7ac959c398868fbb2e893c9ba86961f2a2f))
+* keep Java examples on default 17 ([#260](https://github.com/quokkify/project-toolkit/issues/260)) ([33580c5](https://github.com/quokkify/project-toolkit/commit/33580c5e14b78bd6a6f87c703c5c93bc7f86aa1d))
+* keep public Java examples on Java 17 ([#259](https://github.com/quokkify/project-toolkit/issues/259)) ([00df9c7](https://github.com/quokkify/project-toolkit/commit/00df9c7e7c9656af0f609d57ed75f7793369719b))
+
 ## [2.21.4](https://github.com/quokkify/project-toolkit/compare/v2.21.3...v2.21.4) (2026-09-14)
 
 

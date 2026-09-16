@@ -335,9 +335,9 @@ def _shell_heredoc_free(run: str) -> str:
             if (candidate.lstrip("\t") if strip_tabs else candidate) != delimiter:
                 delimiters.insert(0, (delimiter, strip_tabs))
             else:
-                # The heredoc's terminating newline is also a command
-                # separator.  Preserve that boundary after dropping data.
-                kept.append(";\n")
+                # The command line already retained its terminating newline,
+                # which separates it from commands after the heredoc.
+                pass
             continue
         kept.append(line)
         quote: str | None = None
@@ -353,8 +353,12 @@ def _shell_heredoc_free(run: str) -> str:
                 quote = character
                 index += 1
                 continue
+            # A here-string (<<<) consumes one word, not following lines.
             if line[index : index + 2] != "<<":
                 index += 1
+                continue
+            if line[index : index + 3] == "<<<":
+                index += 3
                 continue
             index += 2
             strip_tabs = index < len(line) and line[index] == "-"
@@ -379,14 +383,43 @@ def _shell_heredoc_free(run: str) -> str:
                 delimiter = line[start:index]
             if delimiter:
                 delimiters.append((delimiter, strip_tabs))
-            break
+            # A command can contain multiple heredoc redirects. Find all of
+            # them so every body is suppressed before tokenization.
+            index += 1
     return "".join(kept)
+
+
+def _shell_newline_separated(run: str) -> str:
+    """Make unescaped shell newlines visible as command separators."""
+    result: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in run:
+        if character == "\n" and escaped:
+            if result and result[-1] == "\\":
+                result.pop()
+            result.append(" ")
+            escaped = False
+            continue
+        if character == "\\" and not escaped:
+            result.append(character)
+            escaped = True
+            continue
+        if character in "'\"" and not escaped:
+            quote = None if quote == character else character if quote is None else quote
+        if character == "\n" and quote is None:
+            result.append(";")
+        else:
+            result.append(character)
+        escaped = False
+    return "".join(result)
 
 
 def _shell_extractor_paths(run: str) -> set[str]:
     """Find extractor paths used as shell commands, not embedded text."""
     try:
-        lexer = shlex.shlex(_shell_heredoc_free(run), posix=True, punctuation_chars=";&|")
+        source = _shell_newline_separated(_shell_heredoc_free(run))
+        lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|")
         lexer.commenters = "#"
         lexer.whitespace_split = True
         tokens = list(lexer)

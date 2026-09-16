@@ -28,6 +28,11 @@ class SetupActionTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
         workflow_inputs = workflow[True]["workflow_call"]["inputs"]
         self.assertEqual(workflow_inputs["java-version"]["default"], "17")
+        workflow_setup = next(
+            step for step in workflow["jobs"]["ci"]["steps"]
+            if step.get("name") == "Set up Java"
+        )
+        self.assertEqual(workflow_setup["with"]["java-version"], "${{ inputs.java-version }}")
 
         validation_workflow = yaml.safe_load((ROOT / ".github/workflows/validate-toolkit.yml").read_text())
         validation_setup = next(
@@ -43,6 +48,19 @@ class SetupActionTests(unittest.TestCase):
             if step.get("name") == "Set up Java"
         )
         self.assertEqual(setup["with"]["java-version"], "${{ inputs.java-version }}")
+
+        example_workflow = yaml.safe_load((ROOT / "examples/java-ci.yml").read_text())
+        self.assertEqual(example_workflow["jobs"]["java"]["with"]["java-version"], "17")
+
+        polyglot_workflow = yaml.safe_load((ROOT / "examples/polyglot-ci.yml").read_text())
+        self.assertEqual(polyglot_workflow["jobs"]["java"]["with"]["java-version"], "17")
+
+        examples = yaml.safe_load((ROOT / "examples/setup-actions.yml").read_text())
+        setup_java = next(
+            step for step in examples["jobs"]["setup-java"]["steps"]
+            if step.get("name") == "Setup Java and Gradle cache"
+        )
+        self.assertEqual(setup_java["with"]["java-version"], "17")
 
     def test_boolean_validation_is_first_and_fails_closed(self) -> None:
         cases = {

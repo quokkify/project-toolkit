@@ -41,6 +41,7 @@ jobs:
       - name: Setup Java and Gradle cache
         uses: quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0
         with:
+          java-version: "17"
           distribution: temurin
           working-directory: .
 

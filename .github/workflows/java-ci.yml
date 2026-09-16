@@ -9,7 +9,7 @@ on:
         default: .
       java-version:
         type: string
-        default: "21"
+        default: "17"
       distribution:
         description: JDK distribution accepted by actions/setup-java.
         type: string

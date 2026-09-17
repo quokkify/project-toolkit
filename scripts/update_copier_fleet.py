@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -321,30 +323,421 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
+def _shell_heredoc_free(run: str) -> str:
+    """Remove heredoc bodies before inspecting shell command tokens."""
+    lines = run.splitlines(keepends=True)
+    kept: list[str] = []
+    delimiters: list[tuple[str, bool, bool]] = []
+    quote: str | None = None
+    arithmetic_depth = 0
+    paren_arithmetic_depth = 0
+    line_index = 0
+    while line_index < len(lines):
+        line = lines[line_index]
+        if delimiters:
+            delimiter, strip_tabs, quoted = delimiters.pop(0)
+            body_lines = [line]
+            consumed_body_lines = 1
+            # For an unquoted heredoc, Bash removes backslash-newline pairs
+            # from the body before checking the closing delimiter.  Fold the
+            # physical lines here so a delimiter-like line joined to prior
+            # body text cannot be mistaken for the closing delimiter.
+            if not quoted:
+                while True:
+                    body_text = body_lines[-1].rstrip("\r\n")
+                    trailing_slashes = len(body_text) - len(body_text.rstrip("\\"))
+                    if trailing_slashes % 2 == 0:
+                        break
+                    next_index = line_index + consumed_body_lines
+                    if next_index >= len(lines):
+                        break
+                    body_lines[-1] = body_text[:-1]
+                    body_lines.append(lines[next_index])
+                    consumed_body_lines += 1
+            candidate = "".join(body_lines).rstrip("\r\n")
+            if (candidate.lstrip("\t") if strip_tabs else candidate) != delimiter:
+                delimiters.insert(0, (delimiter, strip_tabs, quoted))
+            else:
+                # The command line already retained its terminating newline,
+                # which separates it from commands after the heredoc.
+                pass
+            line_index += consumed_body_lines
+            continue
+        # A backslash-newline is removed by the shell before parsing.  Fold
+        # such continuations for delimiter recognition, while retaining the
+        # original physical lines in the output and advancing past them.
+        logical_line = line
+        consumed_lines = 1
+        while logical_line.rstrip("\r\n").endswith("\\"):
+            continuation = logical_line.rstrip("\r\n")
+            trailing_slashes = len(continuation) - len(continuation.rstrip("\\"))
+            if trailing_slashes % 2 == 0 or line_index + consumed_lines >= len(lines):
+                break
+            logical_line = continuation[:-1] + lines[line_index + consumed_lines]
+            consumed_lines += 1
+        kept.extend(lines[line_index : line_index + consumed_lines])
+        line = logical_line
+        comment = False
+        index = 0
+        while index < len(line):
+            character = line[index]
+            if character == "\n":
+                comment = False
+                index += 1
+                continue
+            if comment:
+                index += 1
+                continue
+            if quote:
+                if character == quote and (index == 0 or line[index - 1] != "\\"):
+                    quote = None
+                index += 1
+                continue
+            if character in "'\"":
+                quote = character
+                index += 1
+                continue
+            # A heredoc marker in a shell comment is just comment text. A
+            # comment may begin directly after a shell control operator.
+            previous = line[:index].rstrip()
+            if character == "#" and (
+                not previous
+                or line[index - 1].isspace()
+                or previous.endswith((";", "&&", "||", "|", "&"))
+            ):
+                comment = True
+                break
+            if line.startswith("$((", index):
+                arithmetic_depth += 1
+                index += 3
+                continue
+            if arithmetic_depth and line.startswith("))", index):
+                arithmetic_depth -= 1
+                index += 2
+                continue
+            if not arithmetic_depth and line.startswith("((", index):
+                paren_arithmetic_depth += 1
+                index += 2
+                continue
+            if paren_arithmetic_depth and line.startswith("))", index):
+                paren_arithmetic_depth -= 1
+                index += 2
+                continue
+            # A here-string (<<<) consumes one word, not following lines.
+            if line[index : index + 2] != "<<":
+                index += 1
+                continue
+            if arithmetic_depth or paren_arithmetic_depth:
+                index += 2
+                continue
+            if line[index : index + 3] == "<<<":
+                index += 3
+                continue
+            index += 2
+            strip_tabs = index < len(line) and line[index] == "-"
+            if strip_tabs:
+                index += 1
+            while index < len(line) and line[index] in " \t":
+                index += 1
+            if index >= len(line):
+                break
+            # Read the complete shell word and apply quote removal. Delimiter
+            # words may mix quoted and unquoted segments, and an escaped
+            # whitespace remains part of the word (e.g. <<E\ OF).
+            delimiter_chars: list[str] = []
+            delimiter_quote: str | None = None
+            delimiter_was_quoted = False
+            escaped_delimiter = False
+            while index < len(line):
+                delimiter_character = line[index]
+                if escaped_delimiter:
+                    # In an unquoted word, a backslash quotes any following
+                    # character. Within double quotes it only quotes the
+                    # shell's escapable characters; otherwise it is literal.
+                    if delimiter_quote == '"' and delimiter_character not in '$`"\\\n':
+                        delimiter_chars.append("\\")
+                    delimiter_chars.append(delimiter_character)
+                    escaped_delimiter = False
+                elif delimiter_character == "\\" and delimiter_quote != "'":
+                    escaped_delimiter = True
+                    delimiter_was_quoted = True
+                elif delimiter_quote:
+                    if delimiter_character == delimiter_quote:
+                        delimiter_quote = None
+                    else:
+                        delimiter_chars.append(delimiter_character)
+                elif delimiter_character in "'\"":
+                    delimiter_quote = delimiter_character
+                    delimiter_was_quoted = True
+                elif delimiter_character in " \t;&|\r\n":
+                    break
+                else:
+                    delimiter_chars.append(delimiter_character)
+                index += 1
+            if escaped_delimiter:
+                delimiter_chars.append("\\")
+            if delimiter_quote:
+                break
+            delimiter = "".join(delimiter_chars)
+            if delimiter:
+                delimiters.append((delimiter, strip_tabs, delimiter_was_quoted))
+            # A command can contain multiple heredoc redirects. Find all of
+            # them so every body is suppressed before tokenization.
+            index += 1
+        line_index += consumed_lines
+    return "".join(kept)
+
+
+def _shell_newline_separated(run: str) -> str:
+    """Make unescaped shell newlines visible as command separators."""
+    result: list[str] = []
+    quote: str | None = None
+    escaped = False
+    comment = False
+    for character in run:
+        if character == "\n":
+            if escaped:
+                if result and result[-1] == "\\":
+                    result.pop()
+                result.append(" ")
+                escaped = False
+                continue
+            # Keep a physical newline after a comment so shlex can terminate
+            # the comment.  Newlines after a shell continuation operator are
+            # whitespace, not an additional command separator.
+            if quote is None and not comment:
+                stripped = "".join(result).rstrip()
+                if stripped.endswith(("&&", "||", "|")):
+                    result.append(character)
+                else:
+                    result.append(";")
+            elif comment:
+                result.append(";")
+            else:
+                result.append(character)
+            comment = False
+            escaped = False
+            continue
+        if quote is None and not comment and character == "#":
+            previous = "".join(result).rstrip()
+            if (
+                not previous
+                or (result and result[-1].isspace())
+                or previous.endswith((";", "&&", "||", "|", "&"))
+            ):
+                comment = True
+        if comment:
+            # Do not let shlex's comment mode consume following physical
+            # lines; retain only whitespace until the newline above.
+            result.append(" ")
+            escaped = False
+            continue
+        if character == "\n" and escaped:
+            if result and result[-1] == "\\":
+                result.pop()
+            result.append(" ")
+            escaped = False
+            continue
+        if character == "\\" and not escaped:
+            result.append(character)
+            escaped = True
+            continue
+        if character in "'\"" and not escaped:
+            quote = None if quote == character else character if quote is None else quote
+        result.append(character)
+        escaped = False
+    return "".join(result)
+
+
+def _shell_extractor_paths(run: str) -> set[str]:
+    """Find extractor paths used as shell commands, not embedded text."""
+    try:
+        source = _shell_newline_separated(_shell_heredoc_free(run))
+        lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|")
+        lexer.commenters = "#"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+
+    extractors: set[str] = set()
+    command_start = True
+    working_directory = "."
+    pending_cd = False
+    for index, token in enumerate(tokens):
+        if token in {";", "&&", "||", "|", "&"}:
+            command_start = True
+            pending_cd = False
+            continue
+        if command_start and token == "cd":
+            pending_cd = True
+        elif pending_cd:
+            working_directory = posixpath.normpath(
+                posixpath.join(working_directory, token)
+            )
+            pending_cd = False
+        elif command_start and token in {"python", "python3"}:
+            extractor_index = index + 1
+            while extractor_index < len(tokens) and tokens[extractor_index] in {"\\", "\n"}:
+                extractor_index += 1
+            if extractor_index >= len(tokens):
+                command_start = False
+                continue
+            extractor = tokens[extractor_index]
+            if extractor.endswith("safe_extract.py"):
+                extractors.add(posixpath.normpath(posixpath.join(working_directory, extractor)))
+        command_start = False
+    return extractors
+
+
 def has_custom_allure_outputs(repository_path: Path) -> bool:
-    """Recognize a complete Allure setup that keeps its helpers outside the template paths."""
-    workflow_path = repository_path / FEATURE_PATHS["allure_report"]
-    if not is_regular_file(workflow_path, repository_root=repository_path):
-        return False
-    workflow = workflow_path.read_text(encoding="utf-8")
-    config_match = re.search(
-        r"^\s*config-file:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-        workflow,
-        re.MULTILINE,
-    )
-    extractor_match = re.search(
-        r"(?:^|\s)python\s+([A-Za-z0-9._/-]*safe_extract\.py)(?:\s|$)",
-        workflow,
-        re.MULTILINE,
-    )
-    if not config_match or not extractor_match:
-        return False
-    config_path = next(value for value in config_match.groups() if value is not None)
-    extractor_path = extractor_match.group(1)
-    return all(
-        is_regular_file(repository_path / path, repository_root=repository_path)
-        for path in (config_path, extractor_path)
-    )
+    """Recognize complete custom Allure output in executable workflow steps."""
+    for workflow_path in workflow_files(repository_path):
+        try:
+            document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+            continue
+        config_paths: set[str] = set()
+        extractor_paths: set[str] = set()
+        for job in document["jobs"].values():
+            if not isinstance(job, dict):
+                continue
+            executable_units = [job]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_units.extend(step for step in steps if isinstance(step, dict))
+            for unit in executable_units:
+                options = unit.get("with")
+                config_path = options.get("config-file") if isinstance(options, dict) else None
+                if isinstance(config_path, str):
+                    config_paths.add(config_path)
+                run = unit.get("run")
+                if isinstance(run, str):
+                    extractor_paths.update(_shell_extractor_paths(run))
+        if any(
+            is_regular_file(repository_path / config, repository_root=repository_path)
+            and is_regular_file(repository_path / extractor, repository_root=repository_path)
+            for config in config_paths
+            for extractor in extractor_paths
+        ):
+            return True
+    return False
+
+
+def workflow_files(repository_path: Path) -> list[Path]:
+    """Return regular workflow files without following repository symlinks."""
+    workflows = repository_path / ".github" / "workflows"
+    if not workflows.is_dir() or workflows.is_symlink():
+        return []
+    return [
+        path
+        for path in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml"))
+        if is_regular_file(path, repository_root=repository_path)
+    ]
+
+
+def inferred_components(repository_path: Path) -> tuple[str, ...]:
+    """Infer language/path pairs within each workflow job or step."""
+    language_patterns = {
+        "python": r"python-ci|setup-python|python\s+-m\s+pytest|pytest",
+        "node": r"node-ci|setup-node|npm\s+(?:ci|test|run)|yarn\s+",
+        "java": r"java-ci|(?:actions/)?setup-java(?:-[A-Za-z0-9_-]+)?@|gradlew|gradle\s+(?:build|test)|(?:^|\s)\./mvnw(?:\s|$)|maven",
+    }
+    found: set[str] = set()
+    for workflow in workflow_files(repository_path):
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        jobs = document.get("jobs", {})
+        if not isinstance(jobs, dict):
+            continue
+        workflow_defaults = document.get("defaults", {})
+        workflow_path = "."
+        if isinstance(workflow_defaults, dict):
+            workflow_run_defaults = workflow_defaults.get("run", {})
+            if isinstance(workflow_run_defaults, dict):
+                workflow_path = workflow_run_defaults.get("working-directory", workflow_path)
+        if not isinstance(workflow_path, str):
+            workflow_path = "."
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            job_path = job.get("working-directory", workflow_path)
+            defaults = job.get("defaults", {})
+            if isinstance(defaults, dict):
+                run_defaults = defaults.get("run", {})
+                if isinstance(run_defaults, dict):
+                    job_path = run_defaults.get("working-directory", job_path)
+            if not isinstance(job_path, str):
+                job_path = "."
+            job_with = job.get("with", {})
+            if isinstance(job_with, dict) and isinstance(job_with.get("working-directory"), str):
+                job_path = job_with["working-directory"]
+            units: list[tuple[Any, str]] = []
+            if isinstance(job.get("uses"), str):
+                units.append((job["uses"], job_path))
+            if isinstance(job.get("run"), str):
+                units.append((job["run"], job_path))
+            steps = job.get("steps", [])
+            if isinstance(steps, list):
+                for step in steps:
+                    if isinstance(step, dict):
+                        step_path = step.get("working-directory", job_path)
+                        step_with = step.get("with", {})
+                        if isinstance(step_with, dict):
+                            step_path = step_with.get("working-directory", step_path)
+                        if isinstance(step.get("uses"), str):
+                            units.append((step["uses"], step_path))
+                        if isinstance(step.get("run"), str):
+                            units.append((step["run"], step_path))
+            for unit, path in units:
+                text = unit
+                if not isinstance(path, str):
+                    path = "."
+                for component, pattern in language_patterns.items():
+                    if re.search(pattern, text, re.IGNORECASE):
+                        found.add(f"{component}:{path}")
+    return tuple(sorted(found))
+
+
+def has_custom_release_please_outputs(repository_path: Path) -> bool:
+    """Recognize an executable custom Release Please workflow.
+
+    Parse the workflow document before inspecting jobs and steps.  Searching
+    raw YAML text would treat comments and quoted values as executable action
+    evidence, hiding a real configuration gap.
+    """
+    standard = repository_path / FEATURE_PATHS["release_please"]
+    action_pattern = re.compile(r"(?:^|/)release[-_]please-action@", re.IGNORECASE)
+    for workflow in workflow_files(repository_path):
+        if workflow == standard:
+            continue
+        try:
+            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        jobs = document.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            executable_uses = [job.get("uses")]
+            steps = job.get("steps")
+            if isinstance(steps, list):
+                executable_uses.extend(
+                    step.get("uses") for step in steps if isinstance(step, dict)
+                )
+            if any(isinstance(uses, str) and action_pattern.search(uses) for uses in executable_uses):
+                return True
+    return False
 
 
 def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
@@ -361,7 +754,11 @@ def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> s
             return "enabled"
         if key == "allure_report" and has_custom_allure_outputs(repository_path):
             return "custom"
+        if key == "release_please" and has_custom_release_please_outputs(repository_path):
+            return "custom"
         return "missing"
+    if key == "release_please" and has_custom_release_please_outputs(repository_path):
+        return "custom"
     return "custom" if any(materialized) else "disabled"
 
 
@@ -385,12 +782,14 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
                 components_valid = False
                 break
             components.append(f"{component_type}:{component_path}")
-    else:
+    elif raw_components is not None:
         components_valid = False
     if not components_valid:
         components = ["unknown"]
-    elif not components:
-        components = ["none"]
+    else:
+        components = list(inferred_components(repository_path)) if not components else components
+        if not components:
+            components = ["none"]
 
     missing_baseline = tuple(
         path
@@ -424,6 +823,11 @@ def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
         or inventory.release_please == "missing"
         or inventory.renovate == "missing"
     )
+
+
+def configuration_gap_count(results: Sequence[Result]) -> int:
+    """Count inventory gaps independently from synchronization drift."""
+    return sum(inventory_has_mismatch(result.inventory) for result in results)
 
 
 def console_lines(result: Result) -> list[str]:
@@ -486,13 +890,13 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
     current = counts.get("up-to-date", 0)
     drift = counts.get("would-update", 0)
     excluded = counts.get("excluded", 0)
-    mismatches = sum(inventory_has_mismatch(result.inventory) for result in results)
+    mismatches = configuration_gap_count(results)
     lines = [
         "## Copier fleet audit",
         "",
         f"Fleet: {len(results)} repositories",
         "",
-        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration mismatch · ⏭️ {excluded} excluded",
+        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
         "",
         "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -592,10 +996,12 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 "renovate": result.inventory.renovate,
             }
         repositories.append(item)
+    gaps = configuration_gap_count(results)
     payload = {
         "schema_version": 3,
         "summary": counts,
-        "configuration_mismatches": sum(inventory_has_mismatch(result.inventory) for result in results),
+        "configuration_gaps": gaps,
+        "configuration_mismatches": gaps,
         "repositories": repositories,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -1164,6 +1570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("summary: " + ", ".join(f"{status}={count}" for status, count in sorted(counts.items())))
     for line in feature_summary(results):
         print(line)
+    print(f"configuration-gaps: {configuration_gap_count(results)}")
     if args.markdown_report:
         args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
         args.markdown_report.write_text(markdown_report(results, counts), encoding="utf-8")

@@ -1,4 +1,4 @@
-name: Trusted Allure publisher
+name: Reusable Allure publisher
 
 on:
   workflow_call:

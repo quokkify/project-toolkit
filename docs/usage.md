@@ -83,13 +83,13 @@ GH_TOKEN="$(gh auth token)" python scripts/update_copier_fleet.py --org quokkify
 gh workflow run copier-fleet-auto-update.yml --repo quokkify/project-toolkit -f dry-run=true
 ```
 
-The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit template version. Omit `--public-only` locally when a private consumer is the target.
+The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v2.21.5`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
 
 Across both paths, existing project changes are preserved by Copier's update algorithm; `.rej` conflicts fail that repository loudly instead of opening a partial pull request. The deterministic `automation/copier-template-update` branch is automation-owned and may be force-updated with an exact lease, so maintainers should not add manual commits to it. Normal updates follow the latest release tag rather than unreleased `main`.
 
 ### Self-service template update
 
-Generated projects ship an `Update project template` workflow with a single `workflow_dispatch` trigger and no schedule. It runs `copier update` against the latest released template tag (or an explicit `template-ref` input) and pushes the deterministic `automation/copier-template-update` branch using the project's own `GITHUB_TOKEN`, so this path needs no cross-repository credential anywhere.
+Generated projects ship an `Update project template` workflow with a single `workflow_dispatch` trigger and no schedule. It runs `copier update` against the latest released template tag (or an explicit `template-ref` input) and pushes the deterministic `automation/copier-template-update` branch using the project's own `GITHUB_TOKEN`, so this path needs no cross-repository credential anywhere. Before Copier runs, the supplied ref must match an exact published, non-draft, non-prerelease GitHub Release tag; this prevents a branch, SHA, or unreleased tag from selecting code while the job has `contents: write`.
 
 It deliberately stops at pushing the branch and prints a compare link instead of opening the pull request. A pull request opened with `GITHUB_TOKEN` does not trigger `pull_request` workflows, so `Validate`, `Gitleaks`, and `CodeQL` would never run on it, and a repository with a required-status-check ruleset could never merge it. Opening it by hand costs one click and keeps every check honest.
 

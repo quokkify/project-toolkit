@@ -2,6 +2,11 @@
 
 ## [2.21.6](https://github.com/quokkify/project-toolkit/compare/v2.21.5...v2.21.6) (2026-09-19)
 
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update allure to v3.18.0 ([#268](https://github.com/quokkify/project-toolkit/pull/268)) ([1934caf](https://github.com/quokkify/project-toolkit/commit/1934cafdbb34c64c14a1ef7d6d73cbc354c56bc5)) <!-- project-toolkit:rich-release-notes pr=268 -->
+- update renovate to v44.103.2 ([#270](https://github.com/quokkify/project-toolkit/pull/270)) ([3fdf97b](https://github.com/quokkify/project-toolkit/commit/3fdf97bf7bd8e4b1eefc366b57699eb60bd3d912)) <!-- project-toolkit:rich-release-notes pr=270 -->
+<!-- project-toolkit:rich-block:end -->
 
 ### 🐛 Bug Fixes
 

@@ -872,7 +872,7 @@ class AllureReportActionTests(unittest.TestCase):
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn(
-            "uses: quokkify/allure-report-action@05778ce0c6cee483892e2cc80b841e031dc4c7d0 # v0.4.1",
+            "uses: quokkify/allure-report-action@00a2788fd72dce6727a3232104f770f659aeaccb # v0.5.1",
             text,
         )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
@@ -900,8 +900,8 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "05778ce0c6cee483892e2cc80b841e031dc4c7d0")
-        self.assertEqual(match.group("currentValue"), "v0.4.1")
+        self.assertEqual(match.group("currentDigest"), "00a2788fd72dce6727a3232104f770f659aeaccb")
+        self.assertEqual(match.group("currentValue"), "v0.5.1")
 
     def test_renovate_manages_every_executable_copier_pin(self) -> None:
         """Every file CI or a generated project actually installs Copier from must be

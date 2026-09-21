@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.21.6](https://github.com/quokkify/project-toolkit/compare/v2.21.5...v2.21.6) (2026-09-21)
+
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update quokkify/project-toolkit to v2.21.5 ([#267](https://github.com/quokkify/project-toolkit/pull/267)) ([6041f09](https://github.com/quokkify/project-toolkit/commit/6041f09ea08ecef76d1d4c67e920cc097e6bafe8)) <!-- project-toolkit:rich-release-notes pr=267 -->
+- update allure to v3.18.0 ([#268](https://github.com/quokkify/project-toolkit/pull/268)) ([1934caf](https://github.com/quokkify/project-toolkit/commit/1934cafdbb34c64c14a1ef7d6d73cbc354c56bc5)) <!-- project-toolkit:rich-release-notes pr=268 -->
+- update renovate to v44.103.2 ([#270](https://github.com/quokkify/project-toolkit/pull/270)) ([3fdf97b](https://github.com/quokkify/project-toolkit/commit/3fdf97bf7bd8e4b1eefc366b57699eb60bd3d912)) <!-- project-toolkit:rich-release-notes pr=270 -->
+<!-- project-toolkit:rich-block:end -->
+
+### 🐛 Bug Fixes
+
+* **actions:** retry transient Gradle HTTP 403 ([#276](https://github.com/quokkify/project-toolkit/issues/276)) ([d9f2f1c](https://github.com/quokkify/project-toolkit/commit/d9f2f1c7fb4bf5ce5229dc6a7ef6a3faf7112843))
+* **fleet:** improve audit inventory coverage ([#246](https://github.com/quokkify/project-toolkit/issues/246)) ([8f89def](https://github.com/quokkify/project-toolkit/commit/8f89def8e60cb076a2135ad1695fc5b5038bb24e))
+* **renovate:** deduplicate Allure action updates ([#272](https://github.com/quokkify/project-toolkit/issues/272)) ([e005c43](https://github.com/quokkify/project-toolkit/commit/e005c43afcf38c9481c16355ba08a9f08cbdfd01))
+* **template:** harden Copier update workflow ([#273](https://github.com/quokkify/project-toolkit/issues/273)) ([c2c64ab](https://github.com/quokkify/project-toolkit/commit/c2c64ab4ad9ed69a80b62774abd0f56c3826cbd8))
+
 ## [2.21.5](https://github.com/quokkify/project-toolkit/compare/v2.21.4...v2.21.5) (2026-09-16)
 
 <!-- project-toolkit:rich-block:start -->

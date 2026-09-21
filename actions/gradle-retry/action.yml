@@ -1,16 +1,16 @@
 name: Gradle command with bounded retry
-description: Run a Gradle command, retrying transient 429s and refreshing dependencies once after a repository not-found failure.
+description: Run a Gradle command with bounded repository HTTP 403/429 retries and one dependency refresh recovery.
 
 inputs:
   command:
     description: Trusted Gradle command to execute.
     required: true
   max-attempts:
-    description: Maximum attempts for transient HTTP 429 failures.
+    description: Maximum attempts for transient repository HTTP 403/429 failures.
     required: false
     default: "3"
   initial-delay-seconds:
-    description: Initial delay before a transient HTTP 429 retry.
+    description: Initial delay before a transient repository HTTP 403/429 retry. Zero disables waiting in tests.
     required: false
     default: "30"
 

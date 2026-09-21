@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run a Gradle command with bounded recovery for transient resolution failures.
-# 429 failures retain exponential retry; a dependency not-found gets one refresh.
+# Repository HTTP 403/429 failures retain exponential retry; a dependency
+# not-found gets one refresh.
 set -uo pipefail
 
 command_string="${GRADLE_RETRY_COMMAND:-}"
@@ -15,55 +16,69 @@ if ! [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
   echo "gradle-retry.sh: GRADLE_RETRY_MAX_ATTEMPTS must be a positive integer, got '${max_attempts}'" >&2
   exit 2
 fi
-if ! [[ "$delay" =~ ^[1-9][0-9]*$ ]]; then
-  echo "gradle-retry.sh: GRADLE_RETRY_INITIAL_DELAY_SECONDS must be a positive integer, got '${delay}'" >&2
+if ! [[ "$delay" =~ ^[0-9]+$ ]]; then
+  echo "gradle-retry.sh: GRADLE_RETRY_INITIAL_DELAY_SECONDS must be a non-negative integer, got '${delay}'" >&2
   exit 2
 fi
 
 attempt=1
 refresh_attempted=0
+output_file=""
+cleanup() {
+  if [[ -n "$output_file" ]]; then
+    rm -f -- "$output_file"
+  fi
+}
+trap cleanup EXIT INT TERM
+
 while true; do
-  output="$(mktemp)"
-  bash -euo pipefail -c "$command_string" 2>&1 | tee "$output"
+  output_file="$(mktemp "${TMPDIR:-/tmp}/gradle-retry.XXXXXX")"
+  bash -euo pipefail -c "$command_string" 2>&1 | tee "$output_file"
   status=${PIPESTATUS[0]}
 
   if [[ "$status" -eq 0 ]]; then
-    rm -f "$output"
     exit 0
   fi
 
-  is_repository_failure=0
-  grep -qE 'Could not (GET|HEAD|resolve)' "$output" && is_repository_failure=1
-  is_429=0
-  grep -qE 'status code 429|429 Too Many Requests|Too Many Requests' "$output" && is_429=1
+  # Match Gradle's repository diagnostic, not a bare "Forbidden" from an
+  # unrelated task. The URL is deliberately constrained to a quoted value.
+  transient_status=""
+  if grep -qE "Could not (GET|HEAD) '[^']+'\. Received status code (403|429)([[:space:]]|$)" "$output_file"; then
+    transient_status="$(grep -oE "Could not (GET|HEAD) '[^']+'\. Received status code (403|429)" "$output_file" | tail -n 1 | grep -oE '(403|429)$')"
+  fi
 
-  if [[ "$is_repository_failure" -eq 1 && "$is_429" -eq 1 && "$attempt" -lt "$max_attempts" ]]; then
+  if [[ -n "$transient_status" && "$attempt" -lt "$max_attempts" ]]; then
     jitter=$(( RANDOM % (delay / 3 + 1) ))
     sleep_for=$(( delay + jitter ))
-    echo "::warning::Gradle failed with a transient repository 429 (attempt ${attempt}/${max_attempts}). Retrying in ${sleep_for}s..."
-    rm -f "$output"
+    echo "::warning::Gradle failed with a transient repository HTTP ${transient_status} (attempt ${attempt}/${max_attempts}). Retrying in ${sleep_for}s..."
+    rm -f -- "$output_file"
+    output_file=""
     sleep "$sleep_for"
     attempt=$((attempt + 1))
     delay=$((delay * 3))
     continue
   fi
 
+  if [[ -n "$transient_status" ]]; then
+    echo "::error::Gradle transient repository HTTP ${transient_status} retry budget exhausted after ${attempt}/${max_attempts} attempts."
+  fi
+
   # Gradle's dependency-resolution not-found report includes both the module
   # coordinates and a repository search section. Do not treat unrelated DSL
   # errors such as "Could not find method implementation()" as resolvable.
   is_dependency_not_found=0
-  if grep -qE 'Could not find [^[:space:]]+:[^[:space:]]+:[^[:space:]]+' "$output" \
-    && grep -qE 'Searched in( the following locations)?:' "$output"; then
+  if grep -qE 'Could not find [^[:space:]]+:[^[:space:]]+:[^[:space:]]+' "$output_file" \
+    && grep -qE 'Searched in( the following locations)?:' "$output_file"; then
     is_dependency_not_found=1
   fi
   if [[ "$is_dependency_not_found" -eq 1 && "$refresh_attempted" -eq 0 && "$command_string" != *--refresh-dependencies* ]]; then
     refresh_attempted=1
     command_string="$command_string --refresh-dependencies"
     echo "::warning::Gradle dependency resolution failed; retrying once with --refresh-dependencies."
-    rm -f "$output"
+    rm -f -- "$output_file"
+    output_file=""
     continue
   fi
 
-  rm -f "$output"
   exit "$status"
 done

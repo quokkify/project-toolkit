@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.21.6](https://github.com/quokkify/project-toolkit/compare/v2.21.5...v2.21.6) (2026-09-21)
+
+
+### 🐛 Bug Fixes
+
+* **actions:** retry transient Gradle HTTP 403 ([#276](https://github.com/quokkify/project-toolkit/issues/276)) ([d9f2f1c](https://github.com/quokkify/project-toolkit/commit/d9f2f1c7fb4bf5ce5229dc6a7ef6a3faf7112843))
+* **fleet:** improve audit inventory coverage ([#246](https://github.com/quokkify/project-toolkit/issues/246)) ([8f89def](https://github.com/quokkify/project-toolkit/commit/8f89def8e60cb076a2135ad1695fc5b5038bb24e))
+* **renovate:** deduplicate Allure action updates ([#272](https://github.com/quokkify/project-toolkit/issues/272)) ([e005c43](https://github.com/quokkify/project-toolkit/commit/e005c43afcf38c9481c16355ba08a9f08cbdfd01))
+* **template:** harden Copier update workflow ([#273](https://github.com/quokkify/project-toolkit/issues/273)) ([c2c64ab](https://github.com/quokkify/project-toolkit/commit/c2c64ab4ad9ed69a80b62774abd0f56c3826cbd8))
+
 ## [2.21.5](https://github.com/quokkify/project-toolkit/compare/v2.21.4...v2.21.5) (2026-09-16)
 
 <!-- project-toolkit:rich-block:start -->

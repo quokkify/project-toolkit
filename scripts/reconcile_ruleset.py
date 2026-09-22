@@ -2,7 +2,9 @@
 """Safely reconcile one managed GitHub repository ruleset.
 
 The command is deliberately separate from Copier generation. It defaults to
-``evaluate`` and never changes GitHub in dry-run/evaluate mode.
+``evaluate``: that mode writes an evaluate-enforced ruleset and verifies its
+readback; use ``--dry-run`` for a strictly non-mutating preview and ``--active``
+for the explicit promotion to active enforcement.
 """
 from __future__ import annotations
 
@@ -132,13 +134,14 @@ def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
         rule_type = rule.get("type")
         if not isinstance(rule_type, str):
             raise ReconcileError("GitHub API returned a ruleset rule without a string type")
-        item: dict[str, Any] = {"type": rule_type}
         if rule_type == "pull_request":
+            item: dict[str, Any] = {"type": rule_type}
             params = _require_mapping(rule.get("parameters"), "pull_request parameters")
             item["parameters"] = {key: params.get(key) for key in (
                 "required_approving_review_count", "dismiss_stale_reviews_on_push",
                 "require_code_owner_review", "require_last_push_approval")}
         elif rule_type == "required_status_checks":
+            item = {"type": rule_type}
             params = _require_mapping(rule.get("parameters"), "status-check parameters")
             statuses = _require_list(params.get("required_status_checks"), "required status checks")
             item["parameters"] = {
@@ -146,6 +149,7 @@ def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
                 "strict_required_status_checks_policy": params.get("strict_required_status_checks_policy"),
             }
         elif rule_type == "required_code_scanning":
+            item = {"type": rule_type}
             params = _require_mapping(rule.get("parameters"), "code-scanning parameters")
             tools = _require_list(params.get("code_scanning_tools"), "code-scanning tools")
             item["parameters"] = {"code_scanning_tools": [
@@ -153,6 +157,11 @@ def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
                     "tool", "alerts_threshold", "security_alerts_threshold")}
                 for tool in tools
             ]}
+        else:
+            # Unknown rules are operator-owned. Preserve and compare their
+            # complete meaningful payload rather than silently reducing them
+            # to just their type.
+            item = _normalize(rule)
         rules.append(item)
     rules.sort(key=lambda item: json.dumps(item, sort_keys=True))
     return {
@@ -186,16 +195,51 @@ def _find_existing(rulesets: list[Any], name: str) -> Mapping[str, Any] | None:
     return matches[0] if matches else None
 
 
+def _paged_check_runs(client: GitHubClient, repo: str, revision: str) -> list[Any]:
+    result: list[Any] = []
+    page = 1
+    while True:
+        data = _require_mapping(client.request(
+            "GET", f"/repos/{repo}/commits/{revision}/check-runs?per_page=100&page={page}"
+        ), "check-runs response")
+        runs = _require_list(data.get("check_runs"), "check_runs")
+        result.extend(runs)
+        total = data.get("total_count")
+        if total is not None and (not isinstance(total, int) or total < 0):
+            raise ReconcileError("GitHub API returned malformed check-runs total_count; refusing mutation")
+        if total is not None and len(result) < total:
+            if len(runs) == 0:
+                raise ReconcileError("GitHub API returned incomplete paginated check-runs; refusing mutation")
+            page += 1
+            continue
+        if total is None and len(runs) == 100:
+            page += 1
+            continue
+        return result
+
+
+def _paged_statuses(client: GitHubClient, repo: str, revision: str) -> list[Any]:
+    result: list[Any] = []
+    page = 1
+    while True:
+        statuses = _require_list(client.request(
+            "GET", f"/repos/{repo}/commits/{revision}/statuses?per_page=100&page={page}"
+        ), "statuses response")
+        result.extend(statuses)
+        if len(statuses) < 100:
+            return result
+        page += 1
+
+
 def check_contexts(client: GitHubClient, repo: str, revision: str) -> set[str]:
-    data = _require_mapping(client.request("GET", f"/repos/{repo}/commits/{revision}/check-runs?per_page=100"), "check-runs response")
-    runs = _require_list(data.get("check_runs"), "check_runs")
+    runs = _paged_check_runs(client, repo, revision)
     contexts: set[str] = set()
     for run in runs:
         mapping = _require_mapping(run, "check run")
         if not isinstance(mapping.get("name"), str) or not mapping["name"].strip():
             raise ReconcileError("GitHub API returned malformed check_runs entry; refusing mutation")
         contexts.add(mapping["name"])
-    statuses = _require_list(client.request("GET", f"/repos/{repo}/commits/{revision}/statuses?per_page=100"), "statuses response")
+    statuses = _paged_statuses(client, repo, revision)
     for status in statuses:
         mapping = _require_mapping(status, "commit status")
         if not isinstance(mapping.get("context"), str) or not mapping["context"].strip():
@@ -245,6 +289,11 @@ def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], r
         # replacing only the rule types controlled by this command.
         desired["rules"] = desired["rules"] + [rule for rule in existing_rules if isinstance(rule, Mapping) and rule.get("type") not in desired_types]
     result: dict[str, Any] = {"action": action, "mode": mode, "dry_run": dry_run, "name": name, "desired": desired}
+    if existing is not None and _policy_view(existing) == _policy_view(desired):
+        result["action"] = "noop"
+        result["actual"] = existing
+        result["matches"] = True
+        return result
     if dry_run:
         result["actual"] = existing
         result["matches"] = existing is not None and _policy_view(existing) == _policy_view(desired)

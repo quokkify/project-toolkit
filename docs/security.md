@@ -38,8 +38,9 @@ Rulesets are external policy and are never applied by Copier. Use
 --check gitleaks --check CodeQL --revision SHA` with `GH_TOKEN` or `GITHUB_TOKEN`.
 The default `evaluate` mode performs context preflight, writes an evaluate ruleset,
 and verifies readback; `--dry-run` guarantees no POST/PUT. Only an explicit `--active` promotes the
-managed ruleset. The token or GitHub App needs repository administration permission
-to write rulesets (and metadata/read access to inspect checks); do not put it in
+managed ruleset. The fine-grained token or GitHub App needs `Administration: write` to create or
+update rulesets, `Checks: read` to inspect check runs, `Commit statuses: read`
+to inspect legacy status contexts, and `Metadata: read`; do not put it in
 arguments, files, workflow logs, or Copier answers.
 
 The command manages one namespaced ruleset, preserves unrelated rulesets and unknown

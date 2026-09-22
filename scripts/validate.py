@@ -589,7 +589,7 @@ def validate_toolkit_workflow_errors(
         scan_steps = [
             step
             for step in steps
-            if isinstance(step, dict) and step.get("name") == "Scan Git history and current tree"
+            if isinstance(step, dict) and step.get("name") in {"Scan Git history and current tree", "gitleaks"}
         ]
         require(len(scan_steps) == 1, "gitleaks must define one history and tree scan")
         if scan_steps:
@@ -717,7 +717,8 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
     require_rejection(mutated, "sha256sum -c", "checksum bypass")
 
     mutated = clone()
-    step_by_name(mutated, "gitleaks", "Scan Git history and current tree")["run"] = (
+    scan_step = step_by_name(mutated, "gitleaks", "Scan Git history and current tree") or step_by_name(mutated, "gitleaks", "gitleaks")
+    scan_step["run"] = (
         "gitleaks git .\ngitleaks dir ."
     )
     require_rejection(mutated, "redacted command", "redaction bypass")
@@ -2315,6 +2316,24 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         'if answers.get("codeql") and not codeql_path.is_file():'
         in (no_codeql_dest / ".github/workflows/validate.yml").read_text(),
         "generated contract does not gate the CodeQL workflow on its answer",
+    )
+
+    no_gitleaks_data = tmp_path / "no-gitleaks.yml"
+    no_gitleaks_data.write_text(
+        yaml.safe_dump({"components": [], "codeql": True, "gitleaks": False, "release_please": False, "renovate": False})
+    )
+    no_gitleaks_dest = tmp_path / "no-gitleaks"
+    run([
+        copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+        "--data-file", str(no_gitleaks_data), str(template_source), str(no_gitleaks_dest),
+    ])
+    check(
+        not (no_gitleaks_dest / ".github/workflows/gitleaks.yml").exists(),
+        "gitleaks=false generated .github/workflows/gitleaks.yml",
+    )
+    check(
+        (no_gitleaks_dest / ".github/workflows/codeql.yml").exists(),
+        "gitleaks=false scenario unexpectedly changed CodeQL output",
     )
 
     custom_all_data = tmp_path / "custom-renovate-all.yml"

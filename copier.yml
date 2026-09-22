@@ -9,6 +9,7 @@ _exclude:
   - "{% if not release_please %}.github/release-please/manifest.json{% endif %}"
   - "{% if not release_please %}.github/scripts/enrich_release_notes.py{% endif %}"
   - "{% if not codeql %}.github/workflows/codeql.yml{% endif %}"
+  - "{% if not gitleaks %}.github/workflows/gitleaks.yml{% endif %}"
   - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
@@ -75,6 +76,11 @@ codeql_languages:
     {% if language is not string %}Every codeql_languages entry must be a string.{% elif language not in allowed_codeql_languages %}Unsupported CodeQL language: {{ language }}.{% elif language in codeql_language_state.seen %}Duplicate CodeQL language: {{ language }}.{% else %}{% set codeql_language_state.seen = codeql_language_state.seen + [language] %}{% endif %}
     {% endfor %}
     {% endif %}
+
+gitleaks:
+  type: bool
+  help: Generate the checksum-verified Gitleaks workflow and stable gitleaks check context.
+  default: true
 
 allure_report:
   type: bool

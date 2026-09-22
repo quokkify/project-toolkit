@@ -4,6 +4,9 @@
     "github>quokkify/project-toolkit//renovate/default.json",
     "github>quokkify/renovate-presets//presets/github-actions/default"
   ],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
   "customManagers": [
     {
       "customType": "regex",

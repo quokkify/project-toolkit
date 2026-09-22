@@ -26,5 +26,8 @@
 {%- endmacro -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": {{ json_array(renovate_extends, 'extends', 2) }}
+  "extends": {{ json_array(renovate_extends, 'extends', 2) }},
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps"
 }

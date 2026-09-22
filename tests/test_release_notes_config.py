@@ -35,17 +35,16 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(package["changelog-path"], "CHANGELOG.md")
 
-    def test_renovate_produces_release_please_native_dependency_type(self) -> None:
+    def test_renovate_produces_chore_dependency_type(self) -> None:
         renovate = self.load_config(RENOVATE_PATH)
         self.assertEqual(renovate["semanticCommits"], "enabled")
-        self.assertEqual(renovate["semanticCommitType"], "deps")
+        self.assertEqual(renovate["semanticCommitType"], "chore")
         self.assertEqual(renovate["semanticCommitScope"], "deps")
-        # Release Please 17.6.x sections match commit.type, not scope.  The
-        # producer therefore emits deps(deps), which also preserves existing
-        # consumers that already use that Conventional Commit form.
+        # Release Please sections classify this as a hidden chore while the
+        # explicit deps scope keeps dependency commits recognizable.
         self.assertEqual(
             f"{renovate['semanticCommitType']}({renovate['semanticCommitScope']})",
-            "deps(deps)",
+            "chore(deps)",
         )
 
     def test_release_please_17_renders_native_dependencies_only(self) -> None:

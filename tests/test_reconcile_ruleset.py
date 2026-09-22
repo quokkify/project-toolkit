@@ -139,6 +139,39 @@ class RulesetReconcilerTests(unittest.TestCase):
         with self.assertRaisesRegex(module.ReconcileError, "readback mismatch"):
             module.reconcile(client, "acme/widgets", "main", ["gitleaks"], "abc", "active", False)
 
+    def test_payload_uses_github_ruleset_schema_and_explicit_defaults(self) -> None:
+        desired = module.build_desired(
+            module.managed_name("acme", "widgets"), "main", ["gitleaks"], "evaluate", "errors"
+        )
+        by_type = {rule["type"]: rule for rule in desired["rules"]}
+        self.assertNotIn("required_code_scanning", by_type)
+        tool = by_type["code_scanning"]["parameters"]["code_scanning_tools"][0]
+        self.assertEqual(tool["alerts_threshold"], "errors")
+        self.assertEqual(tool["security_alerts_threshold"], "high_or_higher")
+        self.assertFalse(by_type["pull_request"]["parameters"]["required_review_thread_resolution"])
+        self.assertEqual(
+            by_type["required_status_checks"]["parameters"]["required_status_checks"],
+            [{"context": "gitleaks", "integration_id": None}],
+        )
+
+    def test_status_check_integration_id_mismatch_fails_closed(self) -> None:
+        existing = [{"id": 7, "name": module.managed_name("acme", "widgets")}]
+        client = self._client(existing)
+        desired = module.build_desired(module.managed_name("acme", "widgets"), "main", ["gitleaks"], "active", None)
+        detail = {"id": 7, **module.build_desired(module.managed_name("acme", "widgets"), "main", ["gitleaks"], "evaluate", None)}
+        mismatched = {"id": 7, **desired, "rules": [
+            {**rule, "parameters": {
+                **rule["parameters"],
+                "required_status_checks": [{"context": "gitleaks", "integration_id": 12345}],
+            }} if rule["type"] == "required_status_checks" else rule
+            for rule in desired["rules"]
+        ]}
+        client.responses[("GET", "/repos/acme/widgets/rulesets/7")] = deque([detail, mismatched])
+        client.responses[("PUT", "/repos/acme/widgets/rulesets/7")] = {"id": 7}
+        self.assertNotEqual(module._policy_view(desired), module._policy_view(mismatched))
+        with self.assertRaisesRegex(module.ReconcileError, "readback mismatch"):
+            module.reconcile(client, "acme/widgets", "main", ["gitleaks"], "abc", "active", False)
+
     def test_malformed_ruleset_response_is_rejected(self) -> None:
         client = self._client(existing={"not": "a list"})
         with self.assertRaisesRegex(module.ReconcileError, "expected a list"):

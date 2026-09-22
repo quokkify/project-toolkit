@@ -82,12 +82,13 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
                 "dismiss_stale_reviews_on_push": True,
                 "require_code_owner_review": False,
                 "require_last_push_approval": True,
+                "required_review_thread_resolution": False,
             },
         },
         {
             "type": "required_status_checks",
             "parameters": {
-                "required_status_checks": [{"context": check} for check in sorted(set(checks))],
+                "required_status_checks": [{"context": check, "integration_id": None} for check in sorted(set(checks))],
                 "strict_required_status_checks_policy": True,
             },
         },
@@ -97,7 +98,7 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
             raise ReconcileError("--codeql-alert-threshold must be one of: none, errors, all")
         security_threshold = {"none": "none", "errors": "high_or_higher", "all": "all"}[codeql_threshold]
         rules.append({
-            "type": "required_code_scanning",
+            "type": "code_scanning",
             "parameters": {
                 "code_scanning_tools": [{
                     "tool": "CodeQL",
@@ -139,16 +140,20 @@ def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
             params = _require_mapping(rule.get("parameters"), "pull_request parameters")
             item["parameters"] = {key: params.get(key) for key in (
                 "required_approving_review_count", "dismiss_stale_reviews_on_push",
-                "require_code_owner_review", "require_last_push_approval")}
+                "require_code_owner_review", "require_last_push_approval",
+                "required_review_thread_resolution")}
         elif rule_type == "required_status_checks":
             item = {"type": rule_type}
             params = _require_mapping(rule.get("parameters"), "status-check parameters")
             statuses = _require_list(params.get("required_status_checks"), "required status checks")
             item["parameters"] = {
-                "required_status_checks": [{"context": _require_mapping(status, "status check").get("context")} for status in statuses],
+                "required_status_checks": [{
+                    "context": _require_mapping(status, "status check").get("context"),
+                    "integration_id": _require_mapping(status, "status check").get("integration_id"),
+                } for status in statuses],
                 "strict_required_status_checks_policy": params.get("strict_required_status_checks_policy"),
             }
-        elif rule_type == "required_code_scanning":
+        elif rule_type == "code_scanning":
             item = {"type": rule_type}
             params = _require_mapping(rule.get("parameters"), "code-scanning parameters")
             tools = _require_list(params.get("code_scanning_tools"), "code-scanning tools")

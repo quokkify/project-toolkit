@@ -67,7 +67,7 @@ def managed_name(owner: str, repo: str) -> str:
     return f"project-toolkit/security/{owner}/{repo}"
 
 
-def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_threshold: int | None) -> dict[str, Any]:
+def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_threshold: str | None) -> dict[str, Any]:
     if not name or not branch or not checks or any(not item.strip() for item in checks):
         raise ReconcileError("ruleset name, branch, and at least one non-empty check are required")
     rules: list[dict[str, Any]] = [
@@ -91,15 +91,16 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
         },
     ]
     if codeql_threshold is not None:
-        if codeql_threshold < 0:
-            raise ReconcileError("--codeql-alert-threshold must be non-negative")
+        if codeql_threshold not in {"none", "errors", "all"}:
+            raise ReconcileError("--codeql-alert-threshold must be one of: none, errors, all")
+        security_threshold = {"none": "none", "errors": "high_or_higher", "all": "all"}[codeql_threshold]
         rules.append({
             "type": "required_code_scanning",
             "parameters": {
                 "code_scanning_tools": [{
                     "tool": "CodeQL",
                     "alerts_threshold": codeql_threshold,
-                    "security_alerts_threshold": codeql_threshold,
+                    "security_alerts_threshold": security_threshold,
                 }]
             },
         })
@@ -107,7 +108,7 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
         "name": name,
         "target": "branch",
         "enforcement": mode,
-        "conditions": {"ref_name": {"include": [branch], "exclude": []}},
+        "conditions": {"ref_name": {"include": [f"refs/heads/{branch}"], "exclude": []}},
         "rules": rules,
     }
 
@@ -118,6 +119,49 @@ def _normalize(value: Any) -> Any:
     if isinstance(value, list):
         return sorted((_normalize(item) for item in value), key=lambda item: json.dumps(item, sort_keys=True))
     return value
+
+
+def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare managed fields and ignore GitHub response metadata/defaults."""
+    conditions = _require_mapping(value.get("conditions"), "ruleset conditions")
+    ref_name = _require_mapping(conditions.get("ref_name"), "ruleset ref_name condition")
+    raw_rules = _require_list(value.get("rules"), "ruleset rules")
+    rules: list[dict[str, Any]] = []
+    for raw_rule in raw_rules:
+        rule = _require_mapping(raw_rule, "ruleset rule")
+        rule_type = rule.get("type")
+        if not isinstance(rule_type, str):
+            raise ReconcileError("GitHub API returned a ruleset rule without a string type")
+        item: dict[str, Any] = {"type": rule_type}
+        if rule_type == "pull_request":
+            params = _require_mapping(rule.get("parameters"), "pull_request parameters")
+            item["parameters"] = {key: params.get(key) for key in (
+                "required_approving_review_count", "dismiss_stale_reviews_on_push",
+                "require_code_owner_review", "require_last_push_approval")}
+        elif rule_type == "required_status_checks":
+            params = _require_mapping(rule.get("parameters"), "status-check parameters")
+            statuses = _require_list(params.get("required_status_checks"), "required status checks")
+            item["parameters"] = {
+                "required_status_checks": [{"context": _require_mapping(status, "status check").get("context")} for status in statuses],
+                "strict_required_status_checks_policy": params.get("strict_required_status_checks_policy"),
+            }
+        elif rule_type == "required_code_scanning":
+            params = _require_mapping(rule.get("parameters"), "code-scanning parameters")
+            tools = _require_list(params.get("code_scanning_tools"), "code-scanning tools")
+            item["parameters"] = {"code_scanning_tools": [
+                {key: _require_mapping(tool, "code-scanning tool").get(key) for key in (
+                    "tool", "alerts_threshold", "security_alerts_threshold")}
+                for tool in tools
+            ]}
+        rules.append(item)
+    rules.sort(key=lambda item: json.dumps(item, sort_keys=True))
+    return {
+        "name": value.get("name"),
+        "target": value.get("target"),
+        "enforcement": value.get("enforcement"),
+        "conditions": {"ref_name": {"include": ref_name.get("include"), "exclude": ref_name.get("exclude")}},
+        "rules": rules,
+    }
 
 
 def _rule_types(rules: list[Any]) -> set[str]:
@@ -145,42 +189,65 @@ def _find_existing(rulesets: list[Any], name: str) -> Mapping[str, Any] | None:
 def check_contexts(client: GitHubClient, repo: str, revision: str) -> set[str]:
     data = _require_mapping(client.request("GET", f"/repos/{repo}/commits/{revision}/check-runs?per_page=100"), "check-runs response")
     runs = _require_list(data.get("check_runs"), "check_runs")
-    contexts: set[str] = {
-        run["name"] for run in runs
-        if isinstance(run, Mapping) and isinstance(run.get("name"), str)
-    }
+    contexts: set[str] = set()
+    for run in runs:
+        mapping = _require_mapping(run, "check run")
+        if not isinstance(mapping.get("name"), str) or not mapping["name"].strip():
+            raise ReconcileError("GitHub API returned malformed check_runs entry; refusing mutation")
+        contexts.add(mapping["name"])
     statuses = _require_list(client.request("GET", f"/repos/{repo}/commits/{revision}/statuses?per_page=100"), "statuses response")
-    contexts.update(
-        status["context"] for status in statuses
-        if isinstance(status, Mapping) and isinstance(status.get("context"), str)
-    )
+    for status in statuses:
+        mapping = _require_mapping(status, "commit status")
+        if not isinstance(mapping.get("context"), str) or not mapping["context"].strip():
+            raise ReconcileError("GitHub API returned malformed statuses entry; refusing mutation")
+        contexts.add(mapping["context"])
     return contexts
 
 
-def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], revision: str | None, mode: str, dry_run: bool, codeql_threshold: int | None = None) -> dict[str, Any]:
+def list_rulesets(client: GitHubClient, repo: str) -> list[Any]:
+    """Read every ruleset page; list entries intentionally omit rules."""
+    result: list[Any] = []
+    page = 1
+    while True:
+        page_items = _require_list(client.request(
+            "GET", f"/repos/{repo}/rulesets?includes_parents=true&per_page=100&page={page}"
+        ), "rulesets response")
+        result.extend(page_items)
+        if len(page_items) < 100:
+            return result
+        page += 1
+
+
+def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], revision: str | None, mode: str, dry_run: bool, codeql_threshold: str | None = None) -> dict[str, Any]:
     owner, _, repository = repo.partition("/")
     if not owner or not repository or repo.count("/") != 1:
         raise ReconcileError("--repo must be OWNER/REPOSITORY")
     name = managed_name(owner, repository)
     desired = build_desired(name, branch, checks, mode, codeql_threshold)
+    if not dry_run and not revision:
+        raise ReconcileError("--revision is required for evaluate/active mutation; refusing mutation")
     if revision:
         published = check_contexts(client, repo, revision)
         missing = sorted(set(checks) - published)
         if missing:
             raise ReconcileError(f"required check context(s) not published for {revision}: {', '.join(missing)}; refusing mutation")
-    rulesets = _require_list(client.request("GET", f"/repos/{repo}/rulesets?includes_parents=true"), "rulesets response")
+    rulesets = list_rulesets(client, repo)
     existing = _find_existing(rulesets, name)
     action = "create" if existing is None else "update"
     if existing is not None:
+        identifier = existing.get("id")
+        if not isinstance(identifier, int):
+            raise ReconcileError("managed ruleset response has no numeric id; refusing update")
+        existing = _require_mapping(client.request("GET", f"/repos/{repo}/rulesets/{identifier}"), "managed ruleset detail")
         existing_rules = _require_list(existing.get("rules"), "managed rules")
         desired_types = _rule_types(desired["rules"])
         # Preserve policy owned by an operator inside the managed ruleset, while
         # replacing only the rule types controlled by this command.
         desired["rules"] = desired["rules"] + [rule for rule in existing_rules if isinstance(rule, Mapping) and rule.get("type") not in desired_types]
     result: dict[str, Any] = {"action": action, "mode": mode, "dry_run": dry_run, "name": name, "desired": desired}
-    if dry_run or mode == "evaluate":
+    if dry_run:
         result["actual"] = existing
-        result["matches"] = existing is not None and _normalize(existing) == _normalize(desired)
+        result["matches"] = existing is not None and _policy_view(existing) == _policy_view(desired)
         return result
     identifier = existing.get("id") if existing else None
     if existing is not None and not isinstance(identifier, int):
@@ -192,7 +259,11 @@ def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], r
     if not isinstance(readback_id, int):
         raise ReconcileError("ruleset mutation response has no numeric id")
     readback = _require_mapping(client.request("GET", f"/repos/{repo}/rulesets/{readback_id}"), "ruleset readback")
-    if _normalize(readback) != _normalize(desired):
+    try:
+        matches = _policy_view(readback) == _policy_view(desired)
+    except ReconcileError as exc:
+        raise ReconcileError("ruleset readback mismatch; refusing to report success") from exc
+    if not matches:
         raise ReconcileError("ruleset readback mismatch; refusing to report success")
     result["actual"] = readback
     result["matches"] = True
@@ -208,7 +279,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--mode", choices=("evaluate", "active"), default="evaluate")
     command.add_argument("--active", action="store_true", help="Explicitly promote the managed ruleset to active")
     command.add_argument("--dry-run", action="store_true")
-    command.add_argument("--codeql-alert-threshold", type=int)
+    command.add_argument("--codeql-alert-threshold", choices=("none", "errors", "all"))
     return command
 
 

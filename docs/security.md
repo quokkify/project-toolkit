@@ -35,9 +35,9 @@ requiring a matrix job name.
 
 Rulesets are external policy and are never applied by Copier. Use
 `python scripts/reconcile_ruleset.py --repo OWNER/REPOSITORY --branch main
---check gitleaks --check codeql --revision SHA` with `GH_TOKEN` or `GITHUB_TOKEN`.
-The default `evaluate` mode performs context preflight and readback without mutation;
-`--dry-run` also guarantees no POST/PUT. Only an explicit `--active` promotes the
+--check gitleaks --check CodeQL --revision SHA` with `GH_TOKEN` or `GITHUB_TOKEN`.
+The default `evaluate` mode performs context preflight, writes an evaluate ruleset,
+and verifies readback; `--dry-run` guarantees no POST/PUT. Only an explicit `--active` promotes the
 managed ruleset. The token or GitHub App needs repository administration permission
 to write rulesets (and metadata/read access to inspect checks); do not put it in
 arguments, files, workflow logs, or Copier answers.

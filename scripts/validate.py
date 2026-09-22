@@ -2779,6 +2779,7 @@ else:
     run([sys.executable, "tests/test_release_notes_config.py"], env=suite_env)
     run([sys.executable, "tests/test_update_copier_fleet.py"], env=suite_env)
     run([sys.executable, "tests/test_validate_helpers.py"], env=suite_env)
+    run([sys.executable, "tests/test_reconcile_ruleset.py"], env=suite_env)
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
 
 if not ARGS.static:

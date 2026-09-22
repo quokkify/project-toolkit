@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitHub REST 2022-11-28 repository ruleset create/update request",
+  "description": "Faithful request-body contract for the fields emitted by scripts/reconcile_ruleset.py.",
+  "required": ["name", "target", "enforcement", "conditions", "rules"],
+  "allowed_rule_types": [
+    "deletion",
+    "non_fast_forward",
+    "pull_request",
+    "required_status_checks",
+    "code_scanning",
+    "merge_queue"
+  ],
+  "enforcement": ["disabled", "active", "evaluate"],
+  "pull_request_required_parameters": [
+    "required_approving_review_count",
+    "dismiss_stale_reviews_on_push",
+    "require_code_owner_review",
+    "require_last_push_approval",
+    "required_review_thread_resolution"
+  ],
+  "code_scanning_alert_threshold": ["none", "errors", "all"],
+  "code_scanning_security_alert_threshold": ["none", "high_or_higher", "all"],
+  "required_status_check": {
+    "required": ["context"],
+    "integration_id": {"type": "integer", "minimum": 0, "nullable": false}
+  }
+}

@@ -45,7 +45,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: copier-fleet-auto-update
+  # Full-fleet runs share one lock, while explicitly targeted repositories can
+  # update independently. GitHub retains only one pending run per group, so a
+  # static group silently cancelled earlier targeted dispatches.
+  group: "copier-fleet-auto-update-${{ inputs.repository || 'fleet' }}"
   cancel-in-progress: false
 
 jobs:

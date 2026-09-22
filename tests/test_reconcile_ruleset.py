@@ -151,7 +151,14 @@ class RulesetReconcilerTests(unittest.TestCase):
         self.assertFalse(by_type["pull_request"]["parameters"]["required_review_thread_resolution"])
         self.assertEqual(
             by_type["required_status_checks"]["parameters"]["required_status_checks"],
-            [{"context": "gitleaks", "integration_id": None}],
+            [{"context": "gitleaks"}],
+        )
+
+        # The outbound 2022-11-28 payload must not emit nullable
+        # integration_id; the field is optional and, when present, integer.
+        self.assertNotIn(
+            "integration_id",
+            by_type["required_status_checks"]["parameters"]["required_status_checks"][0],
         )
 
     def test_status_check_integration_id_mismatch_fails_closed(self) -> None:

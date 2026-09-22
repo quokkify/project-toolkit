@@ -88,7 +88,10 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
         {
             "type": "required_status_checks",
             "parameters": {
-                "required_status_checks": [{"context": check, "integration_id": None} for check in sorted(set(checks))],
+                # integration_id is optional and must be omitted unless the
+                # caller explicitly binds a check to a GitHub App.  GitHub's
+                # 2022-11-28 schema accepts an integer here, not JSON null.
+                "required_status_checks": [{"context": check} for check in sorted(set(checks))],
                 "strict_required_status_checks_policy": True,
             },
         },

@@ -283,6 +283,14 @@ def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
         permissions == {"contents": "read"},
         f"top-level permissions must be exactly contents: read, found {permissions!r}",
     )
+    require(
+        workflow.get("concurrency")
+        == {
+            "group": "copier-fleet-auto-update-${{ inputs.repository || 'fleet' }}",
+            "cancel-in-progress": False,
+        },
+        "concurrency must isolate targeted repositories while serializing full-fleet runs",
+    )
 
     jobs = workflow.get("jobs")
     update = jobs.get("update") if isinstance(jobs, dict) else None

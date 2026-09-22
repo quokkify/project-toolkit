@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+import unittest
 from unittest import TestCase
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +86,4 @@ class RulesetReconcilerTests(TestCase):
 
 
 if __name__ == "__main__":
-    import unittest
-
     unittest.main()

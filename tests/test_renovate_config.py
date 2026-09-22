@@ -6,9 +6,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RENOVATE_PATH = ROOT / "renovate/default.json"
+CHECKED_IN_RENOVATE_PATH = ROOT / ".github/renovate.json"
+TEMPLATE_RENOVATE_PATH = ROOT / "templates/project/template/.github/renovate.json.jinja"
 
 
 class RenovateConfigTests(unittest.TestCase):
+    def test_dependency_titles_are_chore_deps_in_local_and_generated_configs(self) -> None:
+        for path in (RENOVATE_PATH, CHECKED_IN_RENOVATE_PATH):
+            with self.subTest(path=path):
+                config = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(config["semanticCommits"], "enabled")
+                self.assertEqual(config["semanticCommitType"], "chore")
+                self.assertEqual(config["semanticCommitScope"], "deps")
+
+        template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
+        self.assertIn('"semanticCommits": "enabled"', template)
+        self.assertIn('"semanticCommitType": "chore"', template)
+        self.assertIn('"semanticCommitScope": "deps"', template)
+        self.assertNotIn('"semanticCommitType": "deps"', template)
+
     def test_allure_action_updates_share_one_cross_manager_group(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
         rules = [

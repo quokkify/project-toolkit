@@ -6,7 +6,7 @@
   "extends": ["config:recommended"],
   "enabledManagers": ["github-actions", "custom.regex"],
   "semanticCommits": "enabled",
-  "semanticCommitType": "deps",
+  "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
   "automerge": false,
   "packageRules": [

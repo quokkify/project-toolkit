@@ -1226,6 +1226,62 @@ class GradleRetryExternalConsumerTests(unittest.TestCase):
             self.assertIn("runtime-success", result.stdout)
 
 
+class GradleConsoleModeTests(unittest.TestCase):
+    @staticmethod
+    def _resolve_step() -> str:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        return next(step["run"] for step in workflow["jobs"]["ci"]["steps"] if step.get("id") == "commands")
+
+    def _resolve(self, console: str = "plain", **commands: str) -> tuple[subprocess.CompletedProcess[str], str]:
+        with tempfile.TemporaryDirectory(prefix="java-ci-console-") as temporary:
+            root = Path(temporary)
+            wrapper = root / "gradlew"
+            wrapper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+            output = root / "output"
+            env = {
+                **os.environ,
+                "BUILD_TOOL": "gradle",
+                "GRADLE_CONSOLE": console,
+                "LINT_COMMAND": commands.get("lint", ""),
+                "TEST_COMMAND": commands.get("test", ""),
+                "BUILD_COMMAND": commands.get("build", ""),
+                "GITHUB_OUTPUT": str(output),
+            }
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", self._resolve_step()],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            return result, output.read_text() if output.exists() else ""
+
+    def test_default_plain_and_explicit_rich_are_applied_to_generated_commands(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        inputs = workflow[True]["workflow_call"]["inputs"]
+        self.assertEqual(inputs["gradle-console"]["default"], "plain")
+        plain_result, plain_output = self._resolve()
+        rich_result, rich_output = self._resolve("rich")
+        self.assertEqual(plain_result.returncode, 0, plain_result.stderr)
+        self.assertEqual(rich_result.returncode, 0, rich_result.stderr)
+        self.assertIn("--console=plain", plain_output)
+        self.assertIn("--console=rich", rich_output)
+
+    def test_invalid_console_mode_fails_with_actionable_error(self) -> None:
+        result, _ = self._resolve("ansi")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Unsupported gradle-console: ansi (expected plain or rich)", result.stderr)
+
+    def test_custom_commands_are_not_rewritten(self) -> None:
+        result, output = self._resolve("rich", lint="./lint.sh", test="./test.sh", build="./build.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lint=./lint.sh", output)
+        self.assertIn("test=./test.sh", output)
+        self.assertIn("build=./build.sh", output)
+
+
 class ReusableTestArtifactContractTests(unittest.TestCase):
     def test_language_workflows_share_opt_in_artifact_contract(self) -> None:
         defaults = {

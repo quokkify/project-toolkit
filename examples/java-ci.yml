@@ -8,3 +8,4 @@ jobs:
     with:
       java-version: "17"
       build-tool: auto
+      gradle-console: plain

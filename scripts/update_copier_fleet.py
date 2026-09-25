@@ -1181,6 +1181,29 @@ def update_template(
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
 
+    # This is a breaking schema migration.  Do not let Copier's new-question
+    # defaults replace a legacy component's type/path.  Consumers must add
+    # stable identities explicitly before a fleet update can proceed.
+    try:
+        answers = yaml.safe_load(original_answers_text)
+    except yaml.YAMLError as exc:
+        raise FleetUpdateError(f"{ANSWERS_FILE} is not valid YAML: {exc}") from exc
+    components = answers.get("components") if isinstance(answers, dict) else None
+    if isinstance(components, list):
+        missing_identity = [
+            str(component.get("path", index))
+            for index, component in enumerate(components)
+            if isinstance(component, dict)
+            and ("id" not in component or "name" not in component)
+        ]
+        if missing_identity:
+            paths = ", ".join(missing_identity)
+            raise FleetUpdateError(
+                "breaking component migration requires explicit id and name for "
+                f"each existing component (missing identity for: {paths}); "
+                "type and path were preserved and no update was applied"
+            )
+
     command = [
         "copier",
         "update",

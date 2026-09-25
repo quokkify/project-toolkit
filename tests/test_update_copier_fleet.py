@@ -545,6 +545,28 @@ class TemplateSourceTests(TestCase):
 
 
 class TemplateUpdateTests(TestCase):
+    @mock.patch.object(fleet, "run")
+    def test_rejects_legacy_components_without_replacing_topology(self, run_mock: mock.Mock) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            original = (
+                "components:\n"
+                "  - type: java\n"
+                "    path: worker\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            )
+            answers.write_text(original, encoding="utf-8")
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "explicit id and name"):
+                fleet.update_template(
+                    repository,
+                    template_source="quokkify/project-toolkit",
+                    template_ref="v2.21.5",
+                    env={},
+                )
+            self.assertEqual(answers.read_text(encoding="utf-8"), original)
+            run_mock.assert_not_called()
+
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")
     @mock.patch.object(fleet, "run")

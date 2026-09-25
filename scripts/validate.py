@@ -1720,6 +1720,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "node": ["default", "github-actions", "javascript"],
         "java": ["default", "github-actions", "java"],
         "polyglot": ["default", "github-actions", "python", "javascript", "java"],
+        "same-type": ["default", "github-actions", "python"],
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
         "allure-external": ["default", "github-actions"],
@@ -2151,6 +2152,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "docker-build.yml" not in generated,
                 "polyglot generated workflow unexpectedly includes Docker",
             )
+        if scenario == "same-type":
+            generated = (dest / ".github/workflows/validate.yml").read_text()
+            for job_id, display_name, path in (
+                ("backend-python", "Backend Python", "backend"),
+                ("tools-python", "Tools Python", "tools"),
+            ):
+                check(f"  {job_id}:" in generated, f"same-type missing job {job_id}")
+                check(f'name: "{display_name}"' in generated, f"same-type missing display name for {job_id}")
+                check(f'working-directory: "{path}"' in generated, f"same-type missing path for {job_id}")
         if scenario == "python":
             run(["git", "init", "-q"], dest)
             run(["git", "config", "user.email", "fixture@example.invalid"], dest)
@@ -2182,6 +2192,13 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "reserved-id": [{"type": "python", "path": ".", "id": "docker", "name": "Application"}],
         "missing-required-fields": [{"type": "python", "path": "."}],
     }
+    for reserved_id in (
+        "template-contract", "docker", "release", "update", "scan", "analyze",
+        "resolve", "generate", "comment", "pages", "changes", "integration",
+    ):
+        invalid_component_cases[f"reserved-{reserved_id}"] = [
+            {"type": "python", "path": ".", "id": reserved_id, "name": "Application"}
+        ]
     for case_name, invalid_components in invalid_component_cases.items():
         invalid_data = tmp_path / f"{case_name}.yml"
         invalid_data.write_text(yaml.safe_dump({"components": invalid_components}))

@@ -52,7 +52,7 @@ components:
     {% if component.path is not string or not component.path | trim %}Every component requires a non-empty string path.{% endif %}
     {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
     {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
-    {% if component.id in ['template-contract', 'docker', 'release', 'changes', 'integration'] %}Component id {{ component.id }} conflicts with a generated job id.{% endif %}
+    {% if component.id in ['template-contract', 'docker', 'release', 'update', 'scan', 'analyze', 'resolve', 'generate', 'comment', 'pages', 'changes', 'integration'] %}Component id {{ component.id }} conflicts with a generated job id.{% endif %}
     {% set component_state = namespace(ids=[]) %}
     {% for candidate in components[:loop.index] %}{% if candidate is mapping and candidate.id is string %}{% set component_state.ids = component_state.ids + [candidate.id] %}{% endif %}{% endfor %}
     {% if component_state.ids | select('equalto', component.id) | list | length > 1 %}Component ids must be unique: {{ component.id }}.{% endif %}

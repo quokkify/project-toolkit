@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from contextlib import redirect_stdout
 from io import StringIO
-from unittest import TestCase, main, mock
+from unittest import TestCase, main, mock, skipUnless
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -545,6 +551,233 @@ class TemplateSourceTests(TestCase):
 
 
 class TemplateUpdateTests(TestCase):
+    @skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
+    def test_real_legacy_copier_migration_reaches_pull_request_dispatch(self) -> None:
+        """Exercise the actual old-template update, not only command construction."""
+        legacy_revision = "9e6e76253f9495305b315e2e22970cd0e926a584"
+        components = (
+            [{"type": "java", "path": "worker"},
+             {"type": "python", "path": "123-worker"},
+             {"type": "python", "path": "api/v1"},
+             {"type": "python", "path": "api-v1"}]
+            + [{"type": "python", "path": "api"} for _ in range(17)]
+        )
+        repository = fleet.Repository("quokkify/legacy-fixture", "main")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            data = root / "components.yml"
+            generated = root / "generated"
+            data.write_text(yaml.safe_dump({"components": components}), encoding="utf-8")
+            subprocess.run(
+                [
+                    "copier", "copy", "--trust", "--defaults", "--vcs-ref", legacy_revision,
+                    "--data-file", str(data),
+                    "https://github.com/quokkify/project-toolkit.git", str(source),
+                ], check=True, text=True, capture_output=True,
+            )
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "add", "--all"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                 "commit", "-qm", "legacy fixture"], cwd=source, check=True,
+            )
+            answers = (source / fleet.ANSWERS_FILE).read_text(encoding="utf-8")
+            # Keep the destination's canonical Copier source identifier so the
+            # production audit is exercised, but route that source to a local
+            # clone containing this exact candidate revision.  The public remote
+            # cannot be expected to contain an unpushed merge commit.
+            candidate_source = root / "candidate-source"
+            subprocess.run(["git", "clone", "-q", str(ROOT), str(candidate_source)], check=True)
+            current_revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=candidate_source, check=True,
+                text=True, capture_output=True,
+            ).stdout.strip()
+            integration_env = os.environ.copy()
+            integration_env.update(
+                {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": f"url.file://{candidate_source}/.insteadOf",
+                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
+                }
+            )
+
+            def clone_fixture(_: fleet.Repository, destination: Path, *, env: dict[str, str]) -> None:
+                del env
+                shutil.copytree(source, destination)
+
+            with mock.patch.object(fleet, "fetch_answers", return_value=answers), \
+                 mock.patch.object(fleet, "clone_repository", side_effect=clone_fixture), \
+                 mock.patch.object(fleet, "push_automation_branch") as push_mock, \
+                 mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
+                result = fleet.process_repository(
+                    repository, expected_template="quokkify/project-toolkit",
+                    branch="automation/copier-template-update", dry_run=False,
+                    template_ref=current_revision, env=integration_env, workspace=generated,
+                )
+
+            self.assertEqual(result.status, "pull-request")
+            self.assertEqual(result.detail, "https://example.invalid/pr")
+            push_mock.assert_called_once()
+            pr_mock.assert_called_once()
+            updated = yaml.safe_load((generated / "quokkify--legacy-fixture" / fleet.ANSWERS_FILE).read_text())
+            migrated = updated["components"]
+            self.assertEqual([item["type"] for item in migrated], [item["type"] for item in components])
+            self.assertEqual([item["path"] for item in migrated], [item["path"] for item in components])
+            ids = [item["id"] for item in migrated]
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", item) for item in ids))
+            self.assertTrue(all(item["name"].strip() for item in migrated))
+            workflow = (generated / "quokkify--legacy-fixture" / ".github/workflows/validate.yml").read_text()
+            for item in migrated:
+                self.assertIn(f"{item['id']}:", workflow)
+                self.assertIn(item["name"], workflow)
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_migrates_legacy_components_without_replacing_topology(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            original = (
+                "components:\n"
+                "  - type: java\n"
+                "    path: worker\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            )
+            answers.write_text(original, encoding="utf-8")
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+            # The migration payload is passed to Copier without dirtying the
+            # checkout; Copier writes the migrated answers after a successful
+            # update.  A mocked runner must therefore leave the source intact.
+            self.assertEqual(answers.read_text(encoding="utf-8"), original)
+            run_mock.assert_called_once()
+            command = run_mock.call_args.args[0]
+            self.assertIn("--vcs-ref", command)
+            data_index = command.index("--data")
+            self.assertEqual(
+                yaml.safe_load(command[data_index + 1].removeprefix("components=")),
+                [{"type": "java", "path": "worker", "id": "worker-java", "name": "Worker Java"}],
+            )
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_migrates_numeric_leading_legacy_path_to_valid_identity(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "components:\n  - type: python\n    path: 123-worker\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        self.assertEqual(
+            yaml.safe_load(command[data_index + 1].removeprefix("components=")),
+            [{
+                "type": "python",
+                "path": "123-worker",
+                "id": "component-123-worker-python",
+                "name": "123 Worker Python",
+            }],
+        )
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_migrates_normalization_collisions_to_distinct_stable_identities(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "components:\n"
+                "  - type: python\n"
+                "    path: api/v1\n"
+                "  - type: python\n"
+                "    path: api-v1\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        migrated = yaml.safe_load(command[data_index + 1].removeprefix("components="))
+        self.assertEqual(migrated[0]["id"], "api-v1-python")
+        self.assertRegex(migrated[1]["id"], r"^api-v1-python-[0-9a-f]{8}$")
+        self.assertNotEqual(migrated[0]["id"], migrated[1]["id"])
+        self.assertEqual([component["path"] for component in migrated], ["api/v1", "api-v1"])
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_migrates_repeated_legacy_components_with_bounded_unique_ids(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            components = [{"type": "python", "path": "api"} for _ in range(17)]
+            (repository / fleet.ANSWERS_FILE).write_text(
+                yaml.safe_dump(
+                    {
+                        "components": components,
+                        "_src_path": "https://github.com/quokkify/project-toolkit.git",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        migrated = yaml.safe_load(command[data_index + 1].removeprefix("components="))
+        ids = [component["id"] for component in migrated]
+        self.assertEqual(len(ids), 17)
+        self.assertEqual(len(set(ids)), 17)
+        self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", value) for value in ids))
+        self.assertEqual([component["path"] for component in migrated], ["api"] * 17)
+
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")
     @mock.patch.object(fleet, "run")

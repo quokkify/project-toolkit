@@ -142,6 +142,8 @@ project_name: example-service
 components:
   - type: python
     path: .
+    id: app-python
+    name: Application Python
 docker: false
 release_please: true
 renovate: true

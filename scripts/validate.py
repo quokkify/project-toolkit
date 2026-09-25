@@ -1886,9 +1886,13 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and 'Path(".github/allure/safe_extract.py")' in validate_text,
                 f"{scenario}: generated contract does not verify Allure outputs",
             )
-            artifact_names = ["allure-results-python-1"]
+            artifact_names = ["allure-results-app-python"]
             if scenario == "allure-polyglot":
-                artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
+                artifact_names = [
+                    "allure-results-backend-python",
+                    "allure-results-frontend-node",
+                    "allure-results-worker-java",
+                ]
             if scenario == "allure-external":
                 artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
@@ -2170,6 +2174,37 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 answers.get("renovate_presets") == ["default", "github-actions", "python"],
                 "copier update did not persist inferred renovate_presets",
             )
+
+    invalid_component_cases = {
+        "duplicate-id": [{"type": "python", "path": ".", "id": "same", "name": "One"}, {"type": "node", "path": ".", "id": "same", "name": "Two"}],
+        "invalid-id": [{"type": "python", "path": ".", "id": "bad.id", "name": "Application"}],
+        "empty-name": [{"type": "python", "path": ".", "id": "app-python", "name": "  "}],
+        "reserved-id": [{"type": "python", "path": ".", "id": "docker", "name": "Application"}],
+        "missing-required-fields": [{"type": "python", "path": "."}],
+    }
+    for case_name, invalid_components in invalid_component_cases.items():
+        invalid_data = tmp_path / f"{case_name}.yml"
+        invalid_data.write_text(yaml.safe_dump({"components": invalid_components}))
+        invalid_result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(tmp_path / case_name),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        check(
+            invalid_result.returncode != 0,
+            f"{case_name}: invalid component configuration was accepted",
+        )
 
     config_only_data = tmp_path / "config-only.yml"
     config_only_data.write_text(

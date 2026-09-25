@@ -3,6 +3,8 @@ toolkit_version: v1.0.0
 components:
   - type: python
     path: .
+    id: app-python
+    name: Application Python
 docker: false
 release_please: false
 renovate: true

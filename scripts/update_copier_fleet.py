@@ -10,6 +10,7 @@ without pushing anything.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import posixpath
@@ -1193,7 +1194,11 @@ def update_template(
     components = answers.get("components") if isinstance(answers, dict) else None
     if isinstance(components, list):
         migrated_components: list[dict[str, Any]] = []
-        generated_ids: set[str] = set()
+        generated_ids: set[str] = {
+            component["id"]
+            for component in components
+            if isinstance(component, dict) and isinstance(component.get("id"), str)
+        }
         for index, component in enumerate(components):
             if not isinstance(component, dict):
                 raise FleetUpdateError(f"components[{index}] must be a mapping")
@@ -1220,11 +1225,24 @@ def update_template(
                     "changes", "integration",
                 }:
                     candidate_id = f"component-{candidate_id}"
+                # Distinct legacy paths can normalize to the same slug (for
+                # example ``api/v1`` and ``api-v1``).  Keep the readable slug
+                # where possible, and add a deterministic digest only when a
+                # collision occurs.  This is a migration identity, not the
+                # old type/index workflow fallback: every generated ID still
+                # derives from the component's complete legacy identity.
                 if candidate_id in generated_ids:
-                    raise FleetUpdateError(
-                        f"cannot migrate components[{index}]: ambiguous stable identity {candidate_id!r}; "
-                        "add explicit id and name"
-                    )
+                    identity_key = f"{component_path}\0{component_type}"
+                    digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()[:8]
+                    candidate_id = f"{candidate_id}-{digest}"
+                    digest_length = 12
+                    while candidate_id in generated_ids:
+                        digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
+                        candidate_id = (
+                            f"{candidate_id.rsplit('-', 1)[0]}-"
+                            f"{digest[:digest_length]}"
+                        )
+                        digest_length += 4
                 generated_ids.add(candidate_id)
                 migrated.setdefault("id", candidate_id)
                 migrated.setdefault("name", f"{path_slug.replace('-', ' ').title()} {component_type.title()}")

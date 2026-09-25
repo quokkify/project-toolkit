@@ -623,6 +623,41 @@ class TemplateUpdateTests(TestCase):
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")
     @mock.patch.object(fleet, "run")
+    def test_migrates_normalization_collisions_to_distinct_stable_identities(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "components:\n"
+                "  - type: python\n"
+                "    path: api/v1\n"
+                "  - type: python\n"
+                "    path: api-v1\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        migrated = yaml.safe_load(command[data_index + 1].removeprefix("components="))
+        self.assertEqual(migrated[0]["id"], "api-v1-python")
+        self.assertRegex(migrated[1]["id"], r"^api-v1-python-[0-9a-f]{8}$")
+        self.assertNotEqual(migrated[0]["id"], migrated[1]["id"])
+        self.assertEqual([component["path"] for component in migrated], ["api/v1", "api-v1"])
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
     def test_canonicalizes_source_after_clean_copier_update(
         self,
         run_mock: mock.Mock,

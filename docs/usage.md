@@ -131,7 +131,7 @@ components:
     name: Worker Java
 ```
 
-The fleet updater refuses a legacy answer file without those identity fields rather than allowing Copier defaults to replace the component topology. Add the fields in the consumer, then rerun the updater so the generated pull request contains the named jobs.
+The fleet updater preserves legacy `type` and `path` values and passes stable identities to Copier as migration data, so the cloned checkout remains pristine and the generated pull request contains the named jobs. Review that pull request and keep the resulting identity fields in the consumer answers file; do not rely on the old type/index job IDs.
 
 ## Copier Allure reporting
 

@@ -572,13 +572,18 @@ class TemplateUpdateTests(TestCase):
                 template_ref="v2.21.5",
                 env={},
             )
-            migrated = yaml.safe_load(answers.read_text(encoding="utf-8"))
+            # The migration payload is passed to Copier without dirtying the
+            # checkout; Copier writes the migrated answers after a successful
+            # update.  A mocked runner must therefore leave the source intact.
+            self.assertEqual(answers.read_text(encoding="utf-8"), original)
+            run_mock.assert_called_once()
+            command = run_mock.call_args.args[0]
+            self.assertIn("--vcs-ref", command)
+            data_index = command.index("--data")
             self.assertEqual(
-                migrated["components"],
+                yaml.safe_load(command[data_index + 1].removeprefix("components=")),
                 [{"type": "java", "path": "worker", "id": "worker-java", "name": "Worker Java"}],
             )
-            run_mock.assert_called_once()
-            self.assertIn("--vcs-ref", run_mock.call_args.args[0])
 
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")

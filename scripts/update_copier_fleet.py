@@ -1183,8 +1183,9 @@ def update_template(
 
     # This is a breaking schema migration.  Copier's --defaults mode answers
     # the changed component question with its new default, which would replace
-    # a legacy component's type/path.  Materialize identities in the answers
-    # file first, preserving the old topology in the reviewable fleet PR.
+    # a legacy component's type/path.  Pass migrated answers as --data instead
+    # of writing them before Copier starts: Copier requires a pristine
+    # destination, and the resulting answers file is written by Copier itself.
     try:
         answers = yaml.safe_load(original_answers_text)
     except yaml.YAMLError as exc:
@@ -1218,9 +1219,6 @@ def update_template(
             migrated_components.append(migrated)
         if migrated_components != components:
             answers["components"] = migrated_components
-            answers_path.write_text(
-                yaml.safe_dump(answers, sort_keys=False, allow_unicode=True), encoding="utf-8"
-            )
 
     command = [
         "copier",
@@ -1230,6 +1228,13 @@ def update_template(
         "--conflict=rej",
         "--skip-tasks",
     ]
+    if isinstance(components, list) and answers.get("components") != components:
+        command.extend(
+            [
+                "--data",
+                "components=" + json.dumps(answers["components"], separators=(",", ":")),
+            ]
+        )
     if template_ref:
         command.extend(["--vcs-ref", template_ref])
         if RELEASE_TAG_PATTERN.fullmatch(template_ref):
@@ -1390,6 +1395,7 @@ def ensure_pull_request(
         + "\n".join(f"- `{path}`" for path in changed)
         + "\n\n## Verification\n\n"
         "- `copier update --trust --defaults --conflict=rej --skip-tasks`\n"
+        "- Legacy components keep their `type`/`path`; the updater supplies stable `id`/`name` migration data.\n"
         "- `git diff --cached --check`\n\n"
         "Do not edit the automation branch directly; make project-specific changes after merging "
         "or adjust the Copier answers/template.\n"

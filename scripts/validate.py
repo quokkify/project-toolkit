@@ -2289,7 +2289,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             {
                 "project_name": "fixture-no-renovate",
                 "toolkit_version": "v1.0.0",
-                "components": [{"type": "node", "path": "."}],
+                "components": [{"type": "node", "path": ".", "id": "app-node", "name": "Application Node"}],
                 "docker": False,
                 "release_please": False,
                 "renovate": False,
@@ -2670,6 +2670,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         {
                             "type": "python",
                             "path": ".",
+                            "id": "app-python",
+                            "name": "Application Python",
                             "allure_results_path": invalid_path,
                         }
                     ],

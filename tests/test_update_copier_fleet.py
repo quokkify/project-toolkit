@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from contextlib import redirect_stdout
 from io import StringIO
+import unittest
 from unittest import TestCase, main, mock
 
 import yaml
@@ -548,6 +552,74 @@ class TemplateSourceTests(TestCase):
 
 
 class TemplateUpdateTests(TestCase):
+    @unittest.skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
+    def test_real_legacy_copier_migration_reaches_pull_request_dispatch(self) -> None:
+        """Exercise the actual old-template update, not only command construction."""
+        legacy_revision = "9e6e76253f9495305b315e2e22970cd0e926a584"
+        components = (
+            [{"type": "java", "path": "worker"},
+             {"type": "python", "path": "123-worker"},
+             {"type": "python", "path": "api/v1"},
+             {"type": "python", "path": "api-v1"}]
+            + [{"type": "python", "path": "api"} for _ in range(17)]
+        )
+        repository = fleet.Repository("quokkify/legacy-fixture", "main")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            data = root / "components.yml"
+            generated = root / "generated"
+            data.write_text(yaml.safe_dump({"components": components}), encoding="utf-8")
+            subprocess.run(
+                [
+                    "copier", "copy", "--trust", "--defaults", "--vcs-ref", legacy_revision,
+                    "--data-file", str(data),
+                    "https://github.com/quokkify/project-toolkit.git", str(source),
+                ], check=True, text=True, capture_output=True,
+            )
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "add", "--all"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                 "commit", "-qm", "legacy fixture"], cwd=source, check=True,
+            )
+            answers = (source / fleet.ANSWERS_FILE).read_text(encoding="utf-8")
+            current_revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+                text=True, capture_output=True,
+            ).stdout.strip()
+
+            def clone_fixture(_: fleet.Repository, destination: Path, *, env: dict[str, str]) -> None:
+                del env
+                shutil.copytree(source, destination)
+
+            with mock.patch.object(fleet, "fetch_answers", return_value=answers), \
+                 mock.patch.object(fleet, "clone_repository", side_effect=clone_fixture), \
+                 mock.patch.object(fleet, "push_automation_branch") as push_mock, \
+                 mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
+                result = fleet.process_repository(
+                    repository, expected_template="quokkify/project-toolkit",
+                    branch="automation/copier-template-update", dry_run=False,
+                    template_ref=current_revision, env=os.environ.copy(), workspace=generated,
+                )
+
+            self.assertEqual(result.status, "pull-request")
+            self.assertEqual(result.detail, "https://example.invalid/pr")
+            push_mock.assert_called_once()
+            pr_mock.assert_called_once()
+            updated = yaml.safe_load((generated / "quokkify--legacy-fixture" / fleet.ANSWERS_FILE).read_text())
+            migrated = updated["components"]
+            self.assertEqual([item["type"] for item in migrated], [item["type"] for item in components])
+            self.assertEqual([item["path"] for item in migrated], [item["path"] for item in components])
+            ids = [item["id"] for item in migrated]
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", item) for item in ids))
+            self.assertTrue(all(item["name"].strip() for item in migrated))
+            workflow = (generated / "quokkify--legacy-fixture" / ".github/workflows/validate.yml").read_text()
+            for item in migrated:
+                self.assertIn(f"{item['id']}:", workflow)
+                self.assertIn(item["name"], workflow)
+
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")
     @mock.patch.object(fleet, "run")

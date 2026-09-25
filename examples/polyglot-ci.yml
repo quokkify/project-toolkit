@@ -61,6 +61,7 @@ jobs:
     uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0
     with:
       java-version: "17"
+      gradle-console: rich
       working-directory: worker
   integration:
     needs: [changes, python, node, java]

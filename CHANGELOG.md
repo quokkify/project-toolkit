@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.22.0](https://github.com/quokkify/project-toolkit/compare/v2.21.6...v2.22.0) (2026-09-25)
+
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update quokkify/project-toolkit to v2.21.6 ([#277](https://github.com/quokkify/project-toolkit/pull/277)) ([a015a50](https://github.com/quokkify/project-toolkit/commit/a015a50e09c85f55fec6e8872a0583e5f77a192b)) <!-- project-toolkit:rich-release-notes pr=277 -->
+- update renovate to v44.106.0 ([#278](https://github.com/quokkify/project-toolkit/pull/278)) ([1390405](https://github.com/quokkify/project-toolkit/commit/1390405c6184381cffcfdd8da72a82276050098c)) <!-- project-toolkit:rich-release-notes pr=278 -->
+<!-- project-toolkit:rich-block:end -->
+
+### ✨ Features
+
+* require named Copier component jobs ([#283](https://github.com/quokkify/project-toolkit/issues/283)) ([285f9f4](https://github.com/quokkify/project-toolkit/commit/285f9f45b2e4fef8a0a82a5f703669b3deee218d))
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** isolate targeted update concurrency ([#281](https://github.com/quokkify/project-toolkit/issues/281)) ([9e6e762](https://github.com/quokkify/project-toolkit/commit/9e6e76253f9495305b315e2e22970cd0e926a584))
+
 ## [2.21.6](https://github.com/quokkify/project-toolkit/compare/v2.21.5...v2.21.6) (2026-09-21)
 
 <!-- project-toolkit:rich-block:start -->

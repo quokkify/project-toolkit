@@ -11,8 +11,7 @@ import tempfile
 from pathlib import Path
 from contextlib import redirect_stdout
 from io import StringIO
-import unittest
-from unittest import TestCase, main, mock
+from unittest import TestCase, main, mock, skipUnless
 
 import yaml
 
@@ -552,7 +551,7 @@ class TemplateSourceTests(TestCase):
 
 
 class TemplateUpdateTests(TestCase):
-    @unittest.skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
+    @skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
     def test_real_legacy_copier_migration_reaches_pull_request_dispatch(self) -> None:
         """Exercise the actual old-template update, not only command construction."""
         legacy_revision = "9e6e76253f9495305b315e2e22970cd0e926a584"

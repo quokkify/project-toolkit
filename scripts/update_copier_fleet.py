@@ -1181,27 +1181,45 @@ def update_template(
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
 
-    # This is a breaking schema migration.  Do not let Copier's new-question
-    # defaults replace a legacy component's type/path.  Consumers must add
-    # stable identities explicitly before a fleet update can proceed.
+    # This is a breaking schema migration.  Copier's --defaults mode answers
+    # the changed component question with its new default, which would replace
+    # a legacy component's type/path.  Materialize identities in the answers
+    # file first, preserving the old topology in the reviewable fleet PR.
     try:
         answers = yaml.safe_load(original_answers_text)
     except yaml.YAMLError as exc:
         raise FleetUpdateError(f"{ANSWERS_FILE} is not valid YAML: {exc}") from exc
     components = answers.get("components") if isinstance(answers, dict) else None
     if isinstance(components, list):
-        missing_identity = [
-            str(component.get("path", index))
-            for index, component in enumerate(components)
-            if isinstance(component, dict)
-            and ("id" not in component or "name" not in component)
-        ]
-        if missing_identity:
-            paths = ", ".join(missing_identity)
-            raise FleetUpdateError(
-                "breaking component migration requires explicit id and name for "
-                f"each existing component (missing identity for: {paths}); "
-                "type and path were preserved and no update was applied"
+        migrated_components: list[dict[str, Any]] = []
+        generated_ids: set[str] = set()
+        for index, component in enumerate(components):
+            if not isinstance(component, dict):
+                raise FleetUpdateError(f"components[{index}] must be a mapping")
+            migrated = dict(component)
+            if "id" not in migrated or "name" not in migrated:
+                component_type = migrated.get("type")
+                component_path = migrated.get("path")
+                if not isinstance(component_type, str) or not isinstance(component_path, str):
+                    raise FleetUpdateError(
+                        f"cannot migrate components[{index}]: type and path are required"
+                    )
+                path_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", component_path.strip("./")).strip("-")
+                path_slug = path_slug or "app"
+                candidate_id = f"{path_slug}-{component_type}"
+                if candidate_id in generated_ids:
+                    raise FleetUpdateError(
+                        f"cannot migrate components[{index}]: ambiguous stable identity {candidate_id!r}; "
+                        "add explicit id and name"
+                    )
+                generated_ids.add(candidate_id)
+                migrated.setdefault("id", candidate_id)
+                migrated.setdefault("name", f"{path_slug.replace('-', ' ').title()} {component_type.title()}")
+            migrated_components.append(migrated)
+        if migrated_components != components:
+            answers["components"] = migrated_components
+            answers_path.write_text(
+                yaml.safe_dump(answers, sort_keys=False, allow_unicode=True), encoding="utf-8"
             )
 
     command = [

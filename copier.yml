@@ -40,11 +40,10 @@ toolkit_version:
 components:
   type: yaml
   help: "Required component mappings such as [{type: python, path: backend, id: backend-python, name: Backend Python, allure_results_path: allure-results}]. id is the stable GitHub Actions job identifier and name is its display name. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
-  default:
-    - type: python
-      path: .
-      id: app-python
-      name: Application Python
+  # On update, retain the prior value long enough for its required identity
+  # validation to fail closed; never replace a legacy topology with defaults.
+  default: >-
+    {% if _commit is defined and components is defined %}{{ components }}{% else %}[{type: python, path: ., id: app-python, name: Application Python}]{% endif %}
   validator: >-
     {% for component in components %}
     {% if component is not mapping %}Every component must be a mapping with type, path, id, and name.{% else %}

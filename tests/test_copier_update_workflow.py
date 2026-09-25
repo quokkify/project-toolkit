@@ -38,7 +38,15 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
         run_git("config", "user.name", "fixture", cwd=checkout)
         run_git("config", "user.email", "fixture@example.com", cwd=checkout)
         (checkout / "README.md").write_text("fixture\n", encoding="utf-8")
-        run_git("add", "README.md", cwd=checkout)
+        (checkout / ".copier-answers.yml").write_text(
+            "components:\n"
+            "  - type: python\n"
+            "    path: .\n"
+            "    id: app-python\n"
+            "    name: Application Python\n",
+            encoding="utf-8",
+        )
+        run_git("add", "README.md", ".copier-answers.yml", cwd=checkout)
         run_git("commit", "-m", "initial", cwd=checkout)
         run_git("push", "origin", "HEAD:refs/heads/main", cwd=checkout)
         return checkout, bare

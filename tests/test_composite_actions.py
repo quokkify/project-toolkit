@@ -1435,7 +1435,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], cwd=destination, check=True)
             java_validate = ""
             java_data = root / "java.yml"
-            java_data.write_text("components:\n  - type: java\n    path: .\n")
+            java_data.write_text("components:\n  - type: java\n    path: .\n    id: app-java\n    name: Application Java\n")
             empty_data = root / "empty.yml"
             empty_data.write_text("components: []\n")
             java_workflow = ""

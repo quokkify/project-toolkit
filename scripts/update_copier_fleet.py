@@ -1208,6 +1208,18 @@ def update_template(
                 path_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", component_path.strip("./")).strip("-")
                 path_slug = path_slug or "app"
                 candidate_id = f"{path_slug}-{component_type}"
+                # Legacy paths may begin with a digit, while the breaking
+                # schema deliberately uses the GitHub Actions identifier
+                # grammar.  Prefix rather than dropping path information so
+                # the generated identity remains stable and recognizable.
+                if not re.match(r"^[A-Za-z_]", candidate_id):
+                    candidate_id = f"component-{candidate_id}"
+                if candidate_id in {
+                    "template-contract", "docker", "release", "update", "scan",
+                    "analyze", "resolve", "generate", "comment", "pages",
+                    "changes", "integration",
+                }:
+                    candidate_id = f"component-{candidate_id}"
                 if candidate_id in generated_ids:
                     raise FleetUpdateError(
                         f"cannot migrate components[{index}]: ambiguous stable identity {candidate_id!r}; "

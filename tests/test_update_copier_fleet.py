@@ -588,6 +588,41 @@ class TemplateUpdateTests(TestCase):
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")
     @mock.patch.object(fleet, "run")
+    def test_migrates_numeric_leading_legacy_path_to_valid_identity(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "components:\n  - type: python\n    path: 123-worker\n"
+                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        self.assertEqual(
+            yaml.safe_load(command[data_index + 1].removeprefix("components=")),
+            [{
+                "type": "python",
+                "path": "123-worker",
+                "id": "component-123-worker-python",
+                "name": "123 Worker Python",
+            }],
+        )
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
     def test_canonicalizes_source_after_clean_copier_update(
         self,
         run_mock: mock.Mock,

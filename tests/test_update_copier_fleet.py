@@ -584,10 +584,24 @@ class TemplateUpdateTests(TestCase):
                  "commit", "-qm", "legacy fixture"], cwd=source, check=True,
             )
             answers = (source / fleet.ANSWERS_FILE).read_text(encoding="utf-8")
+            # Keep the destination's canonical Copier source identifier so the
+            # production audit is exercised, but route that source to a local
+            # clone containing this exact candidate revision.  The public remote
+            # cannot be expected to contain an unpushed merge commit.
+            candidate_source = root / "candidate-source"
+            subprocess.run(["git", "clone", "-q", str(ROOT), str(candidate_source)], check=True)
             current_revision = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+                ["git", "rev-parse", "HEAD"], cwd=candidate_source, check=True,
                 text=True, capture_output=True,
             ).stdout.strip()
+            integration_env = os.environ.copy()
+            integration_env.update(
+                {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": f"url.file://{candidate_source}/.insteadOf",
+                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
+                }
+            )
 
             def clone_fixture(_: fleet.Repository, destination: Path, *, env: dict[str, str]) -> None:
                 del env
@@ -600,7 +614,7 @@ class TemplateUpdateTests(TestCase):
                 result = fleet.process_repository(
                     repository, expected_template="quokkify/project-toolkit",
                     branch="automation/copier-template-update", dry_run=False,
-                    template_ref=current_revision, env=os.environ.copy(), workspace=generated,
+                    template_ref=current_revision, env=integration_env, workspace=generated,
                 )
 
             self.assertEqual(result.status, "pull-request")

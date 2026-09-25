@@ -1919,9 +1919,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             else:
                 for artifact_name in artifact_names:
                     check(
-                        artifact_name in validate_text and artifact_name in report_text,
-                        f"{scenario}: missing exact artifact contract for {artifact_name}",
+                        artifact_name in validate_text,
+                        f"{scenario}: missing source workflow artifact for {artifact_name}",
                     )
+                check(
+                    "const sourceArtifactContractVersion = 1" in report_text
+                    and "const componentArtifactPattern = /^allure-results-[A-Za-z_][A-Za-z0-9_-]*$/" in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text,
+                    f"{scenario}: migration-safe source artifact contract is missing",
+                )
                 check(
                     'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
                     and 'materialize-root: ${{ steps.resolve.outputs.materialize-root }}' in report_text,

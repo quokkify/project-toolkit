@@ -109,6 +109,11 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             remote_commit = run_git("--git-dir", str(bare), "log", "-1", "--format=%s", "automation/copier-template-update", cwd=temporary)
             self.assertEqual(remote_commit, "chore(template): update shared project template")
 
+    def test_yaml_dependency_is_in_test_setup_not_generated_update_workflow(self) -> None:
+        self.assertNotIn("pip install --disable-pip-version-check --quiet PyYAML==6.0.3", self.script)
+        validation_workflow = (ROOT / ".github/workflows/validate-toolkit.yml").read_text(encoding="utf-8")
+        self.assertIn("python -m pip install PyYAML==6.0.3 copier==9.18.2", validation_workflow)
+
     def test_unreleased_or_mismatched_release_ref_stops_before_copier(self) -> None:
         cases = [
             ("v2.21.5", {"tagName": "v2.21.4", "publishedAt": "2026-09-01T00:00:00Z", "isDraft": False, "isPrerelease": False}),

@@ -1635,9 +1635,16 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             component_exact = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["allure-results-app-java"])
             self.assertEqual(component_exact["outputs"].get("ready"), "true")
             self.assertEqual(component_exact["failures"], [])
-            component_wrong = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["external-allure-one"])
-            self.assertEqual(component_wrong["outputs"], {})
-            self.assertIn("Allure artifact contract mismatch", component_wrong["failures"][0])
+            migrated_component = self._run_resolver(
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"]
+            )
+            self.assertEqual(migrated_component["outputs"].get("ready"), "true")
+            self.assertEqual(migrated_component["failures"], [])
+            invalid_component = self._run_resolver(
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-java.1"]
+            )
+            self.assertEqual(invalid_component["outputs"], {})
+            self.assertIn("Allure artifact contract v1 mismatch", invalid_component["failures"][0])
             inactive_external_trigger = self._run_resolver(
                 java_workflow,
                 ".github/workflows/test.yml",

@@ -2542,7 +2542,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 
     derived_languages_data = tmp_path / "codeql-derived.yml"
     derived_languages_data.write_text(
-        yaml.safe_dump({"components": [{"type": "java", "path": "."}], "codeql": True})
+        yaml.safe_dump({"components": [{"type": "java", "path": ".", "id": "app-java", "name": "Application Java"}], "codeql": True})
     )
     derived_languages_dest = tmp_path / "codeql-derived"
     run(

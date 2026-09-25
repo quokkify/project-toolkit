@@ -43,7 +43,7 @@ jobs:
           script: |
             const run = context.payload.workflow_run;
             const expectedArtifacts = [
-            {% for component in components %}  "allure-results-{{ component.type }}-{{ loop.index }}",
+            {% for component in components %}  "allure-results-{{ component.id }}",
             {% endfor %}];
             const artifactPrefix = {{ allure_external_artifact_prefix | tojson }};
             const minimumArtifacts = {{ allure_external_artifact_min_count }};

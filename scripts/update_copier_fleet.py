@@ -1233,16 +1233,21 @@ def update_template(
                 # derives from the component's complete legacy identity.
                 if candidate_id in generated_ids:
                     identity_key = f"{component_path}\0{component_type}"
-                    digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()[:8]
-                    candidate_id = f"{candidate_id}-{digest}"
-                    digest_length = 12
-                    while candidate_id in generated_ids:
-                        digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
-                        candidate_id = (
-                            f"{candidate_id.rsplit('-', 1)[0]}-"
-                            f"{digest[:digest_length]}"
+                    digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
+                    # A legacy template allowed repeated identical components.
+                    # Bound the disambiguation by the input size: this keeps
+                    # migration deterministic without an unbounded loop when
+                    # every digest prefix is already occupied.
+                    digest_candidate = f"{candidate_id}-{digest[:8]}"
+                    candidate_id = digest_candidate
+                    suffix = 2
+                    while candidate_id in generated_ids and suffix <= len(components) + 1:
+                        candidate_id = f"{digest_candidate}-{suffix}"
+                        suffix += 1
+                    if candidate_id in generated_ids:
+                        raise FleetUpdateError(
+                            f"cannot migrate components[{index}]: unable to allocate a unique stable identity"
                         )
-                        digest_length += 4
                 generated_ids.add(candidate_id)
                 migrated.setdefault("id", candidate_id)
                 migrated.setdefault("name", f"{path_slug.replace('-', ' ').title()} {component_type.title()}")

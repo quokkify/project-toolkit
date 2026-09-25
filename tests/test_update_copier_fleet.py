@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -654,6 +655,43 @@ class TemplateUpdateTests(TestCase):
         self.assertRegex(migrated[1]["id"], r"^api-v1-python-[0-9a-f]{8}$")
         self.assertNotEqual(migrated[0]["id"], migrated[1]["id"])
         self.assertEqual([component["path"] for component in migrated], ["api/v1", "api-v1"])
+
+    @mock.patch.object(fleet, "changed_paths", return_value=[])
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_migrates_repeated_legacy_components_with_bounded_unique_ids(
+        self,
+        run_mock: mock.Mock,
+        _: mock.Mock,
+        __: mock.Mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            components = [{"type": "python", "path": "api"} for _ in range(17)]
+            (repository / fleet.ANSWERS_FILE).write_text(
+                yaml.safe_dump(
+                    {
+                        "components": components,
+                        "_src_path": "https://github.com/quokkify/project-toolkit.git",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fleet.update_template(
+                repository,
+                template_source="quokkify/project-toolkit",
+                template_ref="v2.21.5",
+                env={},
+            )
+
+        command = run_mock.call_args.args[0]
+        data_index = command.index("--data")
+        migrated = yaml.safe_load(command[data_index + 1].removeprefix("components="))
+        ids = [component["id"] for component in migrated]
+        self.assertEqual(len(ids), 17)
+        self.assertEqual(len(set(ids)), 17)
+        self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", value) for value in ids))
+        self.assertEqual([component["path"] for component in migrated], ["api"] * 17)
 
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")

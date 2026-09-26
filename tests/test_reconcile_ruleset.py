@@ -8,9 +8,9 @@ import sys
 from email.message import Message
 from collections import deque
 from pathlib import Path
+from unittest import TestCase, main
 from unittest.mock import patch
 from typing import Any
-import unittest
 
 from jsonschema import Draft202012Validator
 
@@ -39,7 +39,7 @@ class FakeClient:
         return response
 
 
-class RulesetReconcilerTests(unittest.TestCase):
+class RulesetReconcilerTests(TestCase):
     @staticmethod
     def _validate_ruleset_request(payload: object, schema: dict[str, Any], method: str) -> None:
         """Validate a complete captured body against the extracted API schema."""
@@ -305,4 +305,4 @@ class RulesetReconcilerTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

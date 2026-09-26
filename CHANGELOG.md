@@ -2,6 +2,12 @@
 
 ## [2.23.0](https://github.com/quokkify/project-toolkit/compare/v2.22.0...v2.23.0) (2026-09-26)
 
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update renovate to v44.107.0 ([#285](https://github.com/quokkify/project-toolkit/pull/285)) ([d97449c](https://github.com/quokkify/project-toolkit/commit/d97449cd05f58fc014e2f4e8328ac1fc8d266d60)) <!-- project-toolkit:rich-release-notes pr=285 -->
+- update quokkify/project-toolkit to v2.22.0 ([#286](https://github.com/quokkify/project-toolkit/pull/286)) ([152728a](https://github.com/quokkify/project-toolkit/commit/152728a19f202daf14dea2027b3bb7536bcc7dde)) <!-- project-toolkit:rich-release-notes pr=286 -->
+- update renovate to v44.108.2 ([#287](https://github.com/quokkify/project-toolkit/pull/287)) ([10fa8ba](https://github.com/quokkify/project-toolkit/commit/10fa8ba1be9bed7a61cd8dd573965d7c49e6a549)) <!-- project-toolkit:rich-release-notes pr=287 -->
+<!-- project-toolkit:rich-block:end -->
 
 ### ✨ Features
 

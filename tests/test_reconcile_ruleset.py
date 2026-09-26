@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
 import sys
+from email.message import Message
 from collections import deque
 from pathlib import Path
-from typing import Any, Mapping
+from unittest.mock import patch
+from typing import Any
 import unittest
+
+from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("reconcile_ruleset", ROOT / "scripts/reconcile_ruleset.py")
@@ -35,62 +41,38 @@ class FakeClient:
 
 class RulesetReconcilerTests(unittest.TestCase):
     @staticmethod
-    def _validate_ruleset_request(payload: object, schema: Mapping[str, Any]) -> None:
-        """Validate the complete POST/PUT body against the pinned API contract."""
-        if not isinstance(payload, dict):
-            raise AssertionError("request body must be an object")
-        for field in schema["required"]:
-            if field not in payload:
-                raise AssertionError(f"missing request field: {field}")
-        if payload.get("target") != "branch" or payload.get("enforcement") not in schema["enforcement"]:
-            raise AssertionError("invalid target or enforcement")
-        conditions = payload.get("conditions")
-        if not isinstance(conditions, dict) or not isinstance(conditions.get("ref_name"), dict):
-            raise AssertionError("invalid conditions")
-        rules = payload.get("rules")
-        if not isinstance(rules, list):
-            raise AssertionError("rules must be a list")
-        for rule in rules:
-            if not isinstance(rule, dict) or rule.get("type") not in schema["allowed_rule_types"]:
-                raise AssertionError("unsupported rule type")
-            rule_type = rule["type"]
-            params = rule.get("parameters", {})
-            if rule_type == "pull_request":
-                required = schema["pull_request_required_parameters"]
-                if not isinstance(params, dict) or any(key not in params for key in required):
-                    raise AssertionError("missing pull_request parameter")
-            elif rule_type == "required_status_checks":
-                statuses = params.get("required_status_checks") if isinstance(params, dict) else None
-                if not isinstance(statuses, list):
-                    raise AssertionError("invalid required status checks")
-                for status in statuses:
-                    if not isinstance(status, dict) or not isinstance(status.get("context"), str):
-                        raise AssertionError("invalid status check")
-                    if "integration_id" in status and (
-                        not isinstance(status["integration_id"], int) or isinstance(status["integration_id"], bool)
-                    ):
-                        raise AssertionError("integration_id must be an integer")
-            elif rule_type == "code_scanning":
-                tools = params.get("code_scanning_tools") if isinstance(params, dict) else None
-                if not isinstance(tools, list):
-                    raise AssertionError("invalid code scanning tools")
-                for tool in tools:
-                    if (
-                        not isinstance(tool, dict)
-                        or tool.get("alerts_threshold") not in schema["code_scanning_alert_threshold"]
-                        or tool.get("security_alerts_threshold") not in schema["code_scanning_security_alert_threshold"]
-                    ):
-                        raise AssertionError("invalid code scanning threshold")
+    def _validate_ruleset_request(payload: object, schema: dict[str, Any], method: str) -> None:
+        """Validate a complete captured body against the extracted API schema."""
+        root = dict(schema[method.lower()])
+        root["components"] = schema["components"]
+        errors = sorted(Draft202012Validator(root).iter_errors(payload), key=lambda error: list(error.path))
+        if errors:
+            raise AssertionError("; ".join(error.message for error in errors))
 
     def test_complete_post_and_put_bodies_match_pinned_github_schema(self) -> None:
         schema_path = ROOT / "tests/fixtures/github_ruleset_request_schema_2022-11-28.json"
         schema = json.loads(schema_path.read_text())
-        payload = module.build_desired(
+        client = self._client()
+        desired = module.build_desired(
             module.managed_name("acme", "widgets"), "main", ["gitleaks"], "evaluate", "errors"
         )
-        for method in ("POST", "PUT"):
+        client.responses[("POST", "/repos/acme/widgets/rulesets")] = {"id": 7, **desired}
+        client.responses[("GET", "/repos/acme/widgets/rulesets/7")] = {"id": 7, **desired}
+        module.reconcile(client, "acme/widgets", "main", ["gitleaks"], "abc", "evaluate", False, "errors")
+        existing = [{"id": 7, "name": desired["name"]}]
+        update_client = self._client(existing)
+        detail = {"id": 7, **desired, "enforcement": "active"}
+        update_client.responses[("GET", "/repos/acme/widgets/rulesets/7")] = deque([detail])
+        update_client.responses[("PUT", "/repos/acme/widgets/rulesets/7")] = {"id": 7, **desired}
+        update_client.responses[("GET", "/repos/acme/widgets/rulesets/7")] = deque([detail, {"id": 7, **desired}])
+        module.reconcile(update_client, "acme/widgets", "main", ["gitleaks"], "abc", "evaluate", False, "errors")
+        captured = {
+            "POST": next(call[2] for call in client.calls if call[0] == "POST"),
+            "PUT": next(call[2] for call in update_client.calls if call[0] == "PUT"),
+        }
+        for method, body in captured.items():
             with self.subTest(method=method):
-                self._validate_ruleset_request(payload, schema)
+                self._validate_ruleset_request(body, schema, method)
 
     def test_pinned_github_schema_rejects_invalid_complete_bodies(self) -> None:
         schema = json.loads((ROOT / "tests/fixtures/github_ruleset_request_schema_2022-11-28.json").read_text())
@@ -101,7 +83,11 @@ class RulesetReconcilerTests(unittest.TestCase):
         unsupported = json.loads(json.dumps(payload))
         unsupported["rules"][0]["type"] = "not_a_github_rule"
         invalid.append(("unsupported rule type", unsupported))
-        for parameter in schema["pull_request_required_parameters"]:
+        for parameter in (
+            "required_approving_review_count", "dismiss_stale_reviews_on_push",
+            "require_code_owner_review", "require_last_push_approval",
+            "required_review_thread_resolution",
+        ):
             missing = json.loads(json.dumps(payload))
             del missing["rules"][2]["parameters"][parameter]
             invalid.append((f"missing {parameter}", missing))
@@ -113,10 +99,21 @@ class RulesetReconcilerTests(unittest.TestCase):
             bad_integration = json.loads(json.dumps(payload))
             bad_integration["rules"][3]["parameters"]["required_status_checks"][0]["integration_id"] = integration_id
             invalid.append((f"invalid integration_id {integration_id!r}", bad_integration))
+        for path, value in (
+            (("rules", 2, "parameters", "required_approving_review_count"), "1"),
+            (("rules", 3, "parameters", "strict_required_status_checks_policy"), "true"),
+            (("conditions", "ref_name", "include"), "refs/heads/main"),
+        ):
+            bad_type = json.loads(json.dumps(payload))
+            target = bad_type
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            invalid.append((f"invalid type at {path}", bad_type))
         for label, candidate in invalid:
             with self.subTest(case=label):
                 with self.assertRaises(AssertionError):
-                    self._validate_ruleset_request(candidate, schema)
+                    self._validate_ruleset_request(candidate, schema, "POST")
 
     def _client(self, existing: object = [], *, contexts: list[str] | None = None) -> FakeClient:
         return FakeClient({
@@ -217,6 +214,42 @@ class RulesetReconcilerTests(unittest.TestCase):
         help_text = module.parser().format_help()
         self.assertIn("Explicitly promote", help_text)
         self.assertNotIn("never changes GitHub", help_text)
+
+    def test_active_mode_requires_explicit_flag_and_missing_token_returns_two(self) -> None:
+        with self.assertRaises(SystemExit) as active:
+            module.main(["--repo", "acme/widgets", "--check", "gitleaks", "--mode", "active"])
+        self.assertEqual(active.exception.code, 2)
+        with patch.dict(os.environ, {}, clear=True), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = module.main(["--repo", "acme/widgets", "--check", "gitleaks"])
+        self.assertEqual(code, 2)
+        self.assertIn("ERROR: set GH_TOKEN or GITHUB_TOKEN", stderr.getvalue())
+
+    def test_malformed_unmanaged_rules_fail_before_mutation(self) -> None:
+        existing = [{"id": 7, "name": module.managed_name("acme", "widgets")}]
+        client = self._client(existing)
+        detail = {
+            "id": 7,
+            **module.build_desired(module.managed_name("acme", "widgets"), "main", ["gitleaks"], "evaluate", None),
+            "rules": [{"type": "deletion"}, {"type": "merge_queue", "parameters": "broken"}],
+        }
+        client.responses[("GET", "/repos/acme/widgets/rulesets/7")] = detail
+        with self.assertRaisesRegex(module.ReconcileError, "malformed"):
+            module.reconcile(client, "acme/widgets", "main", ["gitleaks"], "abc", "evaluate", False)
+        self.assertNotIn("POST", {call[0] for call in client.calls})
+        self.assertNotIn("PUT", {call[0] for call in client.calls})
+
+    def test_http_error_body_is_safely_truncated(self) -> None:
+        from urllib.error import HTTPError
+
+        body = io.BytesIO(b"x" * 3000)
+        error = HTTPError("https://api.github.com", 422, "invalid", Message(), body)
+        with patch.object(module, "urlopen", side_effect=error):
+            with self.assertRaises(module.ReconcileError) as caught:
+                module.GitHubClient("never-display-this-token").request("GET", "/repos/acme/widgets")
+        message = str(caught.exception)
+        self.assertIn("HTTP 422", message)
+        self.assertLessEqual(len(message.split(": ", 1)[-1]), 2000)
+        self.assertNotIn("never-display-this-token", message)
 
     def test_readback_mismatch_fails_closed(self) -> None:
         client = self._client()

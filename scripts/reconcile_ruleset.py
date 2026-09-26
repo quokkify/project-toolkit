@@ -43,7 +43,11 @@ class GitHubClient:
         try:
             with urlopen(request, timeout=30) as response:
                 raw = response.read()
-        except (HTTPError, URLError, TimeoutError) as exc:
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:2000]
+            suffix = f": {detail}" if detail else ""
+            raise ReconcileError(f"GitHub API {method} {path} failed with HTTP {exc.code}{suffix}") from exc
+        except (URLError, TimeoutError) as exc:
             raise ReconcileError(f"GitHub API {method} {path} failed: {exc}") from exc
         if not raw:
             return None
@@ -66,10 +70,12 @@ def _require_list(value: Any, label: str) -> list[Any]:
 
 
 def managed_name(owner: str, repo: str) -> str:
+    """Return the deterministic identity used to find this repository's managed ruleset."""
     return f"project-toolkit/security/{owner}/{repo}"
 
 
 def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_threshold: str | None) -> dict[str, Any]:
+    """Build the complete desired ruleset request without performing I/O."""
     if not name or not branch or not checks or any(not item.strip() for item in checks):
         raise ReconcileError("ruleset name, branch, and at least one non-empty check are required")
     rules: list[dict[str, Any]] = [
@@ -120,6 +126,7 @@ def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_t
 
 
 def _normalize(value: Any) -> Any:
+    """Normalize API values for order-independent exact policy comparison."""
     if isinstance(value, Mapping):
         return {key: _normalize(value[key]) for key in sorted(value) if key not in {"id", "node_id", "created_at", "updated_at", "etag"}}
     if isinstance(value, list):
@@ -182,6 +189,7 @@ def _policy_view(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _rule_types(rules: list[Any]) -> set[str]:
+    """Validate rules and return their declared types."""
     types: set[str] = set()
     for rule in rules:
         mapping = _require_mapping(rule, "ruleset rule")
@@ -193,6 +201,7 @@ def _rule_types(rules: list[Any]) -> set[str]:
 
 
 def _find_existing(rulesets: list[Any], name: str) -> Mapping[str, Any] | None:
+    """Find the unique matching managed ruleset, rejecting duplicates or malformed entries."""
     matches = []
     for item in rulesets:
         mapping = _require_mapping(item, "ruleset")
@@ -204,6 +213,7 @@ def _find_existing(rulesets: list[Any], name: str) -> Mapping[str, Any] | None:
 
 
 def _paged_check_runs(client: GitHubClient, repo: str, revision: str) -> list[Any]:
+    """Fetch all check-run pages and fail closed when pagination is incomplete."""
     result: list[Any] = []
     page = 1
     while True:
@@ -227,6 +237,7 @@ def _paged_check_runs(client: GitHubClient, repo: str, revision: str) -> list[An
 
 
 def _paged_statuses(client: GitHubClient, repo: str, revision: str) -> list[Any]:
+    """Fetch all commit-status pages."""
     result: list[Any] = []
     page = 1
     while True:
@@ -240,6 +251,7 @@ def _paged_statuses(client: GitHubClient, repo: str, revision: str) -> list[Any]
 
 
 def check_contexts(client: GitHubClient, repo: str, revision: str) -> set[str]:
+    """Collect exact published check names for a commit revision."""
     runs = _paged_check_runs(client, repo, revision)
     contexts: set[str] = set()
     for run in runs:
@@ -271,6 +283,7 @@ def list_rulesets(client: GitHubClient, repo: str) -> list[Any]:
 
 
 def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], revision: str | None, mode: str, dry_run: bool, codeql_threshold: str | None = None) -> dict[str, Any]:
+    """Evaluate or safely reconcile the managed ruleset and verify its readback."""
     owner, _, repository = repo.partition("/")
     if not owner or not repository or repo.count("/") != 1:
         raise ReconcileError("--repo must be OWNER/REPOSITORY")
@@ -295,7 +308,17 @@ def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], r
         desired_types = _rule_types(desired["rules"])
         # Preserve policy owned by an operator inside the managed ruleset, while
         # replacing only the rule types controlled by this command.
-        desired["rules"] = desired["rules"] + [rule for rule in existing_rules if isinstance(rule, Mapping) and rule.get("type") not in desired_types]
+        unmanaged: list[Mapping[str, Any]] = []
+        for raw_rule in existing_rules:
+            rule = _require_mapping(raw_rule, "managed ruleset rule")
+            rule_type = rule.get("type")
+            if not isinstance(rule_type, str) or not rule_type.strip():
+                raise ReconcileError("GitHub API returned malformed managed ruleset rule; refusing mutation")
+            if rule_type not in desired_types:
+                if "parameters" in rule and not isinstance(rule["parameters"], Mapping):
+                    raise ReconcileError("GitHub API returned malformed unmanaged rule parameters; refusing mutation")
+                unmanaged.append(rule)
+        desired["rules"] = desired["rules"] + unmanaged
     result: dict[str, Any] = {"action": action, "mode": mode, "dry_run": dry_run, "name": name, "desired": desired}
     if existing is not None and _policy_view(existing) == _policy_view(desired):
         result["action"] = "noop"
@@ -328,6 +351,7 @@ def reconcile(client: GitHubClient, repo: str, branch: str, checks: list[str], r
 
 
 def parser() -> argparse.ArgumentParser:
+    """Create the command-line interface for ruleset reconciliation."""
     command = argparse.ArgumentParser(description=__doc__)
     command.add_argument("--repo", required=True, help="GitHub repository OWNER/REPOSITORY")
     command.add_argument("--branch", default="main")
@@ -341,12 +365,15 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the CLI, translating safe operational errors to exit status 2."""
     args = parser().parse_args(argv)
+    if args.mode == "active" and not args.active:
+        parser().error("--mode active requires the explicit --active flag")
     mode = "active" if args.active else args.mode
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise ReconcileError("set GH_TOKEN or GITHUB_TOKEN; credentials are never accepted as CLI arguments")
     try:
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if not token:
+            raise ReconcileError("set GH_TOKEN or GITHUB_TOKEN; credentials are never accepted as CLI arguments")
         output = reconcile(GitHubClient(token), args.repo, args.branch, args.checks, args.revision, mode, args.dry_run, args.codeql_alert_threshold)
     except ReconcileError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

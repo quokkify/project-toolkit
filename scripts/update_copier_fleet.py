@@ -1270,6 +1270,8 @@ def update_template(
                 "components=" + json.dumps(answers["components"], separators=(",", ":")),
             ]
         )
+    if "gitleaks" not in answers:
+        command.extend(["--data", "gitleaks=true"])
     if template_ref:
         command.extend(["--vcs-ref", template_ref])
         if RELEASE_TAG_PATTERN.fullmatch(template_ref):

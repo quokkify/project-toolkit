@@ -554,7 +554,7 @@ class TemplateUpdateTests(TestCase):
     @skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
     def test_real_legacy_copier_migration_reaches_pull_request_dispatch(self) -> None:
         """Exercise the actual old-template update, not only command construction."""
-        legacy_revision = "9e6e76253f9495305b315e2e22970cd0e926a584"
+        legacy_revision = "a8217fa983347a3dd10133ec51117f873485b138"
         components = (
             [{"type": "java", "path": "worker"},
              {"type": "python", "path": "123-worker"},
@@ -569,12 +569,30 @@ class TemplateUpdateTests(TestCase):
             data = root / "components.yml"
             generated = root / "generated"
             data.write_text(yaml.safe_dump({"components": components}), encoding="utf-8")
+            legacy_template = root / "legacy-template"
+            subprocess.run(["git", "clone", "-q", str(ROOT), str(legacy_template)], check=True)
+            subprocess.run(
+                ["git", "checkout", "--quiet", "--detach", legacy_revision],
+                cwd=legacy_template,
+                check=True,
+            )
+            legacy_env = os.environ.copy()
+            cache_home = root / "home"
+            cache_home.mkdir()
+            legacy_env.update(
+                {
+                    "HOME": str(cache_home),
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": f"url.file://{legacy_template}/.insteadOf",
+                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
+                }
+            )
             subprocess.run(
                 [
                     "copier", "copy", "--trust", "--defaults", "--vcs-ref", legacy_revision,
                     "--data-file", str(data),
                     "https://github.com/quokkify/project-toolkit.git", str(source),
-                ], check=True, text=True, capture_output=True,
+                ], check=True, text=True, capture_output=True, env=legacy_env,
             )
             subprocess.run(["git", "init", "-q"], cwd=source, check=True)
             subprocess.run(["git", "add", "--all"], cwd=source, check=True)
@@ -594,8 +612,11 @@ class TemplateUpdateTests(TestCase):
                 text=True, capture_output=True,
             ).stdout.strip()
             integration_env = os.environ.copy()
+            update_home = root / "update-home"
+            update_home.mkdir()
             integration_env.update(
                 {
+                    "HOME": str(update_home),
                     "GIT_CONFIG_COUNT": "1",
                     "GIT_CONFIG_KEY_0": f"url.file://{candidate_source}/.insteadOf",
                     "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
@@ -665,6 +686,7 @@ class TemplateUpdateTests(TestCase):
             run_mock.assert_called_once()
             command = run_mock.call_args.args[0]
             self.assertIn("--vcs-ref", command)
+            self.assertIn("gitleaks=true", command)
             data_index = command.index("--data")
             self.assertEqual(
                 yaml.safe_load(command[data_index + 1].removeprefix("components=")),

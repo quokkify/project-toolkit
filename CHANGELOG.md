@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.23.0](https://github.com/quokkify/project-toolkit/compare/v2.22.0...v2.23.0) (2026-09-26)
+
+
+### ✨ Features
+
+* **security:** add templates and ruleset reconciler ([#280](https://github.com/quokkify/project-toolkit/issues/280)) ([5345d7e](https://github.com/quokkify/project-toolkit/commit/5345d7ed55fa08f4089ae37f40c03e4a9f545a3f))
+
 ## [2.22.0](https://github.com/quokkify/project-toolkit/compare/v2.21.6...v2.22.0) (2026-09-25)
 
 <!-- project-toolkit:rich-block:start -->

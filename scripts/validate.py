@@ -1721,6 +1721,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "node": ["default", "github-actions", "javascript"],
         "java": ["default", "github-actions", "java"],
         "polyglot": ["default", "github-actions", "python", "javascript", "java"],
+        "same-type": ["default", "github-actions", "python"],
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
         "allure-external": ["default", "github-actions"],
@@ -1887,9 +1888,13 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and 'Path(".github/allure/safe_extract.py")' in validate_text,
                 f"{scenario}: generated contract does not verify Allure outputs",
             )
-            artifact_names = ["allure-results-python-1"]
+            artifact_names = ["allure-results-app-python"]
             if scenario == "allure-polyglot":
-                artifact_names.extend(("allure-results-node-2", "allure-results-java-3"))
+                artifact_names = [
+                    "allure-results-backend-python",
+                    "allure-results-frontend-node",
+                    "allure-results-worker-java",
+                ]
             if scenario == "allure-external":
                 artifact_names = ["external-allure-one", "external-allure-two"]
                 check(
@@ -1915,9 +1920,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             else:
                 for artifact_name in artifact_names:
                     check(
-                        artifact_name in validate_text and artifact_name in report_text,
-                        f"{scenario}: missing exact artifact contract for {artifact_name}",
+                        artifact_name in validate_text,
+                        f"{scenario}: missing source workflow artifact for {artifact_name}",
                     )
+                check(
+                    "const sourceArtifactContractVersion = 1" in report_text
+                    and "const componentArtifactPattern = /^allure-results-[A-Za-z_][A-Za-z0-9_-]*$/" in report_text
+                    and "allureArtifacts.map((artifact) => ({" in report_text,
+                    f"{scenario}: migration-safe source artifact contract is missing",
+                )
                 check(
                     'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
                     and 'materialize-root: ${{ steps.resolve.outputs.materialize-root }}' in report_text,
@@ -2148,6 +2159,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 "docker-build.yml" not in generated,
                 "polyglot generated workflow unexpectedly includes Docker",
             )
+        if scenario == "same-type":
+            generated = (dest / ".github/workflows/validate.yml").read_text()
+            for job_id, display_name, path in (
+                ("backend-python", "Backend Python", "backend"),
+                ("tools-python", "Tools Python", "tools"),
+            ):
+                check(f"  {job_id}:" in generated, f"same-type missing job {job_id}")
+                check(f'name: "{display_name}"' in generated, f"same-type missing display name for {job_id}")
+                check(f'working-directory: "{path}"' in generated, f"same-type missing path for {job_id}")
         if scenario == "python":
             run(["git", "init", "-q"], dest)
             run(["git", "config", "user.email", "fixture@example.invalid"], dest)
@@ -2171,6 +2191,44 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 answers.get("renovate_presets") == ["default", "github-actions", "python"],
                 "copier update did not persist inferred renovate_presets",
             )
+
+    invalid_component_cases = {
+        "duplicate-id": [{"type": "python", "path": ".", "id": "same", "name": "One"}, {"type": "node", "path": ".", "id": "same", "name": "Two"}],
+        "invalid-id": [{"type": "python", "path": ".", "id": "bad.id", "name": "Application"}],
+        "empty-name": [{"type": "python", "path": ".", "id": "app-python", "name": "  "}],
+        "reserved-id": [{"type": "python", "path": ".", "id": "docker", "name": "Application"}],
+        "missing-required-fields": [{"type": "python", "path": "."}],
+    }
+    for reserved_id in (
+        "template-contract", "docker", "release", "update", "scan", "analyze",
+        "resolve", "generate", "comment", "pages", "changes", "integration",
+    ):
+        invalid_component_cases[f"reserved-{reserved_id}"] = [
+            {"type": "python", "path": ".", "id": reserved_id, "name": "Application"}
+        ]
+    for case_name, invalid_components in invalid_component_cases.items():
+        invalid_data = tmp_path / f"{case_name}.yml"
+        invalid_data.write_text(yaml.safe_dump({"components": invalid_components}))
+        invalid_result = subprocess.run(
+            [
+                copier,
+                "copy",
+                "--trust",
+                "--defaults",
+                "--vcs-ref",
+                "HEAD",
+                "--data-file",
+                str(invalid_data),
+                str(template_source),
+                str(tmp_path / case_name),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        check(
+            invalid_result.returncode != 0,
+            f"{case_name}: invalid component configuration was accepted",
+        )
 
     config_only_data = tmp_path / "config-only.yml"
     config_only_data.write_text(
@@ -2255,7 +2313,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             {
                 "project_name": "fixture-no-renovate",
                 "toolkit_version": "v1.0.0",
-                "components": [{"type": "node", "path": "."}],
+                "components": [{"type": "node", "path": ".", "id": "app-node", "name": "Application Node"}],
                 "docker": False,
                 "release_please": False,
                 "renovate": False,
@@ -2526,7 +2584,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
 
     derived_languages_data = tmp_path / "codeql-derived.yml"
     derived_languages_data.write_text(
-        yaml.safe_dump({"components": [{"type": "java", "path": "."}], "codeql": True})
+        yaml.safe_dump({"components": [{"type": "java", "path": ".", "id": "app-java", "name": "Application Java"}], "codeql": True})
     )
     derived_languages_dest = tmp_path / "codeql-derived"
     run(
@@ -2654,6 +2712,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                         {
                             "type": "python",
                             "path": ".",
+                            "id": "app-python",
+                            "name": "Application Python",
                             "allure_results_path": invalid_path,
                         }
                     ],

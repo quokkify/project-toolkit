@@ -3,6 +3,8 @@ toolkit_version: v1.0.0
 components:
   - type: java
     path: .
+    id: app-java
+    name: Application Java
 docker: false
 release_please: false
 renovate: true

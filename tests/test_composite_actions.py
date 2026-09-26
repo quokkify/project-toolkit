@@ -1226,6 +1226,62 @@ class GradleRetryExternalConsumerTests(unittest.TestCase):
             self.assertIn("runtime-success", result.stdout)
 
 
+class GradleConsoleModeTests(unittest.TestCase):
+    @staticmethod
+    def _resolve_step() -> str:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        return next(step["run"] for step in workflow["jobs"]["ci"]["steps"] if step.get("id") == "commands")
+
+    def _resolve(self, console: str = "plain", **commands: str) -> tuple[subprocess.CompletedProcess[str], str]:
+        with tempfile.TemporaryDirectory(prefix="java-ci-console-") as temporary:
+            root = Path(temporary)
+            wrapper = root / "gradlew"
+            wrapper.write_text("#!/usr/bin/env bash\nexit 0\n")
+            wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+            output = root / "output"
+            env = {
+                **os.environ,
+                "BUILD_TOOL": "gradle",
+                "GRADLE_CONSOLE": console,
+                "LINT_COMMAND": commands.get("lint", ""),
+                "TEST_COMMAND": commands.get("test", ""),
+                "BUILD_COMMAND": commands.get("build", ""),
+                "GITHUB_OUTPUT": str(output),
+            }
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", self._resolve_step()],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            return result, output.read_text() if output.exists() else ""
+
+    def test_default_plain_and_explicit_rich_are_applied_to_generated_commands(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        inputs = workflow[True]["workflow_call"]["inputs"]
+        self.assertEqual(inputs["gradle-console"]["default"], "plain")
+        plain_result, plain_output = self._resolve()
+        rich_result, rich_output = self._resolve("rich")
+        self.assertEqual(plain_result.returncode, 0, plain_result.stderr)
+        self.assertEqual(rich_result.returncode, 0, rich_result.stderr)
+        self.assertIn("--console=plain", plain_output)
+        self.assertIn("--console=rich", rich_output)
+
+    def test_invalid_console_mode_fails_with_actionable_error(self) -> None:
+        result, _ = self._resolve("ansi")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Unsupported gradle-console: ansi (expected plain or rich)", result.stderr)
+
+    def test_custom_commands_are_not_rewritten(self) -> None:
+        result, output = self._resolve("rich", lint="./lint.sh", test="./test.sh", build="./build.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lint=./lint.sh", output)
+        self.assertIn("test=./test.sh", output)
+        self.assertIn("build=./build.sh", output)
+
+
 class ReusableTestArtifactContractTests(unittest.TestCase):
     def test_language_workflows_share_opt_in_artifact_contract(self) -> None:
         defaults = {
@@ -1435,7 +1491,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], cwd=destination, check=True)
             java_validate = ""
             java_data = root / "java.yml"
-            java_data.write_text("components:\n  - type: java\n    path: .\n")
+            java_data.write_text("components:\n  - type: java\n    path: .\n    id: app-java\n    name: Application Java\n")
             empty_data = root / "empty.yml"
             empty_data.write_text("components: []\n")
             java_workflow = ""
@@ -1460,7 +1516,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             workflows = trigger["workflow_run"]["workflows"]
             self.assertEqual(workflows, ["Validate", "Run tests"])
             self.assertEqual(len(set(workflows)), 2)
-            self.assertIn("allure-results-java-1", java_validate)
+            self.assertIn("allure-results-app-java", java_validate)
             pull_request_template = (destination / ".github/pull_request_template.md").read_text()
             for heading in ("Description", "Release notes", "Highlight", "Usage example", "Migration", "Breaking change"):
                 self.assertIn(f"## {heading}", pull_request_template)
@@ -1490,7 +1546,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             )
             archives = root / "archives"
             archives.mkdir()
-            with zipfile.ZipFile(archives / "allure-results-java-1.zip", "w") as archive:
+            with zipfile.ZipFile(archives / "allure-results-app-java.zip", "w") as archive:
                 archive.writestr("result.json", "{}")
             extractor = destination / ".github/allure/safe_extract.py"
             materialized = destination / ".allure-input/results"
@@ -1500,7 +1556,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 cwd=destination,
                 env={
                     **os.environ,
-                    "ARTIFACT_MANIFEST": '[{"name":"allure-results-java-1","id":1}]',
+                    "ARTIFACT_MANIFEST": '[{"name":"allure-results-app-java","id":1}]',
                     "ARTIFACT_ARCHIVE_DIR": str(archives),
                     "ARCHIVE_ROOT": str(root / "downloaded"),
                     "OUTPUT_ROOT": str(extracted),
@@ -1572,7 +1628,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 external_valid_outputs["source-artifacts-directory"], ".allure-input/source-artifacts"
             )
             component_valid_outputs = self._run_resolver(
-                java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"]
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-app-java"]
             )["outputs"]
             self.assertEqual(component_valid_outputs["materialize-root"], ".allure-input/results")
             self.assertEqual(component_valid_outputs["source-artifacts-directory"], "")
@@ -1632,16 +1688,23 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(default_zero["failures"], [])
             self.assertIn("No external Allure artifacts found", default_zero["warnings"][0])
 
-            component_exact = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"])
+            component_exact = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["allure-results-app-java"])
             self.assertEqual(component_exact["outputs"].get("ready"), "true")
             self.assertEqual(component_exact["failures"], [])
-            component_wrong = self._run_resolver(java_workflow, ".github/workflows/validate.yml", ["external-allure-one"])
-            self.assertEqual(component_wrong["outputs"], {})
-            self.assertIn("Allure artifact contract mismatch", component_wrong["failures"][0])
+            migrated_component = self._run_resolver(
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-java-1"]
+            )
+            self.assertEqual(migrated_component["outputs"].get("ready"), "true")
+            self.assertEqual(migrated_component["failures"], [])
+            invalid_component = self._run_resolver(
+                java_workflow, ".github/workflows/validate.yml", ["allure-results-java.1"]
+            )
+            self.assertEqual(invalid_component["outputs"], {})
+            self.assertIn("Allure artifact contract v1 mismatch", invalid_component["failures"][0])
             inactive_external_trigger = self._run_resolver(
                 java_workflow,
                 ".github/workflows/test.yml",
-                ["allure-results-java-1"],
+                ["allure-results-app-java"],
             )
             self.assertEqual(inactive_external_trigger["outputs"].get("ready"), "false")
             self.assertEqual(inactive_external_trigger["failures"], [])

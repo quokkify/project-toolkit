@@ -10,6 +10,7 @@ without pushing anything.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import posixpath
@@ -1181,6 +1182,79 @@ def update_template(
         raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
     original_answers_text = answers_path.read_text(encoding="utf-8")
 
+    # This is a breaking schema migration.  Copier's --defaults mode answers
+    # the changed component question with its new default, which would replace
+    # a legacy component's type/path.  Pass migrated answers as --data instead
+    # of writing them before Copier starts: Copier requires a pristine
+    # destination, and the resulting answers file is written by Copier itself.
+    try:
+        answers = yaml.safe_load(original_answers_text)
+    except yaml.YAMLError as exc:
+        raise FleetUpdateError(f"{ANSWERS_FILE} is not valid YAML: {exc}") from exc
+    components = answers.get("components") if isinstance(answers, dict) else None
+    if isinstance(components, list):
+        migrated_components: list[dict[str, Any]] = []
+        generated_ids: set[str] = {
+            component["id"]
+            for component in components
+            if isinstance(component, dict) and isinstance(component.get("id"), str)
+        }
+        for index, component in enumerate(components):
+            if not isinstance(component, dict):
+                raise FleetUpdateError(f"components[{index}] must be a mapping")
+            migrated = dict(component)
+            if "id" not in migrated or "name" not in migrated:
+                component_type = migrated.get("type")
+                component_path = migrated.get("path")
+                if not isinstance(component_type, str) or not isinstance(component_path, str):
+                    raise FleetUpdateError(
+                        f"cannot migrate components[{index}]: type and path are required"
+                    )
+                path_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", component_path.strip("./")).strip("-")
+                path_slug = path_slug or "app"
+                candidate_id = f"{path_slug}-{component_type}"
+                # Legacy paths may begin with a digit, while the breaking
+                # schema deliberately uses the GitHub Actions identifier
+                # grammar.  Prefix rather than dropping path information so
+                # the generated identity remains stable and recognizable.
+                if not re.match(r"^[A-Za-z_]", candidate_id):
+                    candidate_id = f"component-{candidate_id}"
+                if candidate_id in {
+                    "template-contract", "docker", "release", "update", "scan",
+                    "analyze", "resolve", "generate", "comment", "pages",
+                    "changes", "integration",
+                }:
+                    candidate_id = f"component-{candidate_id}"
+                # Distinct legacy paths can normalize to the same slug (for
+                # example ``api/v1`` and ``api-v1``).  Keep the readable slug
+                # where possible, and add a deterministic digest only when a
+                # collision occurs.  This is a migration identity, not the
+                # old type/index workflow fallback: every generated ID still
+                # derives from the component's complete legacy identity.
+                if candidate_id in generated_ids:
+                    identity_key = f"{component_path}\0{component_type}"
+                    digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
+                    # A legacy template allowed repeated identical components.
+                    # Bound the disambiguation by the input size: this keeps
+                    # migration deterministic without an unbounded loop when
+                    # every digest prefix is already occupied.
+                    digest_candidate = f"{candidate_id}-{digest[:8]}"
+                    candidate_id = digest_candidate
+                    suffix = 2
+                    while candidate_id in generated_ids and suffix <= len(components) + 1:
+                        candidate_id = f"{digest_candidate}-{suffix}"
+                        suffix += 1
+                    if candidate_id in generated_ids:
+                        raise FleetUpdateError(
+                            f"cannot migrate components[{index}]: unable to allocate a unique stable identity"
+                        )
+                generated_ids.add(candidate_id)
+                migrated.setdefault("id", candidate_id)
+                migrated.setdefault("name", f"{path_slug.replace('-', ' ').title()} {component_type.title()}")
+            migrated_components.append(migrated)
+        if migrated_components != components:
+            answers["components"] = migrated_components
+
     command = [
         "copier",
         "update",
@@ -1189,6 +1263,13 @@ def update_template(
         "--conflict=rej",
         "--skip-tasks",
     ]
+    if isinstance(components, list) and answers.get("components") != components:
+        command.extend(
+            [
+                "--data",
+                "components=" + json.dumps(answers["components"], separators=(",", ":")),
+            ]
+        )
     if template_ref:
         command.extend(["--vcs-ref", template_ref])
         if RELEASE_TAG_PATTERN.fullmatch(template_ref):
@@ -1349,6 +1430,7 @@ def ensure_pull_request(
         + "\n".join(f"- `{path}`" for path in changed)
         + "\n\n## Verification\n\n"
         "- `copier update --trust --defaults --conflict=rej --skip-tasks`\n"
+        "- Legacy components keep their `type`/`path`; the updater supplies stable `id`/`name` migration data.\n"
         "- `git diff --cached --check`\n\n"
         "Do not edit the automation branch directly; make project-specific changes after merging "
         "or adjust the Copier answers/template.\n"

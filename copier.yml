@@ -35,20 +35,27 @@ project_name:
 toolkit_version:
   type: str
   help: Immutable project-toolkit SemVer tag used by generated workflows.
-  default: v2.21.5
-  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.21.5{% endif %}"
+  default: v2.22.0
+  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.22.0{% endif %}"
 
 components:
   type: yaml
-  help: "Optional mappings such as [{type: python, path: backend, allure_results_path: allure-results}]. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
-  default:
-    - type: python
-      path: .
+  help: "Required component mappings such as [{type: python, path: backend, id: backend-python, name: Backend Python, allure_results_path: allure-results}]. id is the stable GitHub Actions job identifier and name is its display name. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
+  # On update, retain the prior value long enough for its required identity
+  # validation to fail closed; never replace a legacy topology with defaults.
+  default: >-
+    {% if _commit is defined and components is defined %}{{ components }}{% else %}[{type: python, path: ., id: app-python, name: Application Python}]{% endif %}
   validator: >-
     {% for component in components %}
-    {% if component is not mapping %}Every component must be a mapping with type and path.{% else %}
+    {% if component is not mapping %}Every component must be a mapping with type, path, id, and name.{% else %}
     {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}
     {% if component.path is not string or not component.path | trim %}Every component requires a non-empty string path.{% endif %}
+    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
+    {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
+    {% if component.id in ['template-contract', 'docker', 'release', 'update', 'scan', 'analyze', 'resolve', 'generate', 'comment', 'pages', 'changes', 'integration'] %}Component id {{ component.id }} conflicts with a generated job id.{% endif %}
+    {% set component_state = namespace(ids=[]) %}
+    {% for candidate in components[:loop.index] %}{% if candidate is mapping and candidate.id is string %}{% set component_state.ids = component_state.ids + [candidate.id] %}{% endif %}{% endfor %}
+    {% if component_state.ids | select('equalto', component.id) | list | length > 1 %}Component ids must be unique: {{ component.id }}.{% endif %}
     {% set allure_path = component.get('allure_results_path', 'allure-results') %}
     {% if allure_path is not string or not (allure_path | trim) %}allure_results_path must be a non-empty string.{% elif not (allure_path | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$')) or '.' in allure_path.split('/') or '..' in allure_path.split('/') %}allure_results_path must be a safe component-relative path without traversal or globs.{% endif %}
     {% endif %}

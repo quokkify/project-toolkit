@@ -18,6 +18,10 @@ on:
         description: One of auto, gradle, or maven.
         type: string
         default: auto
+      gradle-console:
+        description: Gradle console mode for automatically generated commands; one of plain or rich.
+        type: string
+        default: plain
       install-command:
         description: Optional trusted setup command run before checks.
         type: string
@@ -121,10 +125,15 @@ jobs:
         id: commands
         env:
           BUILD_TOOL: ${{ inputs.build-tool }}
+          GRADLE_CONSOLE: ${{ inputs.gradle-console }}
           LINT_COMMAND: ${{ inputs.lint-command }}
           TEST_COMMAND: ${{ inputs.test-command }}
           BUILD_COMMAND: ${{ inputs.build-command }}
         run: |
+          case "$GRADLE_CONSOLE" in
+            plain|rich) ;;
+            *) echo "Unsupported gradle-console: $GRADLE_CONSOLE (expected plain or rich)" >&2; exit 2 ;;
+          esac
           tool="$BUILD_TOOL"
           if [[ "$tool" == auto ]]; then
             if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
@@ -135,9 +144,9 @@ jobs:
           case "$tool" in
             gradle)
               if [[ -f ./gradlew ]]; then chmod +x ./gradlew; runner=./gradlew; else runner=gradle; fi
-              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test"
-              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test"
-              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner build"
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test --console=$GRADLE_CONSOLE"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test --console=$GRADLE_CONSOLE"
+              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner build --console=$GRADLE_CONSOLE"
               ;;
             maven)
               if [[ -f ./mvnw ]]; then chmod +x ./mvnw; runner=./mvnw; else runner=mvn; fi

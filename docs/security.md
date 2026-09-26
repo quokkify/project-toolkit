@@ -24,6 +24,39 @@ The workflow itself needs no elevated rights on this repository, so it requests 
 
 GitHub normally withholds repository secrets from workflows triggered by untrusted fork pull requests. Keep PR validation read-only, do not use `pull_request_target` to execute fork code with write tokens, and keep push/release paths on trusted branch events.
 
+## Security templates and repository rulesets
+
+Copier answers `gitleaks: true` (the safe default) and `codeql: true` generate the
+checksum-verified Gitleaks workflow and the SHA-pinned CodeQL workflow. Set either
+answer to `false` to omit that workflow; `codeql_languages` is an optional validated
+list, and otherwise languages are derived from `components`. Gitleaks publishes the
+stable `gitleaks` check context. CodeQL's native code-scanning rule is preferred over
+requiring a matrix job name.
+
+Rulesets are external policy and are never applied by Copier. Use
+`python scripts/reconcile_ruleset.py --repo OWNER/REPOSITORY --branch main
+--check gitleaks --check CodeQL --revision SHA` with `GH_TOKEN` or `GITHUB_TOKEN`.
+The default `evaluate` mode performs context preflight, writes an evaluate ruleset,
+and verifies readback; `--dry-run` guarantees no POST/PUT. Only an explicit `--active` promotes the
+managed ruleset. The fine-grained token or GitHub App needs `Administration: write` to create or
+update rulesets, `Checks: read` to inspect check runs, `Commit statuses: read`
+to inspect legacy status contexts, and `Metadata: read`; do not put it in
+arguments, files, workflow logs, or Copier answers.
+
+The command manages one namespaced ruleset, preserves unrelated rulesets and unknown
+rules in the managed ruleset, and refuses duplicate managed identities. It requires
+exact published check contexts for the target revision, blocks deletion and
+non-fast-forward updates, and requires pull requests rather than direct commits.
+After an active mutation it fetches the exact ruleset and compares normalized state;
+a mismatch is a non-zero failure, not a success report. To recover a wrong check name,
+run evaluate against a revision containing the real check, then rerun with the exact
+context. Rollback is an explicit operator update to `--mode evaluate` or removal of
+the managed ruleset through a separately reviewed GitHub administration action.
+
+A ruleset only requires checks that already exist; it does not create workflows or
+publish Gitleaks/CodeQL checks. Roll out with evaluate/readback first, then active
+only after confirming the generated workflows are present on the target branch.
+
 ## Private workflow repositories
 
 A private reusable workflow works only when the owner/organization grants the caller repository Actions access. The caller receives a scoped token to download workflow code, and outside collaborators may indirectly view logs containing workflow output. Cross-owner and organization policy restrictions apply; public toolkit workflows avoid most access-policy friction but remain supply-chain code and must be pinned.
